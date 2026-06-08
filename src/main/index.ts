@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join, extname } from 'path'
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 import { networkInterfaces } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -162,6 +162,29 @@ app.whenReady().then(() => {
     return true
   })
   ipcMain.handle('engine:status', () => ({ hasClients: publisher.hasClients }))
+
+  // Chart save / open + Syphon source rename.
+  ipcMain.handle('chart:save', async (_e, json: string, name: string) => {
+    const res = await dialog.showSaveDialog({
+      defaultPath: `${name || 'chart'}.decor.json`,
+      filters: [{ name: 'DECOR Chart', extensions: ['decor.json', 'json'] }]
+    })
+    if (res.canceled || !res.filePath) return null
+    writeFileSync(res.filePath, json, 'utf8')
+    return res.filePath
+  })
+  ipcMain.handle('chart:open', async () => {
+    const res = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'DECOR Chart', extensions: ['decor.json', 'json'] }]
+    })
+    if (res.canceled || res.filePaths.length === 0) return null
+    return readFileSync(res.filePaths[0], 'utf8')
+  })
+  ipcMain.handle('syphon:rename', (_e, name: string) => {
+    publisher.start(name || 'DECOR STUDIO')
+    return true
+  })
 
   createWindow()
   startEngine()

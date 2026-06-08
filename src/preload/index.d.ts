@@ -21,6 +21,12 @@ export interface DecorApi {
   setBind: (ip: string) => Promise<boolean>
   /** Engine status (Syphon client connected, etc). */
   getStatus: () => Promise<{ hasClients: boolean }>
+  /** Save chart JSON via a native dialog; resolves to the path or null. */
+  saveChart: (json: string, name: string) => Promise<string | null>
+  /** Open a chart file via a native dialog; resolves to its JSON or null. */
+  openChartFile: () => Promise<string | null>
+  /** Rename (restart) the Syphon source. */
+  renameSyphon: (name: string) => Promise<boolean>
 }
 
 declare global {

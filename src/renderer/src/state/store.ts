@@ -42,6 +42,10 @@ interface AppState {
   setManualMode: (on: boolean) => void
   setManualColor: (fixtureId: string, rgb: [number, number, number]) => void
   setManualAll: (rgb: [number, number, number] | null) => void
+  setCanvasSize: (w: number, h: number) => void
+  setGamma: (on: boolean) => void
+  setHoldOnTimeout: (on: boolean) => void
+  setSyphonName: (name: string) => void
 }
 
 /** A small sample chart (shapes patched to U0/1 so the test sender lights them). */
@@ -207,7 +211,14 @@ export const useStore = create<AppState>()((set, get) => ({
       const m: Record<string, [number, number, number]> = {}
       for (const f of s.chart.fixtures) m[f.id] = rgb
       return { manualByFixture: m }
-    })
+    }),
+
+  setCanvasSize: (w, h) => set((s) => ({ chart: { ...s.chart, canvas: { w, h } } })),
+  setGamma: (on) =>
+    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, gamma: on } } })),
+  setHoldOnTimeout: (on) =>
+    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, holdOnTimeout: on } } })),
+  setSyphonName: (name) => set((s) => ({ chart: { ...s.chart, syphon: { name } } }))
 }))
 
 // Test/debug hook: lets the browser preview drive the store (e.g. seed demo shapes).

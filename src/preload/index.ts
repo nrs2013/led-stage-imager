@@ -23,7 +23,12 @@ const api = {
   listInterfaces: (): Promise<{ name: string; address: string }[]> =>
     ipcRenderer.invoke('net:interfaces'),
   setBind: (ip: string): Promise<boolean> => ipcRenderer.invoke('net:bind', ip),
-  getStatus: (): Promise<{ hasClients: boolean }> => ipcRenderer.invoke('engine:status')
+  getStatus: (): Promise<{ hasClients: boolean }> => ipcRenderer.invoke('engine:status'),
+  // Files
+  saveChart: (json: string, name: string): Promise<string | null> =>
+    ipcRenderer.invoke('chart:save', json, name),
+  openChartFile: (): Promise<string | null> => ipcRenderer.invoke('chart:open'),
+  renameSyphon: (name: string): Promise<boolean> => ipcRenderer.invoke('syphon:rename', name)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

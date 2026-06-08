@@ -1,12 +1,14 @@
+import { useState } from 'react'
 import { useStore } from '../state/store'
+import { createChart, newId } from '../model/chart-model'
+import { saveChartToFile, openChartFromFile } from '../io/file-ops'
+import { SettingsDialog } from '../ui/SettingsDialog'
 import { C, F, buttonStyle } from '../ui/tokens'
 
 interface DecorApi {
   openImage?: () => Promise<string | null>
 }
 
-/** Returns a data URL for a chosen image. Uses Electron's dialog when available,
- *  otherwise falls back to a browser file picker (so it also works in dev:web). */
 async function pickImage(): Promise<string | null> {
   const api = (window as unknown as { api?: DecorApi }).api
   if (api?.openImage) return api.openImage()
@@ -26,21 +28,56 @@ async function pickImage(): Promise<string | null> {
   })
 }
 
+const fileBtn = { ...buttonStyle({}), padding: '6px 11px', fontSize: 11 }
+
 export function SubBar(): React.JSX.Element {
   const chart = useStore((s) => s.chart)
+  const setChart = useStore((s) => s.setChart)
   const setUnderlay = useStore((s) => s.setUnderlay)
   const setUnderlayOpacity = useStore((s) => s.setUnderlayOpacity)
   const setUnderlayVisible = useStore((s) => s.setUnderlayVisible)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const u = chart.underlay
 
-  const load = async (): Promise<void> => {
+  const loadUnderlay = async (): Promise<void> => {
     const dataUrl = await pickImage()
     if (dataUrl) setUnderlay({ dataUrl, opacity: 0.5, visible: true })
   }
+  const newChart = (): void => setChart(createChart({ w: chart.canvas.w, h: chart.canvas.h }))
+  const openChart = async (): Promise<void> => {
+    try {
+      const c = await openChartFromFile()
+      if (c) setChart(c)
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert('チャートを開けませんでした: ' + (err as Error).message)
+    }
+  }
+  const saveChart = (): Promise<string | null> => saveChartToFile(chart)
+  const duplicate = (): void =>
+    setChart({ ...chart, id: newId('chart'), name: `${chart.name || 'Untitled'} copy` })
 
   return (
     <div style={subBar}>
-      <button style={{ ...buttonStyle({}), padding: '6px 12px' }} onClick={load}>
+      <button style={fileBtn} onClick={newChart}>
+        新規
+      </button>
+      <button style={fileBtn} onClick={openChart}>
+        開く
+      </button>
+      <button style={fileBtn} onClick={saveChart}>
+        保存
+      </button>
+      <button style={fileBtn} onClick={duplicate}>
+        複製
+      </button>
+      <button style={fileBtn} onClick={() => setSettingsOpen(true)}>
+        設定
+      </button>
+
+      <div style={sep} />
+
+      <button style={{ ...buttonStyle({}), padding: '6px 12px' }} onClick={loadUnderlay}>
         下絵を読み込む
       </button>
 
@@ -52,10 +89,9 @@ export function SubBar(): React.JSX.Element {
             min={0}
             max={100}
             value={Math.round(u.opacity * 100)}
-            style={{ width: 120, accentColor: C.accent }}
+            style={{ width: 110, accentColor: C.accent }}
             onChange={(e) => setUnderlayOpacity(Number(e.target.value) / 100)}
           />
-          <span style={{ ...lbl, fontFamily: F.mono, width: 34 }}>{Math.round(u.opacity * 100)}%</span>
           <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
             <input
               type="checkbox"
@@ -78,6 +114,8 @@ export function SubBar(): React.JSX.Element {
       <span style={{ ...lbl, fontFamily: F.mono }}>
         canvas {chart.canvas.w} × {chart.canvas.h}
       </span>
+
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }
@@ -85,7 +123,7 @@ export function SubBar(): React.JSX.Element {
 const subBar: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
+  gap: 8,
   height: 42,
   padding: '0 14px',
   background: C.panel,
@@ -97,3 +135,4 @@ const lbl: React.CSSProperties = {
   color: C.label,
   fontFamily: "'Inter','Noto Sans JP',sans-serif"
 }
+const sep: React.CSSProperties = { width: '0.5px', height: 22, background: C.border, margin: '0 4px' }

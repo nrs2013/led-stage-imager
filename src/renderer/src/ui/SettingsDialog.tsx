@@ -1,0 +1,145 @@
+import { useStore } from '../state/store'
+import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
+
+const MAX_W = 4096
+const MAX_H = 2160
+
+interface SyphonApi {
+  renameSyphon?: (name: string) => Promise<boolean>
+}
+const syphonApi = (): SyphonApi | undefined => (window as unknown as { api?: SyphonApi }).api
+
+export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
+  const chart = useStore((s) => s.chart)
+  const setCanvasSize = useStore((s) => s.setCanvasSize)
+  const setGamma = useStore((s) => s.setGamma)
+  const setHoldOnTimeout = useStore((s) => s.setHoldOnTimeout)
+  const setSyphonName = useStore((s) => s.setSyphonName)
+
+  const tooBig = chart.canvas.w > MAX_W || chart.canvas.h > MAX_H
+
+  return (
+    <div style={backdrop} onClick={onClose}>
+      <div style={modal} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontFamily: F.display, fontSize: 18, letterSpacing: '0.1em', color: C.white }}>
+            設定
+          </div>
+          <div style={{ flex: 1 }} />
+          <button style={{ ...buttonStyle({}), padding: '4px 10px' }} onClick={onClose}>
+            閉じる
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Field label="キャンバス 幅">
+            <input
+              type="number"
+              min={16}
+              max={MAX_W}
+              value={chart.canvas.w}
+              style={inputStyle}
+              onChange={(e) => setCanvasSize(Math.max(16, Number(e.target.value)), chart.canvas.h)}
+            />
+          </Field>
+          <Field label="キャンバス 高さ">
+            <input
+              type="number"
+              min={16}
+              max={MAX_H}
+              value={chart.canvas.h}
+              style={inputStyle}
+              onChange={(e) => setCanvasSize(chart.canvas.w, Math.max(16, Number(e.target.value)))}
+            />
+          </Field>
+        </div>
+        {tooBig && (
+          <div style={{ color: C.amber, fontSize: 11, fontFamily: F.ui, marginBottom: 10 }}>
+            ⚠ {MAX_W}×{MAX_H} を超えています。動作が重くなる場合があります。
+          </div>
+        )}
+
+        <Field label="Syphon ソース名">
+          <input
+            type="text"
+            value={chart.syphon.name}
+            style={{ ...inputStyle, fontFamily: F.ui }}
+            onChange={(e) => {
+              setSyphonName(e.target.value)
+              syphonApi()?.renameSyphon?.(e.target.value)
+            }}
+          />
+        </Field>
+
+        <Toggle
+          label="明るさカーブ（ガンマ補正）"
+          on={chart.settings.gamma}
+          onChange={setGamma}
+          onText="ON"
+          offText="OFF"
+        />
+        <Toggle
+          label="未受信時の挙動"
+          on={chart.settings.holdOnTimeout}
+          onChange={setHoldOnTimeout}
+          onText="最後の値を保持"
+          offText="ゼロに落とす"
+        />
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div style={{ marginBottom: 12, flex: 1 }}>
+      <label style={fieldLabel}>{label}</label>
+      {children}
+    </div>
+  )
+}
+
+function Toggle({
+  label,
+  on,
+  onChange,
+  onText,
+  offText
+}: {
+  label: string
+  on: boolean
+  onChange: (v: boolean) => void
+  onText: string
+  offText: string
+}): React.JSX.Element {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={fieldLabel}>{label}</label>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button style={{ ...buttonStyle({ active: on }), flex: 1 }} onClick={() => onChange(true)}>
+          {onText}
+        </button>
+        <button style={{ ...buttonStyle({ active: !on }), flex: 1 }} onClick={() => onChange(false)}>
+          {offText}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const backdrop: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0,0,0,0.55)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 100
+}
+const modal: React.CSSProperties = {
+  width: 420,
+  background: C.surface,
+  border: `0.5px solid ${C.border}`,
+  borderRadius: 8,
+  padding: 20
+}
