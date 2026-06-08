@@ -32,6 +32,29 @@ export const F = {
   mono: "'JetBrains Mono', monospace"
 } as const
 
+export const inputStyle: CSSProperties = {
+  background: C.inputBg,
+  border: `0.5px solid ${C.border}`,
+  color: C.white,
+  padding: '5px 8px',
+  borderRadius: 4,
+  fontSize: 12,
+  fontFamily: F.mono,
+  width: '100%',
+  outline: 'none',
+  boxSizing: 'border-box'
+}
+
+export const fieldLabel: CSSProperties = {
+  fontSize: 10,
+  color: C.label,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  fontFamily: F.ui,
+  marginBottom: 4,
+  display: 'block'
+}
+
 /** Brutalist-Vivid button: 0.5px accent line + semi-transparent bg + white text (idle),
  *  solid accent + dark text (active/selected). */
 export function buttonStyle(opts?: { active?: boolean; accent?: string; accentRGB?: string }): CSSProperties {

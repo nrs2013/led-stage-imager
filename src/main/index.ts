@@ -1,5 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { join, extname } from 'path'
+import { readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { ArtNetReceiver } from './artnet/artnet-receiver'
@@ -88,6 +89,19 @@ app.whenReady().then(() => {
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
+
+  // Underlay image picker: returns the chosen image as a data URL.
+  ipcMain.handle('dialog:openImage', async () => {
+    const res = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }]
+    })
+    if (res.canceled || res.filePaths.length === 0) return null
+    const file = res.filePaths[0]
+    const ext = extname(file).slice(1).toLowerCase()
+    const mime = ext === 'jpg' ? 'jpeg' : ext
+    return `data:image/${mime};base64,${readFileSync(file).toString('base64')}`
+  })
 
   createWindow()
   startSpike()
