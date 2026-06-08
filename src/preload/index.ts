@@ -18,7 +18,12 @@ const api = {
   sendChart: (chart: unknown): void => ipcRenderer.send('chart:sync', chart),
   onChartUpdate: (cb: (chart: unknown) => void): void => {
     ipcRenderer.on('chart:update', (_e, c) => cb(c))
-  }
+  },
+  // Status / network
+  listInterfaces: (): Promise<{ name: string; address: string }[]> =>
+    ipcRenderer.invoke('net:interfaces'),
+  setBind: (ip: string): Promise<boolean> => ipcRenderer.invoke('net:bind', ip),
+  getStatus: (): Promise<{ hasClients: boolean }> => ipcRenderer.invoke('engine:status')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Toolbar } from './editor/Toolbar'
 import { SubBar } from './editor/SubBar'
 import { EditorCanvas } from './editor/EditorCanvas'
 import { Inspector } from './editor/Inspector'
 import { PatchTable } from './editor/PatchTable'
 import { LiveView } from './output/LiveView'
+import { StatusBar } from './ui/StatusBar'
+import { ManualFaders } from './test/ManualFaders'
 import { useStore } from './state/store'
 import { useDmxBridge } from './state/dmx-bridge'
 import type { Chart } from './model/types'
@@ -59,11 +61,12 @@ function OutputApp(): React.JSX.Element {
 
 function EditorApp(): React.JSX.Element {
   const mode = useStore((s) => s.mode)
+  const [testOpen, setTestOpen] = useState(false)
   useDmxBridge()
   usePreviewMirror()
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.canvas }}>
-      <Toolbar />
+      <Toolbar testOpen={testOpen} onToggleTest={() => setTestOpen((v) => !v)} />
       {mode === 'edit' ? (
         <>
           <SubBar />
@@ -74,10 +77,12 @@ function EditorApp(): React.JSX.Element {
           <PatchTable />
         </>
       ) : (
-        <main style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex' }}>
+        <main style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', minHeight: 0 }}>
           <LiveView />
         </main>
       )}
+      <StatusBar />
+      {testOpen && <ManualFaders onClose={() => setTestOpen(false)} />}
     </div>
   )
 }

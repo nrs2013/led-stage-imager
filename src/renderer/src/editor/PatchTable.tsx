@@ -1,13 +1,13 @@
 import { useStore } from '../state/store'
 import { C, F, buttonStyle } from '../ui/tokens'
 import { channelRange, detectOverlaps } from '../dmx/patch'
-import { fixtureColor } from '../dmx/channel-math'
-
-const ZEROS = new Uint8Array(512)
+import { resolveColor } from '../dmx/resolve'
 
 export function PatchTable(): React.JSX.Element {
   const chart = useStore((s) => s.chart)
   const dmxByUniverse = useStore((s) => s.dmxByUniverse)
+  const manualMode = useStore((s) => s.manualMode)
+  const manualByFixture = useStore((s) => s.manualByFixture)
   const selectedId = useStore((s) => s.selectedId)
   const select = useStore((s) => s.select)
 
@@ -75,7 +75,12 @@ export function PatchTable(): React.JSX.Element {
               const [s, e] = channelRange(f)
               const isFlagged = flagged.has(f.id)
               const isSel = f.shapeId === selectedId
-              const [r, g, b] = fixtureColor(f, dmxByUniverse[f.universe] ?? ZEROS, chart.settings.gamma)
+              const [r, g, b] = resolveColor(
+                f,
+                dmxByUniverse,
+                chart.settings.gamma,
+                manualMode ? manualByFixture : null
+              )
               return (
                 <tr
                   key={f.id}

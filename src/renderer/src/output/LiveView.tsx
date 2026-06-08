@@ -32,8 +32,14 @@ export function LiveView({
       raf = requestAnimationFrame(loop)
       if (t - last < INTERVAL) return
       last = t
-      const { chart, dmxByUniverse } = useStore.getState()
-      renderer.render(chart, dmxByUniverse, chart.settings.gamma)
+      const st = useStore.getState()
+      const { chart, dmxByUniverse } = st
+      renderer.render(
+        chart,
+        dmxByUniverse,
+        chart.settings.gamma,
+        st.manualMode ? st.manualByFixture : null
+      )
       if (publish && api?.publishFrame) {
         api.publishFrame(chart.canvas.w, chart.canvas.h, renderer.readRGBA())
       }

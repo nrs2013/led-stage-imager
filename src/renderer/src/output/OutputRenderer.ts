@@ -1,8 +1,7 @@
 import type { Chart, Shape, Fixture } from '../model/types'
-import { fixtureColor, type RGB } from '../dmx/channel-math'
+import type { RGB } from '../dmx/channel-math'
+import { resolveColor } from '../dmx/resolve'
 import { cornerBounds, trianglePoints, starPoints, regularPolygonPoints } from '../editor/geometry'
-
-const ZEROS = new Uint8Array(512)
 
 /**
  * Draws the live output frame: every patched shape on a pure-black background, in its
@@ -21,7 +20,12 @@ export class OutputRenderer {
     this.ctx = ctx
   }
 
-  render(chart: Chart, dmxByUniverse: Record<number, Uint8Array>, gamma: boolean): void {
+  render(
+    chart: Chart,
+    dmxByUniverse: Record<number, Uint8Array>,
+    gamma: boolean,
+    manual: Record<string, RGB> | null = null
+  ): void {
     const { w, h } = chart.canvas
     if (this.canvas.width !== w) this.canvas.width = w
     if (this.canvas.height !== h) this.canvas.height = h
@@ -44,7 +48,7 @@ export class OutputRenderer {
     for (const shape of chart.shapes) {
       const fx = fxByShape.get(shape.id)
       if (!fx) continue
-      const rgb = fixtureColor(fx, dmxByUniverse[fx.universe] ?? ZEROS, gamma)
+      const rgb = resolveColor(fx, dmxByUniverse, gamma, manual)
       if (rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0) continue // off -> stays black
       this.drawShape(shape, rgb)
     }

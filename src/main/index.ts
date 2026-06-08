@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join, extname } from 'path'
 import { readFileSync } from 'fs'
+import { networkInterfaces } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { ArtNetReceiver } from './artnet/artnet-receiver'
@@ -143,6 +144,24 @@ app.whenReady().then(() => {
     lastChart = chart
     previewWindow?.webContents.send('chart:update', chart)
   })
+
+  // Network interface list + receiver re-bind + engine status (for the status lamps).
+  ipcMain.handle('net:interfaces', () => {
+    const out: { name: string; address: string }[] = [{ name: 'すべて (0.0.0.0)', address: '0.0.0.0' }]
+    for (const [name, addrs] of Object.entries(networkInterfaces())) {
+      for (const a of addrs ?? []) {
+        if (a.family === 'IPv4' && !a.internal) {
+          out.push({ name: `${name} (${a.address})`, address: a.address })
+        }
+      }
+    }
+    return out
+  })
+  ipcMain.handle('net:bind', (_e, ip: string) => {
+    receiver.start(ip || '0.0.0.0')
+    return true
+  })
+  ipcMain.handle('engine:status', () => ({ hasClients: publisher.hasClients }))
 
   createWindow()
   startEngine()

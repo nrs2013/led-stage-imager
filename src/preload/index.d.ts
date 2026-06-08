@@ -15,6 +15,12 @@ export interface DecorApi {
   sendChart: (chart: unknown) => void
   /** Receive chart updates (preview window). */
   onChartUpdate: (cb: (chart: unknown) => void) => void
+  /** List bindable IPv4 network interfaces. */
+  listInterfaces: () => Promise<{ name: string; address: string }[]>
+  /** Re-bind the Art-Net receiver to a NIC address. */
+  setBind: (ip: string) => Promise<boolean>
+  /** Engine status (Syphon client connected, etc). */
+  getStatus: () => Promise<{ hasClients: boolean }>
 }
 
 declare global {

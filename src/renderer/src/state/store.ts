@@ -20,6 +20,9 @@ interface AppState {
   tool: Tool
   selectedId: string | null
   dmxByUniverse: Record<number, Uint8Array>
+  lastSeenByUniverse: Record<number, number>
+  manualMode: boolean
+  manualByFixture: Record<string, [number, number, number]>
 
   setChart: (c: Chart) => void
   setMode: (m: Mode) => void
@@ -36,6 +39,9 @@ interface AppState {
 
   upsertFixture: (shapeId: string, patch: Partial<Omit<Fixture, 'id' | 'shapeId'>>) => void
   removeFixture: (shapeId: string) => void
+  setManualMode: (on: boolean) => void
+  setManualColor: (fixtureId: string, rgb: [number, number, number]) => void
+  setManualAll: (rgb: [number, number, number] | null) => void
 }
 
 /** A small sample chart (shapes patched to U0/1 so the test sender lights them). */
@@ -97,6 +103,9 @@ export const useStore = create<AppState>()((set, get) => ({
   tool: 'select',
   selectedId: null,
   dmxByUniverse: {},
+  lastSeenByUniverse: {},
+  manualMode: false,
+  manualByFixture: {},
 
   setChart: (chart) => set({ chart, selectedId: null }),
   setMode: (mode) => set({ mode }),
@@ -129,7 +138,10 @@ export const useStore = create<AppState>()((set, get) => ({
     })),
 
   setUniverseData: (universe, data) =>
-    set((s) => ({ dmxByUniverse: { ...s.dmxByUniverse, [universe]: data } })),
+    set((s) => ({
+      dmxByUniverse: { ...s.dmxByUniverse, [universe]: data },
+      lastSeenByUniverse: { ...s.lastSeenByUniverse, [universe]: Date.now() }
+    })),
 
   setUnderlay: (underlay) => set((s) => ({ chart: { ...s.chart, underlay } })),
   setUnderlayOpacity: (opacity) =>
@@ -184,7 +196,18 @@ export const useStore = create<AppState>()((set, get) => ({
           sh.id === shapeId ? { ...sh, fixtureId: undefined } : sh
         )
       }
-    }))
+    })),
+
+  setManualMode: (on) => set({ manualMode: on }),
+  setManualColor: (fixtureId, rgb) =>
+    set((s) => ({ manualByFixture: { ...s.manualByFixture, [fixtureId]: rgb } })),
+  setManualAll: (rgb) =>
+    set((s) => {
+      if (rgb === null) return { manualByFixture: {} }
+      const m: Record<string, [number, number, number]> = {}
+      for (const f of s.chart.fixtures) m[f.id] = rgb
+      return { manualByFixture: m }
+    })
 }))
 
 // Test/debug hook: lets the browser preview drive the store (e.g. seed demo shapes).

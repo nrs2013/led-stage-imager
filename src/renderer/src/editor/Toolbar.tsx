@@ -21,7 +21,13 @@ interface PreviewApi {
 const previewApi = (): PreviewApi | undefined =>
   (window as unknown as { api?: PreviewApi }).api
 
-export function Toolbar(): React.JSX.Element {
+export function Toolbar({
+  testOpen = false,
+  onToggleTest
+}: {
+  testOpen?: boolean
+  onToggleTest?: () => void
+} = {}): React.JSX.Element {
   const mode = useStore((s) => s.mode)
   const setMode = useStore((s) => s.setMode)
   const tool = useStore((s) => s.tool)
@@ -73,6 +79,14 @@ export function Toolbar(): React.JSX.Element {
       </div>
 
       <div style={{ flex: 1 }} />
+
+      <button
+        style={buttonStyle({ active: testOpen, accent: C.fuchsia, accentRGB: '193,134,200' })}
+        onClick={onToggleTest}
+      >
+        テスト卓
+      </button>
+      <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
 
       {hasPreview && (
         <>
