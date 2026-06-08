@@ -2,6 +2,43 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { ArtNetReceiver } from './artnet/artnet-receiver'
+import type { ArtDmxPacket } from './artnet/artdmx-parser'
+import { OutputPublisher } from './output/syphon-publisher'
+
+// --- Milestone 0 spike: Art-Net in -> Syphon out ---
+// Colors a small CPU frame with universe-0 channels 1..3 (R,G,B) and publishes it
+// as the "DECOR STUDIO" Syphon source. (Real WebGL shape rendering arrives in Milestone 3.)
+const SPIKE_W = 256
+const SPIKE_H = 144
+const spikeFrame = new Uint8Array(SPIKE_W * SPIKE_H * 4)
+for (let i = 0; i < SPIKE_W * SPIKE_H; i++) spikeFrame[i * 4 + 3] = 255 // opaque alpha
+const receiver = new ArtNetReceiver()
+const publisher = new OutputPublisher()
+
+function startSpike(): void {
+  publisher.start('DECOR STUDIO')
+  receiver.on('dmx', (pkt: ArtDmxPacket) => {
+    if (pkt.universe !== 0) return
+    const r = pkt.data[0] ?? 0
+    const g = pkt.data[1] ?? 0
+    const b = pkt.data[2] ?? 0
+    for (let i = 0; i < SPIKE_W * SPIKE_H; i++) {
+      spikeFrame[i * 4] = r
+      spikeFrame[i * 4 + 1] = g
+      spikeFrame[i * 4 + 2] = b
+    }
+    publisher.publishRGBA(SPIKE_W, SPIKE_H, spikeFrame)
+  })
+  receiver.on('error', (err) => console.error('[artnet] receiver error:', err))
+  receiver.start('0.0.0.0')
+  console.log('[spike] Art-Net receiver (UDP 6454) + Syphon "DECOR STUDIO" started')
+}
+
+function stopSpike(): void {
+  receiver.stop()
+  publisher.stop()
+}
 
 function createWindow(): void {
   // Create the browser window.
@@ -53,6 +90,7 @@ app.whenReady().then(() => {
   ipcMain.on('ping', () => console.log('pong'))
 
   createWindow()
+  startSpike()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
@@ -64,6 +102,10 @@ app.whenReady().then(() => {
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
+app.on('before-quit', () => {
+  stopSpike()
+})
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
