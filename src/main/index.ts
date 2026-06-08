@@ -50,7 +50,11 @@ function openPreview(): void {
     fullscreen: displays.length > 1,
     backgroundColor: '#000',
     autoHideMenuBar: true,
-    webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: false }
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      backgroundThrottling: false
+    }
   })
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     previewWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '?output&live')
@@ -82,7 +86,8 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: false
     }
   })
 

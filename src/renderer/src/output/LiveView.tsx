@@ -26,12 +26,7 @@ export function LiveView({
     if (!canvas) return
     const renderer = new OutputRenderer(canvas)
     const api = (window as unknown as { api?: DecorApi }).api
-    let raf = 0
-    let last = 0
-    const loop = (t: number): void => {
-      raf = requestAnimationFrame(loop)
-      if (t - last < INTERVAL) return
-      last = t
+    const tick = (): void => {
       const st = useStore.getState()
       const { chart, dmxByUniverse } = st
       renderer.render(
@@ -44,8 +39,11 @@ export function LiveView({
         api.publishFrame(chart.canvas.w, chart.canvas.h, renderer.readRGBA())
       }
     }
-    raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
+    // setInterval (not requestAnimationFrame) so the Syphon output keeps publishing even
+    // when the window is backgrounded / on a second display (rAF would be throttled/paused).
+    const iv = setInterval(tick, INTERVAL)
+    tick()
+    return () => clearInterval(iv)
   }, [publish])
 
   return (

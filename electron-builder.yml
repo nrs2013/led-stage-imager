@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: decor-studio
+appId: com.decor.studio
+productName: DECOR STUDIO
 directories:
   buildResources: build
 files:
@@ -11,6 +11,9 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+  # node-syphon ships a native .node + Syphon.framework — keep them on disk (not in asar)
+  # so the addon and its framework load at runtime.
+  - '**/node_modules/node-syphon/**'
 win:
   executableName: decor-studio
 nsis:
