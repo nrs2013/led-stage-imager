@@ -23,7 +23,6 @@ export interface Shape {
   strokeWidth: number
   glowRadius: number // px
   glowIntensity: number // 0..1
-  fixedColor?: [number, number, number] // for 'dim' mode
   fixtureId?: string
 }
 
@@ -33,6 +32,7 @@ export interface Fixture {
   universe: number // 0..32767
   start: number // 1..512
   mode: ChannelMode
+  fixedColor?: [number, number, number] // for 'dim' mode (the fixed color the dimmer scales)
 }
 
 export interface Chart {
