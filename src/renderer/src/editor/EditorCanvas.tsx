@@ -2,115 +2,40 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPoi
 import { useStore } from '../state/store'
 import type { Point, Shape } from '../model/types'
 import { C, F } from '../ui/tokens'
-import {
-  cornerBounds,
-  trianglePoints,
-  starPoints,
-  regularPolygonPoints,
-  pointsAttr,
-  shapeBounds
-} from './geometry'
+import { cornerBounds, traceShape, shapeArrayBounds } from './geometry'
 
 const MIN_SIZE = 3
 const clamp = (n: number, lo: number, hi: number): number => (n < lo ? lo : n > hi ? hi : n)
 const dist = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y)
+const STROKE = '#cfeaf6'
+const FILL = 'rgba(123,197,232,0.16)'
 
 type DrawType = Exclude<Shape['type'], never>
-
 interface View {
   scale: number
   tx: number
   ty: number
 }
 
-/** Renders one shape as the matching SVG element. */
-function ShapeEl({
-  shape,
-  selected,
-  crisp = false,
-  onPick
-}: {
-  shape: Shape
-  selected: boolean
-  crisp?: boolean
-  onPick?: (e: RPointerEvent) => void
-}): React.JSX.Element | null {
-  const sw = shape.strokeWidth || 4
-  const strokeCol = selected ? C.accent : '#cfeaf6'
-  const fillCol = selected ? 'rgba(123,197,232,0.30)' : 'rgba(123,197,232,0.16)'
-  const open = shape.type === 'line' || shape.type === 'polyline' || shape.type === 'freehand'
-  const stroke = shape.display === 'fill' && !open ? 'none' : strokeCol
-  const fill = open ? 'none' : shape.display === 'stroke' ? 'none' : fillCol
-  const common = {
-    stroke,
-    strokeWidth: sw,
-    fill,
-    strokeLinejoin: 'round' as const,
-    strokeLinecap: 'round' as const,
-    shapeRendering: crisp ? 'crispEdges' : 'geometricPrecision',
-    onPointerDown: onPick,
-    style: { cursor: onPick ? 'pointer' : 'default' }
-  }
-  const p = shape.points
-  if (p.length < 2) return null
-  switch (shape.type) {
-    case 'line':
-      return <line x1={p[0].x} y1={p[0].y} x2={p[1].x} y2={p[1].y} {...common} />
-    case 'polyline':
-    case 'freehand':
-      return <polyline points={pointsAttr(p)} {...common} />
-    case 'rect': {
-      const b = cornerBounds(p[0], p[p.length - 1])
-      return <rect x={b.x} y={b.y} width={b.w} height={b.h} {...common} />
-    }
-    case 'ellipse': {
-      const b = cornerBounds(p[0], p[p.length - 1])
-      return <ellipse cx={b.x + b.w / 2} cy={b.y + b.h / 2} rx={b.w / 2} ry={b.h / 2} {...common} />
-    }
-    case 'triangle':
-      return <polygon points={pointsAttr(trianglePoints(p[0], p[p.length - 1]))} {...common} />
-    case 'star':
-      return <polygon points={pointsAttr(starPoints(p[0], p[p.length - 1]))} {...common} />
-    case 'polygon':
-      return <polygon points={pointsAttr(regularPolygonPoints(p[0], p[p.length - 1]))} {...common} />
-    default:
-      return null
-  }
-}
+const isOpen = (t: Shape['type']): boolean => t === 'line' || t === 'polyline' || t === 'freehand'
 
-/** Renders a shape, expanding a repeat array into lightweight <use> copies. */
-function ShapeNode({
-  shape,
-  selected,
-  crisp,
-  onPick
-}: {
-  shape: Shape
-  selected: boolean
-  crisp: boolean
-  onPick?: (e: RPointerEvent) => void
-}): React.JSX.Element | null {
-  const count = shape.repeat && shape.repeat.count > 1 ? shape.repeat.count : 1
-  if (count <= 1) return <ShapeEl shape={shape} selected={selected} crisp={crisp} onPick={onPick} />
-  const dx = shape.repeat!.dx
-  const dy = shape.repeat!.dy
-  return (
-    <g>
-      <g id={`s-${shape.id}`}>
-        <ShapeEl shape={shape} selected={selected} crisp={crisp} onPick={onPick} />
-      </g>
-      {Array.from({ length: count - 1 }, (_, k) => (
-        <use
-          key={k}
-          href={`#s-${shape.id}`}
-          x={dx * (k + 1)}
-          y={dy * (k + 1)}
-          onPointerDown={onPick}
-          style={{ pointerEvents: onPick ? 'auto' : 'none', cursor: onPick ? 'pointer' : 'default' }}
-        />
-      ))}
-    </g>
-  )
+/** Draws one shape (with its repeat array) in a given colour into the content buffer. */
+function drawShapeInto(ctx: CanvasRenderingContext2D, shape: Shape, stroke: string, fill: string): void {
+  const reps = shape.repeat && shape.repeat.count > 1 ? shape.repeat.count : 1
+  const dx = shape.repeat?.dx ?? 0
+  const dy = shape.repeat?.dy ?? 0
+  const open = isOpen(shape.type)
+  ctx.strokeStyle = stroke
+  ctx.fillStyle = fill
+  ctx.lineWidth = shape.strokeWidth || 4
+  for (let i = 0; i < reps; i++) {
+    ctx.save()
+    if (dx * i || dy * i) ctx.translate(dx * i, dy * i)
+    traceShape(ctx, shape)
+    if (!open && shape.display !== 'stroke') ctx.fill()
+    if (open || shape.display !== 'fill') ctx.stroke()
+    ctx.restore()
+  }
 }
 
 export function EditorCanvas(): React.JSX.Element {
@@ -124,17 +49,24 @@ export function EditorCanvas(): React.JSX.Element {
   const mask = useStore((s) => s.mask)
 
   const wrapRef = useRef<HTMLDivElement>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const contentRef = useRef<HTMLCanvasElement | null>(null)
+  if (!contentRef.current && typeof document !== 'undefined') {
+    contentRef.current = document.createElement('canvas')
+  }
+  const underlayImg = useRef<HTMLImageElement | null>(null)
+  const maskImg = useRef<HTMLImageElement | null>(null)
+  const contentDirty = useRef(true)
+
   const [view, setView] = useState<View>({ scale: 0.4, tx: 40, ty: 40 })
   const viewRef = useRef(view)
   viewRef.current = view
-
   const [draft, setDraft] = useState<{ type: DrawType; points: Point[] } | null>(null)
   const drawing = useRef(false)
   const panning = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
   const spaceHeld = useRef(false)
   const [spaceUi, setSpaceUi] = useState(false)
-  const userAdjusted = useRef(false) // true once the user zooms/pans → stop auto-fitting
+  const userAdjusted = useRef(false)
 
   const { w, h } = chart.canvas
 
@@ -149,7 +81,6 @@ export function EditorCanvas(): React.JSX.Element {
     setView({ scale, tx: (cw - w * scale) / 2, ty: (ch - h * scale) / 2 })
   }
 
-  /** Zoom to an absolute scale, keeping the viewport centre fixed. */
   const zoomTo = (scale: number): void => {
     const el = wrapRef.current
     if (!el) return
@@ -162,12 +93,180 @@ export function EditorCanvas(): React.JSX.Element {
     setView({ scale, tx: cxs - cx * scale, ty: cys - cy * scale })
   }
 
+  // ---- content buffer (chart-resolution) ----
+  const drawContent = (): void => {
+    const cc = contentRef.current
+    if (!cc) return
+    if (cc.width !== w) cc.width = w
+    if (cc.height !== h) cc.height = h
+    const ctx = cc.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, w, h)
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, w, h)
+    const u = chart.underlay
+    if (u?.visible && underlayImg.current) {
+      ctx.globalAlpha = u.opacity
+      ctx.drawImage(underlayImg.current, 0, 0, w, h)
+      ctx.globalAlpha = 1
+    }
+    if (maskImg.current) ctx.drawImage(maskImg.current, 0, 0, w, h)
+    ctx.lineJoin = 'round'
+    ctx.lineCap = 'round'
+    for (const shape of chart.shapes) drawShapeInto(ctx, shape, STROKE, FILL)
+  }
+
+  const drawGrid = (ctx: CanvasRenderingContext2D, cw: number, ch: number, v: View): void => {
+    const x0 = Math.max(0, Math.floor((0 - v.tx) / v.scale))
+    const x1 = Math.min(w, Math.ceil((cw - v.tx) / v.scale))
+    const y0 = Math.max(0, Math.floor((0 - v.ty) / v.scale))
+    const y1 = Math.min(h, Math.ceil((ch - v.ty) / v.scale))
+    const step = (s: number, color: string): void => {
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      for (let x = Math.ceil(x0 / s) * s; x <= x1; x += s) {
+        const sx = v.tx + x * v.scale
+        ctx.moveTo(sx, v.ty + y0 * v.scale)
+        ctx.lineTo(sx, v.ty + y1 * v.scale)
+      }
+      for (let y = Math.ceil(y0 / s) * s; y <= y1; y += s) {
+        const sy = v.ty + y * v.scale
+        ctx.moveTo(v.tx + x0 * v.scale, sy)
+        ctx.lineTo(v.tx + x1 * v.scale, sy)
+      }
+      ctx.stroke()
+    }
+    if (v.scale >= 6) step(1, '#211f1d')
+    step(10, '#3f3a33')
+  }
+
+  // ---- visible canvas ----
+  const draw = (): void => {
+    const cv = canvasRef.current
+    const wrap = wrapRef.current
+    if (!cv || !wrap) return
+    const cw = wrap.clientWidth
+    const ch = wrap.clientHeight
+    if (cv.width !== cw) cv.width = cw
+    if (cv.height !== ch) cv.height = ch
+    const ctx = cv.getContext('2d')
+    if (!ctx) return
+    if (contentDirty.current) {
+      drawContent()
+      contentDirty.current = false
+    }
+    const v = view
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, cw, ch)
+    ctx.fillStyle = C.canvas
+    ctx.fillRect(0, 0, cw, ch)
+
+    // content blit (crisp pixels when zoomed in, smooth when zoomed out)
+    ctx.imageSmoothingEnabled = v.scale < 1
+    ctx.setTransform(v.scale, 0, 0, v.scale, v.tx, v.ty)
+    if (contentRef.current) ctx.drawImage(contentRef.current, 0, 0)
+
+    // canvas border (screen space)
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.strokeStyle = C.border
+    ctx.lineWidth = 1
+    ctx.strokeRect(v.tx, v.ty, w * v.scale, h * v.scale)
+
+    if (v.scale >= 1.5) drawGrid(ctx, cw, ch, v)
+
+    // draft preview + selection (content transform)
+    ctx.setTransform(v.scale, 0, 0, v.scale, v.tx, v.ty)
+    if (draft) {
+      const dShape: Shape = {
+        id: '__draft',
+        type: draft.type,
+        points: draft.points,
+        display: draft.type === 'rect' || draft.type === 'ellipse' ? 'both' : 'stroke',
+        strokeWidth: tool === 'pixelpen' ? 1 : 4,
+        glowRadius: 0,
+        glowIntensity: 0
+      }
+      drawShapeInto(ctx, dShape, C.accent, 'rgba(123,197,232,0.3)')
+    }
+    const sel = chart.shapes.find((s) => s.id === selectedId)
+    if (sel) {
+      drawShapeInto(ctx, sel, C.accent, 'rgba(123,197,232,0.3)')
+      const b = shapeArrayBounds(sel)
+      const lw = 1 / v.scale
+      ctx.strokeStyle = C.accent
+      ctx.lineWidth = lw
+      ctx.setLineDash([4 / v.scale, 3 / v.scale])
+      ctx.strokeRect(b.x, b.y, b.w, b.h)
+      ctx.setLineDash([])
+      const hs = 8 / v.scale
+      ctx.fillStyle = C.accent
+      for (const c of [
+        { x: b.x, y: b.y },
+        { x: b.x + b.w, y: b.y },
+        { x: b.x, y: b.y + b.h },
+        { x: b.x + b.w, y: b.y + b.h }
+      ]) {
+        ctx.fillRect(c.x - hs / 2, c.y - hs / 2, hs, hs)
+      }
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+  }
+
+  // schedule a draw after every render (rAF-coalesced)
+  const drawRef = useRef(draw)
+  drawRef.current = draw
+  const rafRef = useRef(0)
+  useEffect(() => {
+    cancelAnimationFrame(rafRef.current)
+    rafRef.current = requestAnimationFrame(() => drawRef.current())
+  })
+
+  // mark content dirty when chart / underlay / mask change
+  useEffect(() => {
+    contentDirty.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chart.shapes, chart.canvas, chart.underlay, mask])
+
+  // cache underlay + mask images
+  useEffect(() => {
+    const url = chart.underlay?.dataUrl
+    if (!url) {
+      underlayImg.current = null
+      contentDirty.current = true
+      return
+    }
+    const img = new Image()
+    img.onload = (): void => {
+      underlayImg.current = img
+      contentDirty.current = true
+      drawRef.current()
+    }
+    img.src = url
+  }, [chart.underlay?.dataUrl])
+  useEffect(() => {
+    const url = mask?.overlay
+    if (!url) {
+      maskImg.current = null
+      contentDirty.current = true
+      return
+    }
+    const img = new Image()
+    img.onload = (): void => {
+      maskImg.current = img
+      contentDirty.current = true
+      drawRef.current()
+    }
+    img.src = url
+  }, [mask?.overlay])
+
   useLayoutEffect(() => {
     fit()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [w, h])
 
-  // Space-to-pan + Escape-to-cancel.
+  // space-to-pan + escape-to-cancel
   useEffect(() => {
     const down = (e: KeyboardEvent): void => {
       if (e.code === 'Space') {
@@ -192,7 +291,7 @@ export function EditorCanvas(): React.JSX.Element {
     }
   }, [])
 
-  // Keyboard precision editing: arrows nudge (Shift=10px), Delete removes, Cmd/Ctrl+D duplicates.
+  // keyboard precision editing: nudge / delete / duplicate
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
@@ -210,13 +309,13 @@ export function EditorCanvas(): React.JSX.Element {
         e.preventDefault()
         return
       }
-      const step = e.shiftKey ? 10 : 1
+      const stp = e.shiftKey ? 10 : 1
       let dx = 0
       let dy = 0
-      if (e.key === 'ArrowLeft') dx = -step
-      else if (e.key === 'ArrowRight') dx = step
-      else if (e.key === 'ArrowUp') dy = -step
-      else if (e.key === 'ArrowDown') dy = step
+      if (e.key === 'ArrowLeft') dx = -stp
+      else if (e.key === 'ArrowRight') dx = stp
+      else if (e.key === 'ArrowUp') dy = -stp
+      else if (e.key === 'ArrowDown') dy = stp
       else return
       st.nudgeShape(sel, dx, dy)
       e.preventDefault()
@@ -225,13 +324,13 @@ export function EditorCanvas(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Non-passive wheel zoom around the cursor.
+  // non-passive wheel zoom + auto-fit on resize
   useEffect(() => {
-    const svg = svgRef.current
-    if (!svg) return
+    const cv = canvasRef.current
+    if (!cv) return
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault()
-      const r = svg.getBoundingClientRect()
+      const r = cv.getBoundingClientRect()
       const mx = e.clientX - r.left
       const my = e.clientY - r.top
       const v = viewRef.current
@@ -242,16 +341,15 @@ export function EditorCanvas(): React.JSX.Element {
       userAdjusted.current = true
       setView({ scale, tx: mx - cx * scale, ty: my - cy * scale })
     }
-    svg.addEventListener('wheel', onWheel, { passive: false })
-    return () => svg.removeEventListener('wheel', onWheel)
+    cv.addEventListener('wheel', onWheel, { passive: false })
+    return () => cv.removeEventListener('wheel', onWheel)
   }, [])
-
-  // Auto-fit the canvas to the container until the user manually zooms/pans.
   useEffect(() => {
     const el = wrapRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
       if (!userAdjusted.current) fit()
+      else drawRef.current()
     })
     ro.observe(el)
     return () => ro.disconnect()
@@ -259,7 +357,7 @@ export function EditorCanvas(): React.JSX.Element {
   }, [w, h])
 
   const toCanvas = (clientX: number, clientY: number): Point => {
-    const r = svgRef.current!.getBoundingClientRect()
+    const r = canvasRef.current!.getBoundingClientRect()
     const v = viewRef.current
     const x = (clientX - r.left - v.tx) / v.scale
     const y = (clientY - r.top - v.ty) / v.scale
@@ -275,20 +373,30 @@ export function EditorCanvas(): React.JSX.Element {
     return mask.bitmap[yi * mask.w + xi] === 1
   }
 
-  const onPointerDown = (e: RPointerEvent<SVGSVGElement>): void => {
+  const hitTest = (p: Point): string | null => {
+    const tol = Math.max(3, 4 / view.scale)
+    for (let i = chart.shapes.length - 1; i >= 0; i--) {
+      const b = shapeArrayBounds(chart.shapes[i])
+      if (p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol) {
+        return chart.shapes[i].id
+      }
+    }
+    return null
+  }
+
+  const onPointerDown = (e: RPointerEvent<HTMLCanvasElement>): void => {
     if (spaceHeld.current || e.button === 1) {
       panning.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty }
-      svgRef.current?.setPointerCapture(e.pointerId)
+      canvasRef.current?.setPointerCapture(e.pointerId)
       return
     }
     if (e.button !== 0) return
     const p = toCanvas(e.clientX, e.clientY)
-
     if (tool === 'select') {
-      select(null) // empty-space click deselects (shapes stop propagation)
+      select(hitTest(p))
       return
     }
-    if (mask && !isDrawable(p)) return // chart mask: can't start drawing outside the area
+    if (mask && !isDrawable(p)) return
     if (tool === 'polyline') {
       setDraft((d) =>
         d && d.type === 'polyline'
@@ -300,10 +408,10 @@ export function EditorCanvas(): React.JSX.Element {
     drawing.current = true
     const dt: DrawType = tool === 'pixelpen' ? 'freehand' : (tool as DrawType)
     setDraft({ type: dt, points: [p, p] })
-    svgRef.current?.setPointerCapture(e.pointerId)
+    canvasRef.current?.setPointerCapture(e.pointerId)
   }
 
-  const onPointerMove = (e: RPointerEvent<SVGSVGElement>): void => {
+  const onPointerMove = (e: RPointerEvent<HTMLCanvasElement>): void => {
     if (panning.current) {
       const pan = panning.current
       userAdjusted.current = true
@@ -344,13 +452,13 @@ export function EditorCanvas(): React.JSX.Element {
     setDraft(null)
   }
 
-  const onPointerUp = (e: RPointerEvent<SVGSVGElement>): void => {
+  const onPointerUp = (e: RPointerEvent<HTMLCanvasElement>): void => {
     if (panning.current) {
       panning.current = null
-      svgRef.current?.releasePointerCapture(e.pointerId)
+      canvasRef.current?.releasePointerCapture(e.pointerId)
       return
     }
-    if (tool === 'polyline') return // polyline finishes on double-click
+    if (tool === 'polyline') return
     if (!drawing.current) return
     drawing.current = false
     commit()
@@ -358,165 +466,25 @@ export function EditorCanvas(): React.JSX.Element {
 
   const onDoubleClick = (): void => {
     if (draft?.type === 'polyline') {
-      const verts = draft.points.slice(0, -1) // drop trailing rubber-band point
+      const verts = draft.points.slice(0, -1)
       if (verts.length >= 2) addShape({ type: 'polyline', points: verts })
       setDraft(null)
     }
   }
 
-  const sel = chart.shapes.find((s) => s.id === selectedId)
-  let selB = sel ? shapeBounds(sel) : null
-  if (sel && selB && sel.repeat && sel.repeat.count > 1) {
-    const c = sel.repeat.count - 1
-    const ex = sel.repeat.dx * c
-    const ey = sel.repeat.dy * c
-    selB = {
-      x: Math.min(selB.x, selB.x + ex),
-      y: Math.min(selB.y, selB.y + ey),
-      w: selB.w + Math.abs(ex),
-      h: selB.h + Math.abs(ey)
-    }
-  }
-  const handle = 8 / view.scale
   const cursor = spaceUi ? 'grab' : tool === 'select' ? 'default' : 'crosshair'
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', flex: 1, overflow: 'hidden', background: C.canvas }}>
-      <svg
-        ref={svgRef}
-        width="100%"
-        height="100%"
+      <canvas
+        ref={canvasRef}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onDoubleClick={onDoubleClick}
-        style={{ display: 'block', cursor, touchAction: 'none' }}
-      >
-        <g transform={`translate(${view.tx},${view.ty}) scale(${view.scale})`}>
-          {/* canvas = pure black background (also catches empty-space clicks) */}
-          <rect x={0} y={0} width={w} height={h} fill="#000" />
-          {chart.underlay && chart.underlay.visible && (
-            <image
-              href={chart.underlay.dataUrl}
-              x={0}
-              y={0}
-              width={w}
-              height={h}
-              opacity={chart.underlay.opacity}
-              preserveAspectRatio="none"
-              style={{ pointerEvents: 'none', imageRendering: 'pixelated' }}
-            />
-          )}
-          {/* chart mask: shade the non-drawable area */}
-          {mask && (
-            <image
-              href={mask.overlay}
-              x={0}
-              y={0}
-              width={w}
-              height={h}
-              preserveAspectRatio="none"
-              style={{ pointerEvents: 'none', imageRendering: 'pixelated' }}
-            />
-          )}
-          {/* canvas border */}
-          <rect
-            x={0}
-            y={0}
-            width={w}
-            height={h}
-            fill="none"
-            stroke={C.border}
-            strokeWidth={1 / view.scale}
-            style={{ pointerEvents: 'none' }}
-          />
+        style={{ display: 'block', width: '100%', height: '100%', cursor, touchAction: 'none' }}
+      />
 
-          {/* pixel grid: 10px major when zoomed, 1px minor at high zoom */}
-          {view.scale >= 1.5 && (
-            <>
-              <defs>
-                <pattern id="grid-minor" width={1} height={1} patternUnits="userSpaceOnUse">
-                  <path d="M1 0 H0 V1" fill="none" stroke="#2b2926" strokeWidth={0.7 / view.scale} />
-                </pattern>
-                <pattern id="grid-major" width={10} height={10} patternUnits="userSpaceOnUse">
-                  <path d="M10 0 H0 V10" fill="none" stroke="#4d473f" strokeWidth={1 / view.scale} />
-                </pattern>
-              </defs>
-              {view.scale >= 6 && (
-                <rect x={0} y={0} width={w} height={h} fill="url(#grid-minor)" style={{ pointerEvents: 'none' }} />
-              )}
-              <rect x={0} y={0} width={w} height={h} fill="url(#grid-major)" style={{ pointerEvents: 'none' }} />
-            </>
-          )}
-
-          {chart.shapes.map((shape) => (
-            <ShapeNode
-              key={shape.id}
-              shape={shape}
-              selected={shape.id === selectedId}
-              crisp={snapToPixel}
-              onPick={
-                tool === 'select'
-                  ? (e) => {
-                      e.stopPropagation()
-                      select(shape.id)
-                    }
-                  : undefined
-              }
-            />
-          ))}
-
-          {/* in-progress draft preview */}
-          {draft && (
-            <ShapeEl
-              shape={{
-                id: '__draft',
-                type: draft.type,
-                points: draft.points,
-                display: draft.type === 'rect' || draft.type === 'ellipse' ? 'both' : 'stroke',
-                strokeWidth: 4,
-                glowRadius: 0,
-                glowIntensity: 0
-              }}
-              selected
-              crisp={snapToPixel}
-            />
-          )}
-
-          {/* selection bounding box + handles */}
-          {selB && (
-            <g style={{ pointerEvents: 'none' }}>
-              <rect
-                x={selB.x}
-                y={selB.y}
-                width={selB.w}
-                height={selB.h}
-                fill="none"
-                stroke={C.accent}
-                strokeWidth={1 / view.scale}
-                strokeDasharray={`${4 / view.scale} ${3 / view.scale}`}
-              />
-              {[
-                { x: selB.x, y: selB.y },
-                { x: selB.x + selB.w, y: selB.y },
-                { x: selB.x, y: selB.y + selB.h },
-                { x: selB.x + selB.w, y: selB.y + selB.h }
-              ].map((c, i) => (
-                <rect
-                  key={i}
-                  x={c.x - handle / 2}
-                  y={c.y - handle / 2}
-                  width={handle}
-                  height={handle}
-                  fill={C.accent}
-                />
-              ))}
-            </g>
-          )}
-        </g>
-      </svg>
-
-      {/* zoom / fit / snap controls */}
       <div style={{ position: 'absolute', left: 10, bottom: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
         <button onClick={fit} style={zoomBtn}>
           FIT
@@ -561,7 +529,6 @@ const zoomBtn: React.CSSProperties = {
   letterSpacing: '0.08em',
   cursor: 'pointer'
 }
-
 const hintStyle: React.CSSProperties = {
   position: 'absolute',
   left: '50%',
