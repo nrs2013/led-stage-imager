@@ -7,6 +7,7 @@ const TOOLS: { id: Tool; label: string }[] = [
   { id: 'line', label: 'Line' },
   { id: 'polyline', label: 'Poly-L' },
   { id: 'freehand', label: 'Pen' },
+  { id: 'pixelpen', label: 'Pixel' },
   { id: 'ellipse', label: 'Bulb' },
   { id: 'triangle', label: 'Tri' },
   { id: 'rect', label: 'Rect' },

@@ -192,6 +192,39 @@ export function EditorCanvas(): React.JSX.Element {
     }
   }, [])
 
+  // Keyboard precision editing: arrows nudge (Shift=10px), Delete removes, Cmd/Ctrl+D duplicates.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return
+      const st = useStore.getState()
+      const sel = st.selectedId
+      if (!sel) return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        st.removeShape(sel)
+        e.preventDefault()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
+        st.duplicateShape(sel)
+        e.preventDefault()
+        return
+      }
+      const step = e.shiftKey ? 10 : 1
+      let dx = 0
+      let dy = 0
+      if (e.key === 'ArrowLeft') dx = -step
+      else if (e.key === 'ArrowRight') dx = step
+      else if (e.key === 'ArrowUp') dy = -step
+      else if (e.key === 'ArrowDown') dy = step
+      else return
+      st.nudgeShape(sel, dx, dy)
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Non-passive wheel zoom around the cursor.
   useEffect(() => {
     const svg = svgRef.current
@@ -230,7 +263,8 @@ export function EditorCanvas(): React.JSX.Element {
     const v = viewRef.current
     const x = (clientX - r.left - v.tx) / v.scale
     const y = (clientY - r.top - v.ty) / v.scale
-    return snapToPixel ? { x: Math.round(x), y: Math.round(y) } : { x, y }
+    const snap = snapToPixel || tool === 'pixelpen'
+    return snap ? { x: Math.round(x), y: Math.round(y) } : { x, y }
   }
 
   const isDrawable = (p: Point): boolean => {
@@ -264,7 +298,8 @@ export function EditorCanvas(): React.JSX.Element {
       return
     }
     drawing.current = true
-    setDraft({ type: tool as DrawType, points: [p, p] })
+    const dt: DrawType = tool === 'pixelpen' ? 'freehand' : (tool as DrawType)
+    setDraft({ type: dt, points: [p, p] })
     svgRef.current?.setPointerCapture(e.pointerId)
   }
 
@@ -294,7 +329,12 @@ export function EditorCanvas(): React.JSX.Element {
     const a = pts[0]
     const b = pts[pts.length - 1]
     if (draft.type === 'freehand') {
-      if (pts.length >= 2) addShape({ type: 'freehand', points: pts })
+      if (pts.length >= 2)
+        addShape({
+          type: 'freehand',
+          points: pts,
+          ...(tool === 'pixelpen' ? { strokeWidth: 1, glowRadius: 6, glowIntensity: 0.5 } : {})
+        })
     } else if (draft.type === 'line') {
       if (dist(a, b) >= MIN_SIZE) addShape({ type: 'line', points: [a, b] })
     } else {

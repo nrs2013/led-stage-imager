@@ -15,6 +15,7 @@ export type Tool =
   | 'triangle'
   | 'star'
   | 'polygon'
+  | 'pixelpen'
 
 interface AppState {
   chart: Chart
@@ -35,6 +36,8 @@ interface AppState {
   updateShape: (id: string, patch: Partial<Shape>) => void
   addShape: (init: { type: Shape['type']; points: Shape['points'] } & Partial<Shape>) => string
   removeShape: (id: string) => void
+  nudgeShape: (id: string, dx: number, dy: number) => void
+  duplicateShape: (id: string) => void
   setUniverseData: (universe: number, data: Uint8Array) => void
 
   setUnderlay: (u: Chart['underlay']) => void
@@ -289,7 +292,36 @@ export const useStore = create<AppState>()((set, get) => ({
       }
     }))
     return newShapes.length
-  }
+  },
+  nudgeShape: (id, dx, dy) =>
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        shapes: s.chart.shapes.map((sh) =>
+          sh.id === id ? { ...sh, points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : sh
+        )
+      }
+    })),
+  duplicateShape: (id) =>
+    set((s) => {
+      const sh = s.chart.shapes.find((x) => x.id === id)
+      if (!sh) return {}
+      const nid = newId('shape')
+      const copy: Shape = {
+        ...sh,
+        id: nid,
+        points: sh.points.map((p) => ({ x: p.x + 10, y: p.y + 10 })),
+        fixtureId: undefined
+      }
+      let fixtures = s.chart.fixtures
+      const fx = s.chart.fixtures.find((f) => f.shapeId === id)
+      if (fx) {
+        const nfid = newId('fx')
+        copy.fixtureId = nfid
+        fixtures = [...fixtures, { ...fx, id: nfid, shapeId: nid }]
+      }
+      return { chart: { ...s.chart, shapes: [...s.chart.shapes, copy], fixtures }, selectedId: nid }
+    })
 }))
 
 // Test/debug hook: lets the browser preview drive the store (e.g. seed demo shapes).
