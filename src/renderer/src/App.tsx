@@ -9,6 +9,7 @@ import { StatusBar } from './ui/StatusBar'
 import { ManualFaders } from './test/ManualFaders'
 import { useStore } from './state/store'
 import { useDmxBridge } from './state/dmx-bridge'
+import { useMask } from './state/use-mask'
 import type { Chart } from './model/types'
 import { C } from './ui/tokens'
 
@@ -63,6 +64,7 @@ function EditorApp(): React.JSX.Element {
   const mode = useStore((s) => s.mode)
   const [testOpen, setTestOpen] = useState(false)
   useDmxBridge()
+  useMask()
   usePreviewMirror()
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.canvas }}>

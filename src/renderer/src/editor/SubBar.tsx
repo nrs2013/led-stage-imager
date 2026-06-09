@@ -36,6 +36,7 @@ export function SubBar(): React.JSX.Element {
   const setUnderlay = useStore((s) => s.setUnderlay)
   const setUnderlayOpacity = useStore((s) => s.setUnderlayOpacity)
   const setUnderlayVisible = useStore((s) => s.setUnderlayVisible)
+  const setUnderlayMask = useStore((s) => s.setUnderlayMask)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const u = chart.underlay
 
@@ -101,6 +102,24 @@ export function SubBar(): React.JSX.Element {
             />
             表示
           </label>
+          <div style={sep} />
+          <button
+            style={{ ...buttonStyle({ active: u.mask?.enabled ?? false }), padding: '5px 10px' }}
+            onClick={() => setUnderlayMask({ enabled: !(u.mask?.enabled ?? false) })}
+            title="アルファPNGの透明部を描画領域にする（はみ出し禁止）"
+          >
+            マスク
+          </button>
+          {u.mask?.enabled && (
+            <button
+              style={{ ...buttonStyle({ active: u.mask?.invert ?? false }), padding: '5px 10px' }}
+              onClick={() => setUnderlayMask({ invert: !(u.mask?.invert ?? false) })}
+              title="描画領域を反転（不透明部を描画領域に）"
+            >
+              反転
+            </button>
+          )}
+          <div style={sep} />
           <button
             style={{ ...buttonStyle({ accent: '#e0726a', accentRGB: '224,114,106' }), padding: '5px 10px' }}
             onClick={() => setUnderlay(null)}

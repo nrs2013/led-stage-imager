@@ -121,6 +121,7 @@ export function EditorCanvas(): React.JSX.Element {
   const addShape = useStore((s) => s.addShape)
   const snapToPixel = useStore((s) => s.snapToPixel)
   const setSnap = useStore((s) => s.setSnap)
+  const mask = useStore((s) => s.mask)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -232,6 +233,14 @@ export function EditorCanvas(): React.JSX.Element {
     return snapToPixel ? { x: Math.round(x), y: Math.round(y) } : { x, y }
   }
 
+  const isDrawable = (p: Point): boolean => {
+    if (!mask) return true
+    const xi = Math.floor(p.x)
+    const yi = Math.floor(p.y)
+    if (xi < 0 || yi < 0 || xi >= mask.w || yi >= mask.h) return false
+    return mask.bitmap[yi * mask.w + xi] === 1
+  }
+
   const onPointerDown = (e: RPointerEvent<SVGSVGElement>): void => {
     if (spaceHeld.current || e.button === 1) {
       panning.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty }
@@ -245,6 +254,7 @@ export function EditorCanvas(): React.JSX.Element {
       select(null) // empty-space click deselects (shapes stop propagation)
       return
     }
+    if (mask && !isDrawable(p)) return // chart mask: can't start drawing outside the area
     if (tool === 'polyline') {
       setDraft((d) =>
         d && d.type === 'polyline'
@@ -272,7 +282,7 @@ export function EditorCanvas(): React.JSX.Element {
     }
     if (!drawing.current || !draft) return
     if (draft.type === 'freehand') {
-      setDraft((d) => (d ? { ...d, points: [...d.points, p] } : d))
+      if (!mask || isDrawable(p)) setDraft((d) => (d ? { ...d, points: [...d.points, p] } : d))
     } else {
       setDraft((d) => (d ? { ...d, points: [d.points[0], p] } : d))
     }
@@ -353,6 +363,18 @@ export function EditorCanvas(): React.JSX.Element {
               width={w}
               height={h}
               opacity={chart.underlay.opacity}
+              preserveAspectRatio="none"
+              style={{ pointerEvents: 'none', imageRendering: 'pixelated' }}
+            />
+          )}
+          {/* chart mask: shade the non-drawable area */}
+          {mask && (
+            <image
+              href={mask.overlay}
+              x={0}
+              y={0}
+              width={w}
+              height={h}
               preserveAspectRatio="none"
               style={{ pointerEvents: 'none', imageRendering: 'pixelated' }}
             />

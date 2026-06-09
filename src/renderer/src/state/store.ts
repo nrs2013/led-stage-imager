@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Chart, Shape, Fixture, ChannelMode } from '../model/types'
 import { createChart, addShape as addShapeToChart, newId } from '../model/chart-model'
+import type { MaskData } from '../ui/mask'
 
 export type Mode = 'edit' | 'live'
 export type Tool =
@@ -24,6 +25,7 @@ interface AppState {
   manualMode: boolean
   manualByFixture: Record<string, [number, number, number]>
   snapToPixel: boolean
+  mask: MaskData | null
 
   setChart: (c: Chart) => void
   setMode: (m: Mode) => void
@@ -44,6 +46,8 @@ interface AppState {
   setManualColor: (fixtureId: string, rgb: [number, number, number]) => void
   setManualAll: (rgb: [number, number, number] | null) => void
   setSnap: (on: boolean) => void
+  setUnderlayMask: (patch: { enabled?: boolean; invert?: boolean }) => void
+  setMaskData: (m: MaskData | null) => void
   setCanvasSize: (w: number, h: number) => void
   setGamma: (on: boolean) => void
   setHoldOnTimeout: (on: boolean) => void
@@ -113,6 +117,7 @@ export const useStore = create<AppState>()((set, get) => ({
   manualMode: false,
   manualByFixture: {},
   snapToPixel: true,
+  mask: null,
 
   setChart: (chart) => set({ chart, selectedId: null }),
   setMode: (mode) => set({ mode }),
@@ -222,7 +227,16 @@ export const useStore = create<AppState>()((set, get) => ({
   setHoldOnTimeout: (on) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, holdOnTimeout: on } } })),
   setSyphonName: (name) => set((s) => ({ chart: { ...s.chart, syphon: { name } } })),
-  setSnap: (on) => set({ snapToPixel: on })
+  setSnap: (on) => set({ snapToPixel: on }),
+  setUnderlayMask: (patch) =>
+    set((s) => {
+      if (!s.chart.underlay) return {}
+      const cur = s.chart.underlay.mask ?? { enabled: false, invert: false }
+      return {
+        chart: { ...s.chart, underlay: { ...s.chart.underlay, mask: { ...cur, ...patch } } }
+      }
+    }),
+  setMaskData: (m) => set({ mask: m })
 }))
 
 // Test/debug hook: lets the browser preview drive the store (e.g. seed demo shapes).

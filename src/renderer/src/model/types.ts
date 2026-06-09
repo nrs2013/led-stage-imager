@@ -44,7 +44,13 @@ export interface Chart {
   id: string
   name: string
   canvas: { w: number; h: number }
-  underlay: { dataUrl: string; opacity: number; visible: boolean } | null
+  underlay: {
+    dataUrl: string
+    opacity: number
+    visible: boolean
+    /** Use the image's alpha as a drawable-area mask (transparent = drawable; invert flips). */
+    mask?: { enabled: boolean; invert: boolean }
+  } | null
   shapes: Shape[]
   fixtures: Fixture[]
   syphon: { name: string }
