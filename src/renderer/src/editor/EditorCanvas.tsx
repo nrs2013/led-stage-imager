@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPoi
 import { useStore } from '../state/store'
 import type { Point, Shape } from '../model/types'
 import { C, F } from '../ui/tokens'
-import { cornerBounds, traceShape, shapeArrayBounds, cellsBetween } from './geometry'
+import { cornerBounds, traceShape, shapeArrayBounds, cellsBetween, type Bounds } from './geometry'
+import { buildCandidates, salientOf, snap1D, snapMoveDelta, softAxis, type SnapCand } from './snapping'
 
 const MIN_SIZE = 3
 const clamp = (n: number, lo: number, hi: number): number => (n < lo ? lo : n > hi ? hi : n)
@@ -34,20 +35,32 @@ const isOpen = (t: Shape['type']): boolean => t === 'line' || t === 'polyline' |
 const BOXY = new Set<Shape['type']>(['rect', 'ellipse', 'triangle', 'star', 'polygon'])
 
 /** One pointer gesture on the canvas: move the whole shape, drag one vertex
- *  (line/polyline), drag a box corner against its fixed opposite corner, or pull
- *  the end of a painted run to change its length. */
+ *  (line/polyline), drag a box corner/edge against its fixed opposite side, or pull
+ *  the end of a painted run to change its length. Alignment candidates are computed
+ *  once at gesture start. */
 type Interaction =
-  | { kind: 'move'; id: string; sx: number; sy: number; orig: Point[]; forceSnap?: boolean }
-  | { kind: 'vertex'; id: string; idx: number }
-  | { kind: 'corner'; id: string; anchor: Point }
-  | { kind: 'end'; id: string; anchor: Point } // anchor = fixed end's cell
+  | {
+      kind: 'move'
+      id: string
+      sx: number
+      sy: number
+      orig: Point[]
+      forceSnap?: boolean
+      cand?: SnapCand
+      sal?: { xs: number[]; ys: number[] }
+    }
+  | { kind: 'vertex'; id: string; idx: number; cand?: SnapCand }
+  | { kind: 'corner'; id: string; anchor: Point; aspect: number; cand?: SnapCand }
+  | { kind: 'edge'; id: string; b: Bounds; dir: 'n' | 's' | 'e' | 'w'; cand?: SnapCand }
+  | { kind: 'end'; id: string; anchor: Point; cand?: SnapCand } // anchor = fixed end's cell
 
 interface Handle {
   x: number
   y: number
-  kind: 'vertex' | 'corner' | 'end'
+  kind: 'vertex' | 'corner' | 'end' | 'edge'
   idx: number
   anchor?: Point
+  dir?: 'n' | 's' | 'e' | 'w'
 }
 
 /** A painted dot run: 1px freehand whose points all sit on cell centres (x.5/y.5). */
@@ -87,13 +100,19 @@ function shapeHandles(sh: Shape): Handle[] {
       { x: b.x + b.w, y: b.y },
       { x: b.x, y: b.y + b.h },
       { x: b.x + b.w, y: b.y + b.h }
-    ]
-    return corners.map((c, i) => ({
+    ].map((c, i) => ({
       ...c,
       kind: 'corner' as const,
       idx: i,
       anchor: { x: 2 * b.x + b.w - c.x, y: 2 * b.y + b.h - c.y } // opposite corner stays put
     }))
+    const edges: Handle[] = [
+      { x: b.x + b.w / 2, y: b.y, kind: 'edge', idx: 4, dir: 'n' },
+      { x: b.x + b.w / 2, y: b.y + b.h, kind: 'edge', idx: 5, dir: 's' },
+      { x: b.x, y: b.y + b.h / 2, kind: 'edge', idx: 6, dir: 'w' },
+      { x: b.x + b.w, y: b.y + b.h / 2, kind: 'edge', idx: 7, dir: 'e' }
+    ]
+    return [...corners, ...edges]
   }
   return []
 }
@@ -160,9 +179,14 @@ export function EditorCanvas(): React.JSX.Element {
   const viewRef = useRef(view)
   viewRef.current = view
   const [draft, setDraft] = useState<{ type: DrawType; points: Point[] } | null>(null)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
   const drawing = useRef(false)
   const interaction = useRef<Interaction | null>(null)
   const lastCell = useRef<Point | null>(null)
+  const guidesRef = useRef<{ x: number | null; y: number | null }>({ x: null, y: null })
+  const posRef = useRef<HTMLSpanElement>(null)
+  const [cursorOv, setCursorOv] = useState<string | null>(null)
   const scratchCtx = useRef<CanvasRenderingContext2D | null>(null)
   if (!scratchCtx.current && typeof document !== 'undefined') {
     scratchCtx.current = document.createElement('canvas').getContext('2d')
@@ -184,6 +208,9 @@ export function EditorCanvas(): React.JSX.Element {
     const scale = Math.min(cw / w, ch / h) * 0.92
     setView({ scale, tx: (cw - w * scale) / 2, ty: (ch - h * scale) / 2 })
   }
+
+  const fitRef = useRef<() => void>(() => {})
+  fitRef.current = fit
 
   const zoomTo = (scale: number): void => {
     const el = wrapRef.current
@@ -322,9 +349,28 @@ export function EditorCanvas(): React.JSX.Element {
       ctx.strokeStyle = '#0a0a0a'
       ctx.lineWidth = 1 / v.scale
       for (const hd of shapeHandles(sel)) {
-        ctx.fillRect(hd.x - hs / 2, hd.y - hs / 2, hs, hs)
-        ctx.strokeRect(hd.x - hs / 2, hd.y - hs / 2, hs, hs)
+        const s2 = hd.kind === 'edge' ? hs * 0.78 : hs
+        ctx.fillRect(hd.x - s2 / 2, hd.y - s2 / 2, s2, s2)
+        ctx.strokeRect(hd.x - s2 / 2, hd.y - s2 / 2, s2, s2)
       }
+    }
+    // alignment guides (lit while something snaps onto another shape's line)
+    const g = guidesRef.current
+    if (g.x != null || g.y != null) {
+      ctx.strokeStyle = C.green
+      ctx.lineWidth = 1 / v.scale
+      ctx.setLineDash([6 / v.scale, 4 / v.scale])
+      ctx.beginPath()
+      if (g.x != null) {
+        ctx.moveTo(g.x, -1e4)
+        ctx.lineTo(g.x, 1e4)
+      }
+      if (g.y != null) {
+        ctx.moveTo(-1e4, g.y)
+        ctx.lineTo(1e4, g.y)
+      }
+      ctx.stroke()
+      ctx.setLineDash([])
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0)
   }
@@ -388,8 +434,12 @@ export function EditorCanvas(): React.JSX.Element {
         spaceHeld.current = true
         setSpaceUi(true)
       } else if (e.code === 'Escape') {
-        setDraft(null)
-        drawing.current = false
+        if (draftRef.current) {
+          setDraft(null)
+          drawing.current = false
+        } else {
+          useStore.getState().select(null) // Esc with nothing in progress = deselect
+        }
       }
     }
     const up = (e: KeyboardEvent): void => {
@@ -412,9 +462,21 @@ export function EditorCanvas(): React.JSX.Element {
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return
       const st = useStore.getState()
-      // quick tool keys (industry-standard letters)
+      // undo / redo
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        if (e.shiftKey) st.redo()
+        else st.undo()
+        e.preventDefault()
+        return
+      }
+      // quick tool keys (industry-standard letters) + F = fit view
       if (!e.metaKey && !e.ctrlKey && !e.altKey) {
         const k = e.key.toLowerCase()
+        if (k === 'f') {
+          fitRef.current()
+          e.preventDefault()
+          return
+        }
         const quick: Record<string, Parameters<typeof st.setTool>[0]> = {
           v: 'select',
           p: 'pixelpen',
@@ -470,16 +532,26 @@ export function EditorCanvas(): React.JSX.Element {
     if (!cv) return
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault()
-      const r = cv.getBoundingClientRect()
-      const mx = e.clientX - r.left
-      const my = e.clientY - r.top
       const v = viewRef.current
-      const factor = Math.exp(-e.deltaY * 0.0015)
-      const scale = clamp(v.scale * factor, 0.05, 64)
-      const cx = (mx - v.tx) / v.scale
-      const cy = (my - v.ty) / v.scale
       userAdjusted.current = true
-      setView({ scale, tx: mx - cx * scale, ty: my - cy * scale })
+      // pinch (ctrlKey), Cmd+scroll, or a classic mouse-wheel notch (integer, large,
+      // vertical-only) zooms toward the cursor; trackpad two-finger scroll pans.
+      const notch = Math.abs(e.deltaY) >= 80 && e.deltaX === 0 && Number.isInteger(e.deltaY)
+      if (e.ctrlKey || e.metaKey || notch) {
+        const r = cv.getBoundingClientRect()
+        const mx = e.clientX - r.left
+        const my = e.clientY - r.top
+        const k = e.ctrlKey && !e.metaKey ? 0.012 : 0.0015 // pinch sends small deltas
+        const factor = Math.exp(-e.deltaY * k)
+        const scale = clamp(v.scale * factor, 0.05, 64)
+        const cx = (mx - v.tx) / v.scale
+        const cy = (my - v.ty) / v.scale
+        setView({ scale, tx: mx - cx * scale, ty: my - cy * scale })
+      } else {
+        const dx = e.shiftKey && e.deltaX === 0 ? e.deltaY : e.deltaX
+        const dy = e.shiftKey && e.deltaX === 0 ? 0 : e.deltaY
+        setView({ ...v, tx: v.tx - dx, ty: v.ty - dy })
+      }
     }
     cv.addEventListener('wheel', onWheel, { passive: false })
     return () => cv.removeEventListener('wheel', onWheel)
@@ -548,10 +620,54 @@ export function EditorCanvas(): React.JSX.Element {
     return null
   }
 
+  /** Nearest grabbable handle of a shape around p. The radius shrinks for small shapes
+   *  so the middle of a short line stays grabbable for plain moving when zoomed out. */
+  const findHandle = (sh: Shape, p: Point): Handle | undefined => {
+    const b = shapeArrayBounds(sh)
+    const span = Math.max(b.w, b.h)
+    const tolH = Math.min(9 / viewRef.current.scale, Math.max(2, span * 0.25))
+    let hd: Handle | undefined
+    let bestD = Infinity
+    for (const hh of shapeHandles(sh)) {
+      const d = Math.hypot(hh.x - p.x, hh.y - p.y)
+      if (d <= tolH && d < bestD) {
+        bestD = d
+        hd = hh
+      }
+    }
+    return hd
+  }
+
+  /** Starts a whole-shape move gesture (records one undo step + alignment targets). */
+  const startMove = (id: string, raw: Point, forceSnap: boolean): boolean => {
+    const sh = chart.shapes.find((s) => s.id === id)
+    if (!sh) return false
+    select(id)
+    useStore.getState().beginHistory()
+    interaction.current = {
+      kind: 'move',
+      id,
+      sx: raw.x,
+      sy: raw.y,
+      orig: sh.points.map((pp) => ({ ...pp })),
+      forceSnap,
+      cand: buildCandidates(chart.shapes, id),
+      sal: salientOf(sh)
+    }
+    return true
+  }
+
   const onPointerDown = (e: RPointerEvent<HTMLCanvasElement>): void => {
     if (spaceHeld.current || e.button === 1) {
       panning.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty }
       canvasRef.current?.setPointerCapture(e.pointerId)
+      return
+    }
+    if (e.button === 2) {
+      // right-drag: grab & move whatever is under the cursor, in any tool
+      const raw = toCanvasRaw(e.clientX, e.clientY)
+      const hit = hitTest(raw)
+      if (hit && startMove(hit, raw, true)) canvasRef.current?.setPointerCapture(e.pointerId)
       return
     }
     if (e.button !== 0) return
@@ -561,42 +677,39 @@ export function EditorCanvas(): React.JSX.Element {
       // grab a handle of the already-selected shape first (resize/reshape/pull)
       const sel = chart.shapes.find((s) => s.id === selectedId)
       if (sel) {
-        const tolH = 9 / viewRef.current.scale
-        let hd: Handle | undefined
-        let bestD = Infinity
-        for (const hh of shapeHandles(sel)) {
-          const d = Math.hypot(hh.x - raw.x, hh.y - raw.y)
-          if (d <= tolH && d < bestD) {
-            bestD = d
-            hd = hh // nearest handle wins (they can overlap when zoomed out)
-          }
-        }
+        const hd = findHandle(sel, raw)
         if (hd) {
-          interaction.current =
-            hd.kind === 'vertex'
-              ? { kind: 'vertex', id: sel.id, idx: hd.idx }
-              : hd.kind === 'end'
-                ? { kind: 'end', id: sel.id, anchor: hd.anchor! }
-                : { kind: 'corner', id: sel.id, anchor: hd.anchor! }
+          useStore.getState().beginHistory()
+          const cand = buildCandidates(chart.shapes, sel.id)
+          if (hd.kind === 'vertex') {
+            interaction.current = { kind: 'vertex', id: sel.id, idx: hd.idx, cand }
+          } else if (hd.kind === 'end') {
+            interaction.current = { kind: 'end', id: sel.id, anchor: hd.anchor!, cand }
+          } else if (hd.kind === 'edge') {
+            interaction.current = {
+              kind: 'edge',
+              id: sel.id,
+              b: cornerBounds(sel.points[0], sel.points[sel.points.length - 1]),
+              dir: hd.dir!,
+              cand
+            }
+          } else {
+            const bb = cornerBounds(sel.points[0], sel.points[sel.points.length - 1])
+            interaction.current = {
+              kind: 'corner',
+              id: sel.id,
+              anchor: hd.anchor!,
+              aspect: bb.h > 0 ? bb.w / bb.h : 1,
+              cand
+            }
+          }
           canvasRef.current?.setPointerCapture(e.pointerId)
           return
         }
       }
-      const hit = hitTest(toCanvasRaw(e.clientX, e.clientY))
+      const hit = hitTest(raw)
       select(hit)
-      if (hit) {
-        const sh = chart.shapes.find((s) => s.id === hit)
-        if (sh) {
-          interaction.current = {
-            kind: 'move',
-            id: hit,
-            sx: raw.x,
-            sy: raw.y,
-            orig: sh.points.map((pp) => ({ ...pp }))
-          }
-          canvasRef.current?.setPointerCapture(e.pointerId)
-        }
-      }
+      if (hit && startMove(hit, raw, false)) canvasRef.current?.setPointerCapture(e.pointerId)
       return
     }
     // Cmd/Opt + drag in any drawing tool = grab & move without switching to Select
@@ -604,19 +717,7 @@ export function EditorCanvas(): React.JSX.Element {
       const raw = toCanvasRaw(e.clientX, e.clientY)
       const hit = hitTest(raw)
       if (hit) {
-        select(hit)
-        const sh = chart.shapes.find((s) => s.id === hit)
-        if (sh) {
-          interaction.current = {
-            kind: 'move',
-            id: hit,
-            sx: raw.x,
-            sy: raw.y,
-            orig: sh.points.map((pp) => ({ ...pp })),
-            forceSnap: true // the modifier started the move; keep pixel snap
-          }
-          canvasRef.current?.setPointerCapture(e.pointerId)
-        }
+        if (startMove(hit, raw, true)) canvasRef.current?.setPointerCapture(e.pointerId)
         return
       }
     }
@@ -654,6 +755,40 @@ export function EditorCanvas(): React.JSX.Element {
   }
 
   const onPointerMove = (e: RPointerEvent<HTMLCanvasElement>): void => {
+    {
+      // cell-coordinate readout + hover cursor (cheap, no React state unless it changes)
+      const rp = toCanvasRaw(e.clientX, e.clientY)
+      if (posRef.current) {
+        const inside = rp.x >= 0 && rp.y >= 0 && rp.x < w && rp.y < h
+        posRef.current.textContent = inside ? `${Math.floor(rp.x)} , ${Math.floor(rp.y)}` : ''
+      }
+      if (
+        e.buttons === 0 &&
+        !panning.current &&
+        !interaction.current &&
+        !drawing.current &&
+        tool === 'select'
+      ) {
+        let cur: string | null = null
+        const selSh = chart.shapes.find((s) => s.id === selectedId)
+        const hd = selSh ? findHandle(selSh, rp) : undefined
+        if (hd) {
+          cur =
+            hd.kind === 'corner'
+              ? hd.idx === 0 || hd.idx === 3
+                ? 'nwse-resize'
+                : 'nesw-resize'
+              : hd.kind === 'edge'
+                ? hd.dir === 'n' || hd.dir === 's'
+                  ? 'ns-resize'
+                  : 'ew-resize'
+                : 'pointer'
+        } else if (hitTest(rp)) {
+          cur = 'move'
+        }
+        if (cur !== cursorOv) setCursorOv(cur)
+      }
+    }
     if (panning.current) {
       const pan = panning.current
       userAdjusted.current = true
@@ -664,24 +799,48 @@ export function EditorCanvas(): React.JSX.Element {
       const it = interaction.current
       const raw = toCanvasRaw(e.clientX, e.clientY)
       const st = useStore.getState()
+      const tolA = 6 / viewRef.current.scale
       if (it.kind === 'move') {
         const free = it.forceSnap ? false : e.metaKey || e.altKey // Cmd/Opt = no pixel snap
         let dx = raw.x - it.sx
         let dy = raw.y - it.sy
-        if (!free) {
+        let gx: number | null = null
+        let gy: number | null = null
+        if (!free && snapToPixel && it.cand && it.sal) {
+          const r2 = snapMoveDelta(dx, dy, it.sal, it.cand, tolA)
+          dx = r2.dx
+          dy = r2.dy
+          gx = r2.gx
+          gy = r2.gy
+        } else if (!free) {
           dx = Math.round(dx)
           dy = Math.round(dy)
         }
+        guidesRef.current = { x: gx, y: gy }
         st.setShapePoints(it.id, it.orig.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })))
         return
       }
       if (it.kind === 'end') {
         // pull a painted run's end: regenerate a straight dot run from the fixed end
         let cell = toCell(e.clientX, e.clientY)
+        let gx: number | null = null
+        let gy: number | null = null
         if (e.shiftKey) {
           const sn = axisSnap(it.anchor, cell)
           cell = { x: clamp(sn.x, 0, w - 1), y: clamp(sn.y, 0, h - 1) }
+        } else if (snapToPixel && !(e.metaKey || e.altKey)) {
+          // soft snaps: align to other shapes first, then gently towards H/V/45°
+          if (it.cand) {
+            const sx2 = snap1D(cell.x + 0.5, it.cand.xs, tolA, 0, 0, false)
+            const sy2 = snap1D(cell.y + 0.5, it.cand.ys, tolA, 0, 0, false)
+            gx = sx2.guide
+            gy = sy2.guide
+            cell = { x: Math.floor(sx2.v), y: Math.floor(sy2.v) }
+          }
+          cell = softAxis(it.anchor, cell, Math.max(1, Math.round(tolA)))
+          cell = { x: clamp(cell.x, 0, w - 1), y: clamp(cell.y, 0, h - 1) }
         }
+        guidesRef.current = { x: gx, y: gy }
         const pts: Point[] = []
         for (const c of [it.anchor, ...cellsBetween(it.anchor, cell)]) {
           const center = { x: c.x + 0.5, y: c.y + 0.5 }
@@ -692,15 +851,90 @@ export function EditorCanvas(): React.JSX.Element {
         return
       }
       const free = e.metaKey || e.altKey
-      const np = free ? raw : { x: Math.round(raw.x), y: Math.round(raw.y) }
       const sh = st.chart.shapes.find((s) => s.id === it.id)
       if (!sh) return
       if (it.kind === 'vertex') {
+        let np = free ? raw : { x: Math.round(raw.x), y: Math.round(raw.y) }
+        let gx: number | null = null
+        let gy: number | null = null
+        if (!free && snapToPixel && it.cand) {
+          const sx2 = snap1D(raw.x, it.cand.xs, tolA, 10, 2, true)
+          const sy2 = snap1D(raw.y, it.cand.ys, tolA, 10, 2, true)
+          np = { x: sx2.v, y: sy2.v }
+          gx = sx2.guide
+          gy = sy2.guide
+        }
+        if (sh.type === 'line' && sh.points.length >= 2) {
+          const other = sh.points[it.idx === 0 ? sh.points.length - 1 : 0]
+          if (e.shiftKey) np = axisSnap(other, np)
+          else if (!free && snapToPixel) np = softAxis(other, np, Math.max(1, tolA))
+        }
+        guidesRef.current = { x: gx, y: gy }
         st.setShapePoints(it.id, sh.points.map((pt, i) => (i === it.idx ? np : pt)))
-      } else {
-        st.setShapePoints(it.id, [it.anchor, np]) // box reshape: opposite corner anchored
+        return
       }
-      return
+      if (it.kind === 'edge') {
+        const b = it.b
+        const p1 = { x: b.x, y: b.y }
+        const p2 = { x: b.x + b.w, y: b.y + b.h }
+        let gx: number | null = null
+        let gy: number | null = null
+        if (it.dir === 'e' || it.dir === 'w') {
+          let nx = free ? raw.x : Math.round(raw.x)
+          if (!free && snapToPixel && it.cand) {
+            const s2 = snap1D(raw.x, it.cand.xs, tolA, 10, 2, true)
+            nx = s2.v
+            gx = s2.guide
+          }
+          if (it.dir === 'e') p2.x = nx
+          else p1.x = nx
+        } else {
+          let ny = free ? raw.y : Math.round(raw.y)
+          if (!free && snapToPixel && it.cand) {
+            const s2 = snap1D(raw.y, it.cand.ys, tolA, 10, 2, true)
+            ny = s2.v
+            gy = s2.guide
+          }
+          if (it.dir === 's') p2.y = ny
+          else p1.y = ny
+        }
+        guidesRef.current = { x: gx, y: gy }
+        st.setShapePoints(it.id, [p1, p2])
+        return
+      }
+      // corner: opposite corner anchored; Shift keeps the original aspect ratio
+      {
+        let np = free ? raw : { x: Math.round(raw.x), y: Math.round(raw.y) }
+        let gx: number | null = null
+        let gy: number | null = null
+        if (!free && snapToPixel && it.cand) {
+          const sx2 = snap1D(raw.x, it.cand.xs, tolA, 10, 2, true)
+          const sy2 = snap1D(raw.y, it.cand.ys, tolA, 10, 2, true)
+          np = { x: sx2.v, y: sy2.v }
+          gx = sx2.guide
+          gy = sy2.guide
+        }
+        if (e.shiftKey && it.aspect > 0) {
+          const w2 = Math.abs(np.x - it.anchor.x)
+          const h2 = Math.abs(np.y - it.anchor.y)
+          if (w2 / it.aspect >= h2) {
+            np = {
+              x: np.x,
+              y: it.anchor.y + Math.sign(np.y - it.anchor.y || 1) * Math.round(w2 / it.aspect)
+            }
+          } else {
+            np = {
+              x: it.anchor.x + Math.sign(np.x - it.anchor.x || 1) * Math.round(h2 * it.aspect),
+              y: np.y
+            }
+          }
+          gx = null
+          gy = null
+        }
+        guidesRef.current = { x: gx, y: gy }
+        st.setShapePoints(it.id, [it.anchor, np])
+        return
+      }
     }
     if (drawing.current && tool === 'eraser') {
       const cell = toCell(e.clientX, e.clientY)
@@ -751,7 +985,20 @@ export function EditorCanvas(): React.JSX.Element {
     if (draft.type === 'freehand') {
       if (!mask || isDrawable(p)) setDraft((d) => (d ? { ...d, points: [...d.points, p] } : d))
     } else {
-      setDraft((d) => (d ? { ...d, points: [d.points[0], p] } : d))
+      let b2 = p
+      const a = draft.points[0]
+      if (e.shiftKey) {
+        if (draft.type === 'line') {
+          b2 = axisSnap(a, p) // straight: H / V / 45°
+        } else {
+          // square / circle / regular shape
+          const dx2 = p.x - a.x
+          const dy2 = p.y - a.y
+          const m = Math.max(Math.abs(dx2), Math.abs(dy2))
+          b2 = { x: a.x + Math.sign(dx2 || 1) * m, y: a.y + Math.sign(dy2 || 1) * m }
+        }
+      }
+      setDraft((d) => (d ? { ...d, points: [d.points[0], b2] } : d))
     }
   }
 
@@ -786,6 +1033,7 @@ export function EditorCanvas(): React.JSX.Element {
     }
     if (interaction.current) {
       interaction.current = null
+      guidesRef.current = { x: null, y: null }
       canvasRef.current?.releasePointerCapture(e.pointerId)
       return
     }
@@ -803,7 +1051,7 @@ export function EditorCanvas(): React.JSX.Element {
     }
   }
 
-  const cursor = spaceUi ? 'grab' : tool === 'select' ? 'default' : 'crosshair'
+  const cursor = spaceUi ? 'grab' : (cursorOv ?? (tool === 'select' ? 'default' : 'crosshair'))
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', flex: 1, overflow: 'hidden', background: C.canvas }}>
@@ -812,7 +1060,12 @@ export function EditorCanvas(): React.JSX.Element {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerLeave={() => {
+          if (posRef.current) posRef.current.textContent = ''
+          if (cursorOv) setCursorOv(null)
+        }}
         onDoubleClick={onDoubleClick}
+        onContextMenu={(e) => e.preventDefault()}
         style={{ display: 'block', width: '100%', height: '100%', cursor, touchAction: 'none' }}
       />
 
@@ -829,6 +1082,10 @@ export function EditorCanvas(): React.JSX.Element {
         <span style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, minWidth: 44, textAlign: 'center' }}>
           {Math.round(view.scale * 100)}%
         </span>
+        <span
+          ref={posRef}
+          style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, minWidth: 76 }}
+        />
         <button
           onClick={() => setSnap(!snapToPixel)}
           style={{

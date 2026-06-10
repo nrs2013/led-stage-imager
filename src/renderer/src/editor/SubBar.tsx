@@ -29,6 +29,12 @@ export function SubBar(): React.JSX.Element {
     applyChartImage(dataUrl, w, h)
   }
   const newChart = (): void => {
+    if (
+      chart.shapes.length > 0 &&
+      !window.confirm('現在の作品を閉じて新規にしますか？（保存していない変更は消えます）')
+    ) {
+      return
+    }
     setChart(createChart({ w: 1920, h: 1080 }))
     setStarted(false) // back to the doorway: drop a chart or pick a blank canvas
   }

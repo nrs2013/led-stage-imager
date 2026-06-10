@@ -32,7 +32,17 @@ interface AppState {
   mask: MaskData | null
   /** False until the user picks a doorway (chart image / blank / load); shows the start screen. */
   started: boolean
+  /** Undo/redo: snapshots of `chart` (immutable, so stacking references is cheap). */
+  history: Chart[]
+  future: Chart[]
+  histTag: string | null
+  histAt: number
 
+  /** Snapshot the chart before a mutation. Same `tag` within 600ms coalesces
+   *  (one undo step per drag gesture / arrow-key burst / scrub). */
+  beginHistory: (tag?: string) => void
+  undo: () => void
+  redo: () => void
   setStarted: (on: boolean) => void
   /** Loads a chart image: canvas snaps to the image's pixel size, the image becomes the
    *  underlay, and the mask defaults to "transparent hole = where decorations go" —
@@ -147,9 +157,49 @@ export const useStore = create<AppState>()((set, get) => ({
   snapToPixel: true,
   mask: null,
   started: initialStarted(),
+  history: [],
+  future: [],
+  histTag: null,
+  histAt: 0,
 
+  beginHistory: (tag) =>
+    set((s) => {
+      const now = Date.now()
+      if (tag && s.histTag === tag && now - s.histAt < 600) return { histAt: now }
+      return {
+        history: [...s.history.slice(-49), s.chart],
+        future: [],
+        histTag: tag ?? null,
+        histAt: now
+      }
+    }),
+  undo: () =>
+    set((s) => {
+      const prev = s.history[s.history.length - 1]
+      if (!prev) return {}
+      return {
+        chart: prev,
+        history: s.history.slice(0, -1),
+        future: [s.chart, ...s.future].slice(0, 50),
+        selectedId: null,
+        histTag: null
+      }
+    }),
+  redo: () =>
+    set((s) => {
+      const next = s.future[0]
+      if (!next) return {}
+      return {
+        chart: next,
+        future: s.future.slice(1),
+        history: [...s.history.slice(-49), s.chart],
+        selectedId: null,
+        histTag: null
+      }
+    }),
   setStarted: (started) => set({ started }),
-  applyChartImage: (dataUrl, w, h) =>
+  applyChartImage: (dataUrl, w, h) => {
+    get().beginHistory()
     set((s) => ({
       chart: {
         ...s.chart,
@@ -161,28 +211,33 @@ export const useStore = create<AppState>()((set, get) => ({
           mask: { enabled: true, invert: false }
         }
       }
-    })),
+    }))
+  },
   setChart: (chart) => set({ chart, selectedId: null }),
   setMode: (mode) => set({ mode }),
   setTool: (tool) => set({ tool }),
   select: (selectedId) => set({ selectedId }),
 
-  updateShape: (id, patch) =>
+  updateShape: (id, patch) => {
+    get().beginHistory(`upd-${id}`)
     set((s) => ({
       chart: {
         ...s.chart,
         shapes: s.chart.shapes.map((sh) => (sh.id === id ? { ...sh, ...patch } : sh))
       }
-    })),
+    }))
+  },
 
   addShape: (init) => {
+    get().beginHistory()
     const c2 = addShapeToChart(get().chart, init)
     const created = c2.shapes[c2.shapes.length - 1]
     set({ chart: c2, selectedId: created.id })
     return created.id
   },
 
-  removeShape: (id) =>
+  removeShape: (id) => {
+    get().beginHistory()
     set((s) => ({
       chart: {
         ...s.chart,
@@ -190,7 +245,8 @@ export const useStore = create<AppState>()((set, get) => ({
         fixtures: s.chart.fixtures.filter((f) => f.shapeId !== id)
       },
       selectedId: s.selectedId === id ? null : s.selectedId
-    })),
+    }))
+  },
 
   setUniverseData: (universe, data) =>
     set((s) => ({
@@ -198,14 +254,19 @@ export const useStore = create<AppState>()((set, get) => ({
       lastSeenByUniverse: { ...s.lastSeenByUniverse, [universe]: Date.now() }
     })),
 
-  setUnderlay: (underlay) => set((s) => ({ chart: { ...s.chart, underlay } })),
-  setUnderlayOpacity: (opacity) =>
+  setUnderlay: (underlay) => {
+    get().beginHistory()
+    set((s) => ({ chart: { ...s.chart, underlay } }))
+  },
+  setUnderlayOpacity: (opacity) => {
+    get().beginHistory('underlay-op')
     set((s) => ({
       chart: {
         ...s.chart,
         underlay: s.chart.underlay ? { ...s.chart.underlay, opacity } : null
       }
-    })),
+    }))
+  },
   setUnderlayVisible: (visible) =>
     set((s) => ({
       chart: {
@@ -214,7 +275,8 @@ export const useStore = create<AppState>()((set, get) => ({
       }
     })),
 
-  upsertFixture: (shapeId, patch) =>
+  upsertFixture: (shapeId, patch) => {
+    get().beginHistory(`fx-${shapeId}`)
     set((s) => {
       const existing = s.chart.fixtures.find((f) => f.shapeId === shapeId)
       if (existing) {
@@ -240,9 +302,11 @@ export const useStore = create<AppState>()((set, get) => ({
           shapes: s.chart.shapes.map((sh) => (sh.id === shapeId ? { ...sh, fixtureId: fx.id } : sh))
         }
       }
-    }),
+    })
+  },
 
-  removeFixture: (shapeId) =>
+  removeFixture: (shapeId) => {
+    get().beginHistory()
     set((s) => ({
       chart: {
         ...s.chart,
@@ -251,7 +315,8 @@ export const useStore = create<AppState>()((set, get) => ({
           sh.id === shapeId ? { ...sh, fixtureId: undefined } : sh
         )
       }
-    })),
+    }))
+  },
 
   setManualMode: (on) => set({ manualMode: on }),
   setManualColor: (fixtureId, rgb) =>
@@ -283,16 +348,19 @@ export const useStore = create<AppState>()((set, get) => ({
       }
     }),
   setMaskData: (m) => set({ mask: m }),
-  eraseCells: (keys) =>
+  eraseCells: (keys) => {
+    get().beginHistory('erase')
     set((s) => {
       const r = eraseCellsFromChart(s.chart, new Set(keys))
       if (!r.changed) return {}
       const selAlive = r.chart.shapes.some((sh) => sh.id === s.selectedId)
       return { chart: r.chart, selectedId: selAlive ? s.selectedId : null }
-    }),
+    })
+  },
   autoFill: (opts) => {
     const { mask } = get()
     if (!mask) return 0
+    get().beginHistory()
     const px = Math.max(1, Math.round(opts.pitchX))
     const py = Math.max(1, Math.round(opts.pitchY))
     const cap = 4000
@@ -329,7 +397,8 @@ export const useStore = create<AppState>()((set, get) => ({
     }))
     return newShapes.length
   },
-  nudgeShape: (id, dx, dy) =>
+  nudgeShape: (id, dx, dy) => {
+    get().beginHistory(`nudge-${id}`)
     set((s) => ({
       chart: {
         ...s.chart,
@@ -337,12 +406,14 @@ export const useStore = create<AppState>()((set, get) => ({
           sh.id === id ? { ...sh, points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : sh
         )
       }
-    })),
+    }))
+  },
   setShapePoints: (id, points) =>
     set((s) => ({
       chart: { ...s.chart, shapes: s.chart.shapes.map((sh) => (sh.id === id ? { ...sh, points } : sh)) }
     })),
-  duplicateShape: (id) =>
+  duplicateShape: (id) => {
+    get().beginHistory()
     set((s) => {
       const sh = s.chart.shapes.find((x) => x.id === id)
       if (!sh) return {}
@@ -362,6 +433,7 @@ export const useStore = create<AppState>()((set, get) => ({
       }
       return { chart: { ...s.chart, shapes: [...s.chart.shapes, copy], fixtures }, selectedId: nid }
     })
+  }
 }))
 
 // Test/debug hook: lets the browser preview drive the store (e.g. seed demo shapes).
