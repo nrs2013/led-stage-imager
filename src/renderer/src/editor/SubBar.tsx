@@ -19,6 +19,8 @@ export function SubBar(): React.JSX.Element {
   const applyChartImage = useStore((s) => s.applyChartImage)
   const setStarted = useStore((s) => s.setStarted)
   const maskEmpty = useStore((s) => s.maskEmpty)
+  const showDims = useStore((s) => s.showDims)
+  const setShowDims = useStore((s) => s.setShowDims)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fillOpen, setFillOpen] = useState(false)
   const u = chart.underlay
@@ -126,6 +128,13 @@ export function SubBar(): React.JSX.Element {
               Fill
             </button>
           )}
+          <button
+            style={{ ...buttonStyle({ active: showDims }), padding: '5px 10px' }}
+            onClick={() => setShowDims(!showDims)}
+            title="くり抜きの寸法線（X/Yのピクセル数）を表示"
+          >
+            Sizes
+          </button>
           {u.mask?.enabled && maskEmpty && (
             <span style={{ ...lbl, color: C.amber }}>
               この画像では描ける所が0 → 制限を解除中（Invert で反転を試して）

@@ -1,10 +1,18 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as RPointerEvent
+} from 'react'
 import { useStore } from '../state/store'
 import type { Point, Shape } from '../model/types'
 import { C, F } from '../ui/tokens'
 import { cornerBounds, traceShape, shapeArrayBounds, cellsBetween, type Bounds } from './geometry'
 import { buildCandidates, salientOf, snap1D, snapMoveDelta, softAxis, type SnapCand } from './snapping'
 import { cleanPaintStroke, regenChain } from './stroke-fit'
+import { findDrawableRegions, type Region } from './regions'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 
@@ -184,6 +192,12 @@ export function EditorCanvas(): React.JSX.Element {
   const snapToPixel = useStore((s) => s.snapToPixel)
   const setSnap = useStore((s) => s.setSnap)
   const mask = useStore((s) => s.mask)
+  const showDims = useStore((s) => s.showDims)
+  /** Punch-out islands of the chart (for the blueprint dimension labels). */
+  const regions = useMemo<Region[]>(
+    () => (mask ? findDrawableRegions(mask.bitmap, mask.w, mask.h) : []),
+    [mask]
+  )
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -509,6 +523,55 @@ export function EditorCanvas(): React.JSX.Element {
       ctx.setLineDash([])
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0)
+
+    // blueprint dimension lines on the chart's punch-out islands (screen-space text,
+    // editor-only — never part of the Syphon output)
+    if (showDims && regions.length) {
+      ctx.font = "10px 'JetBrains Mono', monospace"
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const arrow = (x1: number, y1: number, x2: number, y2: number): void => {
+        ctx.beginPath()
+        ctx.moveTo(x1, y1)
+        ctx.lineTo(x2, y2)
+        const a = Math.atan2(y2 - y1, x2 - x1)
+        for (const [ex, ey, ang] of [
+          [x1, y1, a],
+          [x2, y2, a + Math.PI]
+        ] as const) {
+          ctx.moveTo(ex + Math.cos(ang + 0.42) * 5, ey + Math.sin(ang + 0.42) * 5)
+          ctx.lineTo(ex, ey)
+          ctx.lineTo(ex + Math.cos(ang - 0.42) * 5, ey + Math.sin(ang - 0.42) * 5)
+        }
+        ctx.stroke()
+      }
+      const chip = (text: string, x: number, y: number): void => {
+        const tw = ctx.measureText(text).width
+        ctx.fillStyle = 'rgba(15,14,13,0.85)'
+        ctx.fillRect(x - tw / 2 - 4, y - 8, tw + 8, 16)
+        ctx.fillStyle = '#b8c8cf'
+        ctx.fillText(text, x, y)
+      }
+      ctx.strokeStyle = 'rgba(160,190,205,0.55)'
+      ctx.lineWidth = 1
+      for (const rg of regions) {
+        const sx0 = v.tx + rg.x * v.scale
+        const sy0 = v.ty + rg.y * v.scale
+        const sw2 = rg.w * v.scale
+        const sh2 = rg.h * v.scale
+        if (sx0 + sw2 < 0 || sy0 + sh2 < 0 || sx0 > cw || sy0 > ch) continue // offscreen
+        if (sw2 >= 46) {
+          const yLine = sy0 + Math.min(12, sh2 * 0.3)
+          arrow(sx0 + 1, yLine, sx0 + sw2 - 1, yLine)
+          chip(`${rg.w}`, sx0 + sw2 / 2, yLine)
+        }
+        if (sh2 >= 46) {
+          const xLine = sx0 + Math.min(12, sw2 * 0.3)
+          arrow(xLine, sy0 + 1, xLine, sy0 + sh2 - 1)
+          chip(`${rg.h}`, xLine, sy0 + sh2 / 2)
+        }
+      }
+    }
   }
 
   // schedule a draw after every render (rAF-coalesced)
