@@ -213,6 +213,22 @@ export function EditorCanvas(): React.JSX.Element {
     },
     []
   )
+  // live measurement badge near the cursor: X/Y spans, dot counts, W×H — updated
+  // imperatively (no React state) while drawing / pulling / resizing / moving
+  const measureRef = useRef<HTMLDivElement>(null)
+  const showMeasure = (e: { clientX: number; clientY: number }, text: string): void => {
+    const el = measureRef.current
+    const wr = wrapRef.current
+    if (!el || !wr) return
+    const r = wr.getBoundingClientRect()
+    el.style.display = 'block'
+    el.style.left = `${Math.min(e.clientX - r.left + 14, r.width - 160)}px`
+    el.style.top = `${Math.min(e.clientY - r.top + 18, r.height - 30)}px`
+    el.textContent = text
+  }
+  const hideMeasure = (): void => {
+    if (measureRef.current) measureRef.current.style.display = 'none'
+  }
   const scratchCtx = useRef<CanvasRenderingContext2D | null>(null)
   if (!scratchCtx.current && typeof document !== 'undefined') {
     scratchCtx.current = document.createElement('canvas').getContext('2d')
@@ -478,6 +494,7 @@ export function EditorCanvas(): React.JSX.Element {
         spaceHeld.current = true
         setSpaceUi(true)
       } else if (e.code === 'Escape') {
+        hideMeasure()
         if (draftRef.current) {
           setDraft(null)
           drawing.current = false
@@ -513,9 +530,15 @@ export function EditorCanvas(): React.JSX.Element {
         e.preventDefault()
         return
       }
-      // quick tool keys (industry-standard letters) + F = fit view
+      // quick tool keys (industry-standard letters) + F = fit + Z = one-key undo
       if (!e.metaKey && !e.ctrlKey && !e.altKey) {
         const k = e.key.toLowerCase()
+        if (k === 'z') {
+          if (e.shiftKey) st.redo()
+          else st.undo()
+          e.preventDefault()
+          return
+        }
         if (k === 'f') {
           fitRef.current()
           e.preventDefault()
@@ -868,6 +891,7 @@ export function EditorCanvas(): React.JSX.Element {
         }
         guidesRef.current = { x: gx, y: gy }
         st.setShapePoints(it.id, it.orig.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })))
+        showMeasure(e, `ΔX ${Math.round(dx)} · ΔY ${Math.round(dy)}`)
         return
       }
       if (it.kind === 'end') {
@@ -897,7 +921,15 @@ export function EditorCanvas(): React.JSX.Element {
           if (mask && !isDrawable(center)) break // stop at the chart's edge
           pts.push(center)
         }
-        if (pts.length) st.setShapePoints(it.id, pts.length === 1 ? [pts[0], pts[0]] : pts)
+        if (pts.length) {
+          st.setShapePoints(it.id, pts.length === 1 ? [pts[0], pts[0]] : pts)
+          const f0 = pts[0]
+          const f1 = pts[pts.length - 1]
+          showMeasure(
+            e,
+            `X ${Math.abs(Math.floor(f1.x) - Math.floor(f0.x)) + 1} · Y ${Math.abs(Math.floor(f1.y) - Math.floor(f0.y)) + 1} · ${pts.length} dots`
+          )
+        }
         return
       }
       const free = e.metaKey || e.altKey
@@ -921,6 +953,12 @@ export function EditorCanvas(): React.JSX.Element {
         }
         guidesRef.current = { x: gx, y: gy }
         st.setShapePoints(it.id, sh.points.map((pt, i) => (i === it.idx ? np : pt)))
+        if (sh.type === 'line' && sh.points.length >= 2) {
+          const other = sh.points[it.idx === 0 ? sh.points.length - 1 : 0]
+          const ddx = Math.abs(Math.round(np.x - other.x))
+          const ddy = Math.abs(Math.round(np.y - other.y))
+          showMeasure(e, `X ${ddx} · Y ${ddy} · L ${Math.round(Math.hypot(ddx, ddy))}`)
+        }
         return
       }
       if (it.kind === 'edge') {
@@ -950,6 +988,7 @@ export function EditorCanvas(): React.JSX.Element {
         }
         guidesRef.current = { x: gx, y: gy }
         st.setShapePoints(it.id, [p1, p2])
+        showMeasure(e, `W ${Math.abs(Math.round(p2.x - p1.x))} × H ${Math.abs(Math.round(p2.y - p1.y))}`)
         return
       }
       // corner: opposite corner anchored; Shift keeps the original aspect ratio
@@ -983,6 +1022,10 @@ export function EditorCanvas(): React.JSX.Element {
         }
         guidesRef.current = { x: gx, y: gy }
         st.setShapePoints(it.id, [it.anchor, np])
+        showMeasure(
+          e,
+          `W ${Math.abs(Math.round(np.x - it.anchor.x))} × H ${Math.abs(Math.round(np.y - it.anchor.y))}`
+        )
         return
       }
     }
@@ -1012,7 +1055,15 @@ export function EditorCanvas(): React.JSX.Element {
           pts.push(center)
         }
         lastCell.current = target
-        if (pts.length) setDraft((d) => (d ? { ...d, points: pts } : d))
+        if (pts.length) {
+          setDraft((d) => (d ? { ...d, points: pts } : d))
+          const f0 = pts[0]
+          const f1 = pts[pts.length - 1]
+          showMeasure(
+            e,
+            `X ${Math.abs(Math.floor(f1.x) - Math.floor(f0.x)) + 1} · Y ${Math.abs(Math.floor(f1.y) - Math.floor(f0.y)) + 1} · ${pts.length} dots`
+          )
+        }
         return
       }
       const last = lastCell.current
@@ -1024,6 +1075,25 @@ export function EditorCanvas(): React.JSX.Element {
       }
       lastCell.current = cell
       if (adds.length) setDraft((d) => (d ? { ...d, points: [...d.points, ...adds] } : d))
+      {
+        const d2 = draftRef.current
+        if (d2 && d2.points.length) {
+          let minX = Infinity
+          let maxX = -Infinity
+          let minY = Infinity
+          let maxY = -Infinity
+          for (const q of d2.points) {
+            if (q.x < minX) minX = q.x
+            if (q.x > maxX) maxX = q.x
+            if (q.y < minY) minY = q.y
+            if (q.y > maxY) maxY = q.y
+          }
+          showMeasure(
+            e,
+            `X ${Math.round(maxX - minX) + 1} · Y ${Math.round(maxY - minY) + 1} · ${d2.points.length} dots`
+          )
+        }
+      }
       return
     }
     const p = toCanvas(e.clientX, e.clientY)
@@ -1050,6 +1120,14 @@ export function EditorCanvas(): React.JSX.Element {
         }
       }
       setDraft((d) => (d ? { ...d, points: [d.points[0], b2] } : d))
+      if (d0.type === 'line') {
+        const ddx = Math.abs(Math.round(b2.x - a.x))
+        const ddy = Math.abs(Math.round(b2.y - a.y))
+        showMeasure(e, `X ${ddx} · Y ${ddy} · L ${Math.round(Math.hypot(ddx, ddy))}`)
+      } else {
+        const bb = cornerBounds(a, b2)
+        showMeasure(e, `W ${Math.round(bb.w)} × H ${Math.round(bb.h)}`)
+      }
     }
   }
 
@@ -1078,6 +1156,7 @@ export function EditorCanvas(): React.JSX.Element {
   }
 
   const onPointerUp = (e: RPointerEvent<HTMLCanvasElement>): void => {
+    hideMeasure()
     if (panning.current) {
       panning.current = null
       canvasRef.current?.releasePointerCapture(e.pointerId)
@@ -1116,6 +1195,7 @@ export function EditorCanvas(): React.JSX.Element {
         onPointerLeave={() => {
           if (posRef.current) posRef.current.textContent = ''
           if (cursorOv) setCursorOv(null)
+          hideMeasure()
         }}
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
@@ -1160,6 +1240,7 @@ export function EditorCanvas(): React.JSX.Element {
           ここは描けないエリアです（チャートの絵がある所）。Invert で反転 / Mask OFF で解除
         </div>
       )}
+      <div ref={measureRef} style={measureBadge} />
     </div>
   )
 }
@@ -1174,6 +1255,20 @@ const zoomBtn: React.CSSProperties = {
   fontFamily: "'Bebas Neue', sans-serif",
   letterSpacing: '0.08em',
   cursor: 'pointer'
+}
+const measureBadge: React.CSSProperties = {
+  position: 'absolute',
+  display: 'none',
+  pointerEvents: 'none',
+  background: 'rgba(15,14,13,0.92)',
+  border: `0.5px solid ${C.accent}`,
+  borderRadius: 4,
+  padding: '3px 8px',
+  fontSize: 11,
+  fontFamily: F.mono,
+  color: C.white,
+  whiteSpace: 'nowrap',
+  zIndex: 5
 }
 const hintStyle: React.CSSProperties = {
   position: 'absolute',

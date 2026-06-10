@@ -24,6 +24,13 @@ const api = {
     ipcRenderer.invoke('net:interfaces'),
   setBind: (ip: string): Promise<boolean> => ipcRenderer.invoke('net:bind', ip),
   getStatus: (): Promise<{ hasClients: boolean }> => ipcRenderer.invoke('engine:status'),
+  // Edit menu (Cmd+Z / Shift+Cmd+Z routed from the app menu)
+  onEditUndo: (cb: () => void): void => {
+    ipcRenderer.on('edit:undo', () => cb())
+  },
+  onEditRedo: (cb: () => void): void => {
+    ipcRenderer.on('edit:redo', () => cb())
+  },
   // Files
   saveChart: (json: string, name: string): Promise<string | null> =>
     ipcRenderer.invoke('chart:save', json, name),

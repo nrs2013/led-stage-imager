@@ -20,6 +20,8 @@ interface DecorApi {
   onPreviewActive?: (cb: (active: boolean) => void) => void
   sendChart?: (chart: unknown) => void
   onChartUpdate?: (cb: (chart: unknown) => void) => void
+  onEditUndo?: (cb: () => void) => void
+  onEditRedo?: (cb: () => void) => void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -61,6 +63,26 @@ function OutputApp(): React.JSX.Element {
   )
 }
 
+/** Cmd+Z / Shift+Cmd+Z arrive via the app menu (the default menu would swallow them).
+ *  Text fields keep their native undo; everywhere else it's the chart history. */
+function useMenuUndo(): void {
+  useEffect(() => {
+    const a = getApi()
+    const inText = (): boolean => {
+      const t = document.activeElement as HTMLElement | null
+      return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
+    }
+    a?.onEditUndo?.(() => {
+      if (inText()) document.execCommand('undo')
+      else useStore.getState().undo()
+    })
+    a?.onEditRedo?.(() => {
+      if (inText()) document.execCommand('redo')
+      else useStore.getState().redo()
+    })
+  }, [])
+}
+
 /** Dropping a file outside a drop zone must not navigate the window away. */
 function useDropGuard(): void {
   useEffect(() => {
@@ -82,6 +104,7 @@ function EditorApp(): React.JSX.Element {
   useMask()
   usePreviewMirror()
   useDropGuard()
+  useMenuUndo()
   if (mode === 'edit' && !started) {
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.canvas }}>

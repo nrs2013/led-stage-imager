@@ -1,9 +1,28 @@
 import { useStore } from '../state/store'
-import type { ChannelMode, DisplayMode } from '../model/types'
+import type { ChannelMode, DisplayMode, Shape } from '../model/types'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
 import { channelCount } from '../dmx/channel-math'
 import { addressAt, formatDmx } from '../dmx/address'
 import { NumberField } from '../ui/NumberField'
+import { shapeBounds } from './geometry'
+
+/** Human-readable size of a shape: spans, dot counts, lengths — diagonals included. */
+function sizeText(shape: Shape): string {
+  const b = shapeBounds(shape)
+  if (shape.type === 'freehand') {
+    const single =
+      shape.points.length === 2 &&
+      shape.points[0].x === shape.points[1].x &&
+      shape.points[0].y === shape.points[1].y
+    const dots = single ? 1 : shape.points.length
+    return `X ${Math.round(b.w) + 1} px · Y ${Math.round(b.h) + 1} px · ${dots} dots`
+  }
+  if (shape.type === 'line' || shape.type === 'polyline') {
+    const L = Math.round(Math.hypot(b.w, b.h))
+    return `X ${Math.round(b.w)} px · Y ${Math.round(b.h)} px · L ${L} px`
+  }
+  return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px`
+}
 
 const DISPLAY_MODES: DisplayMode[] = ['stroke', 'fill', 'both']
 const CHANNEL_MODES: { id: ChannelMode; label: string }[] = [
@@ -49,8 +68,11 @@ export function Inspector(): React.JSX.Element {
   return (
     <aside style={asideStyle}>
       <SectionTitle>Fixture</SectionTitle>
-      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, marginBottom: rowGap }}>
+      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, marginBottom: 6 }}>
         {shape.type.toUpperCase()} · {shape.id.slice(-6)}
+      </div>
+      <div style={{ fontFamily: F.mono, fontSize: 12, color: C.accent, marginBottom: rowGap }}>
+        {sizeText(shape)}
       </div>
 
       {/* display mode */}

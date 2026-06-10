@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, screen, Menu } from 'electron'
 import { join, extname } from 'path'
 import { readFileSync, writeFileSync } from 'fs'
 import { networkInterfaces } from 'os'
@@ -108,8 +108,40 @@ function createWindow(): void {
   }
 }
 
+/** App menu: Cmd+Z/Shift+Cmd+Z go to the app's own chart undo (the default Electron
+ *  menu would swallow them as text-editing undo and the editor would never see them).
+ *  Cut/Copy/Paste stay native roles so text fields keep working. */
+function buildMenu(): void {
+  const send = (ch: string): void => {
+    BrowserWindow.getFocusedWindow()?.webContents.send(ch)
+  }
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      {
+        label: 'Edit',
+        submenu: [
+          { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: (): void => send('edit:undo') },
+          {
+            label: 'Redo',
+            accelerator: 'Shift+CmdOrCtrl+Z',
+            click: (): void => send('edit:redo')
+          },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' }
+        ]
+      },
+      { role: 'windowMenu' }
+    ])
+  )
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.decor.studio')
+  buildMenu()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
