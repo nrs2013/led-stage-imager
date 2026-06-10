@@ -14,6 +14,7 @@ import { C, F, buttonStyle } from './tokens'
 export function StartScreen(): React.JSX.Element {
   const setStarted = useStore((s) => s.setStarted)
   const setChart = useStore((s) => s.setChart)
+  const setTool = useStore((s) => s.setTool)
   const applyChartImage = useStore((s) => s.applyChartImage)
   const [over, setOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -23,6 +24,7 @@ export function StartScreen(): React.JSX.Element {
       const { w, h } = await imageSize(dataUrl)
       if (w <= 0 || h <= 0) throw new Error('画像サイズを読めませんでした')
       applyChartImage(dataUrl, w, h)
+      setTool('pixelpen') // start painting right away
       setStarted(true)
     } catch (err) {
       setError('チャート画像を読み込めませんでした: ' + (err as Error).message)
@@ -74,6 +76,7 @@ export function StartScreen(): React.JSX.Element {
 
   const startBlank = (w: number, h: number): void => {
     setChart(createChart({ w, h }))
+    setTool('pixelpen')
     setStarted(true)
   }
 

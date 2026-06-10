@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPoi
 import { useStore } from '../state/store'
 import type { Point, Shape } from '../model/types'
 import { C, F } from '../ui/tokens'
-import { cornerBounds, traceShape, shapeArrayBounds } from './geometry'
+import { cornerBounds, traceShape, shapeArrayBounds, cellsBetween } from './geometry'
 
 const MIN_SIZE = 3
 const clamp = (n: number, lo: number, hi: number): number => (n < lo ? lo : n > hi ? hi : n)
@@ -18,6 +18,47 @@ interface View {
 }
 
 const isOpen = (t: Shape['type']): boolean => t === 'line' || t === 'polyline' || t === 'freehand'
+
+/** Two-corner box shapes: resized by dragging a bounding-box corner. */
+const BOXY = new Set<Shape['type']>(['rect', 'ellipse', 'triangle', 'star', 'polygon'])
+
+/** One pointer gesture on the canvas: move the whole shape, drag one vertex
+ *  (line/polyline), or drag a box corner against its fixed opposite corner. */
+type Interaction =
+  | { kind: 'move'; id: string; sx: number; sy: number; orig: Point[] }
+  | { kind: 'vertex'; id: string; idx: number }
+  | { kind: 'corner'; id: string; anchor: Point }
+
+interface Handle {
+  x: number
+  y: number
+  kind: 'vertex' | 'corner'
+  idx: number
+  anchor?: Point
+}
+
+/** Grabbable handles of a shape. Freehand strokes have none (move/delete/repaint). */
+function shapeHandles(sh: Shape): Handle[] {
+  if (sh.type === 'line' || sh.type === 'polyline') {
+    return sh.points.map((p, i) => ({ x: p.x, y: p.y, kind: 'vertex' as const, idx: i }))
+  }
+  if (BOXY.has(sh.type) && sh.points.length >= 2) {
+    const b = cornerBounds(sh.points[0], sh.points[sh.points.length - 1])
+    const corners = [
+      { x: b.x, y: b.y },
+      { x: b.x + b.w, y: b.y },
+      { x: b.x, y: b.y + b.h },
+      { x: b.x + b.w, y: b.y + b.h }
+    ]
+    return corners.map((c, i) => ({
+      ...c,
+      kind: 'corner' as const,
+      idx: i,
+      anchor: { x: 2 * b.x + b.w - c.x, y: 2 * b.y + b.h - c.y } // opposite corner stays put
+    }))
+  }
+  return []
+}
 
 /** Draws one shape (with its repeat array) in a given colour into the content buffer. */
 function drawShapeInto(ctx: CanvasRenderingContext2D, shape: Shape, stroke: string, fill: string): void {
@@ -63,7 +104,12 @@ export function EditorCanvas(): React.JSX.Element {
   viewRef.current = view
   const [draft, setDraft] = useState<{ type: DrawType; points: Point[] } | null>(null)
   const drawing = useRef(false)
-  const moving = useRef<{ id: string; sx: number; sy: number; orig: Point[] } | null>(null)
+  const interaction = useRef<Interaction | null>(null)
+  const lastCell = useRef<Point | null>(null)
+  const scratchCtx = useRef<CanvasRenderingContext2D | null>(null)
+  if (!scratchCtx.current && typeof document !== 'undefined') {
+    scratchCtx.current = document.createElement('canvas').getContext('2d')
+  }
   const panning = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
   const spaceHeld = useRef(false)
   const [spaceUi, setSpaceUi] = useState(false)
@@ -180,14 +226,20 @@ export function EditorCanvas(): React.JSX.Element {
     // draft preview + selection (content transform)
     ctx.setTransform(v.scale, 0, 0, v.scale, v.tx, v.ty)
     if (draft) {
-      const dShape: Shape = {
-        id: '__draft',
-        type: draft.type,
-        points: draft.points,
-        display: draft.type === 'rect' || draft.type === 'ellipse' ? 'both' : 'stroke',
-        strokeWidth: tool === 'pixelpen' ? 1 : 2
+      if (tool === 'pixelpen') {
+        // paint feel: every visited 1px cell fills in as you drag
+        ctx.fillStyle = C.accent
+        for (const pp of draft.points) ctx.fillRect(pp.x - 0.5, pp.y - 0.5, 1, 1)
+      } else {
+        const dShape: Shape = {
+          id: '__draft',
+          type: draft.type,
+          points: draft.points,
+          display: draft.type === 'rect' || draft.type === 'ellipse' ? 'both' : 'stroke',
+          strokeWidth: 2
+        }
+        drawShapeInto(ctx, dShape, C.accent, 'rgba(123,197,232,0.3)')
       }
-      drawShapeInto(ctx, dShape, C.accent, 'rgba(123,197,232,0.3)')
     }
     const sel = chart.shapes.find((s) => s.id === selectedId)
     if (sel) {
@@ -199,15 +251,14 @@ export function EditorCanvas(): React.JSX.Element {
       ctx.setLineDash([4 / v.scale, 3 / v.scale])
       ctx.strokeRect(b.x, b.y, b.w, b.h)
       ctx.setLineDash([])
+      // real grab handles: vertices (line/polyline) or box corners (rect etc.)
       const hs = 8 / v.scale
       ctx.fillStyle = C.accent
-      for (const c of [
-        { x: b.x, y: b.y },
-        { x: b.x + b.w, y: b.y },
-        { x: b.x, y: b.y + b.h },
-        { x: b.x + b.w, y: b.y + b.h }
-      ]) {
-        ctx.fillRect(c.x - hs / 2, c.y - hs / 2, hs, hs)
+      ctx.strokeStyle = '#0a0a0a'
+      ctx.lineWidth = 1 / v.scale
+      for (const hd of shapeHandles(sel)) {
+        ctx.fillRect(hd.x - hs / 2, hd.y - hs / 2, hs, hs)
+        ctx.strokeRect(hd.x - hs / 2, hd.y - hs / 2, hs, hs)
       }
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -372,8 +423,12 @@ export function EditorCanvas(): React.JSX.Element {
   }
   const toCanvas = (clientX: number, clientY: number): Point => {
     const p = toCanvasRaw(clientX, clientY)
-    const snap = snapToPixel || tool === 'pixelpen'
-    return snap ? { x: Math.round(p.x), y: Math.round(p.y) } : p
+    return snapToPixel ? { x: Math.round(p.x), y: Math.round(p.y) } : p
+  }
+  /** The 1px cell under the pointer (clamped to the canvas). */
+  const toCell = (clientX: number, clientY: number): Point => {
+    const p = toCanvasRaw(clientX, clientY)
+    return { x: clamp(Math.floor(p.x), 0, w - 1), y: clamp(Math.floor(p.y), 0, h - 1) }
   }
 
   const isDrawable = (p: Point): boolean => {
@@ -384,12 +439,30 @@ export function EditorCanvas(): React.JSX.Element {
     return mask.bitmap[yi * mask.w + xi] === 1
   }
 
+  /** Precise pick: distance to the actual stroke/fill (not just the bounding box),
+   *  so thin 1px lines are selectable without grabbing everything around them. */
   const hitTest = (p: Point): string | null => {
-    const tol = Math.max(3, 4 / view.scale)
+    const ctx = scratchCtx.current
+    const tol = Math.max(2, 6 / viewRef.current.scale)
     for (let i = chart.shapes.length - 1; i >= 0; i--) {
-      const b = shapeArrayBounds(chart.shapes[i])
-      if (p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol) {
-        return chart.shapes[i].id
+      const sh = chart.shapes[i]
+      const b = shapeArrayBounds(sh)
+      const pad = tol + (sh.strokeWidth || 1) / 2
+      if (p.x < b.x - pad || p.x > b.x + b.w + pad || p.y < b.y - pad || p.y > b.y + b.h + pad) {
+        continue
+      }
+      if (!ctx) return sh.id // no scratch context: fall back to the bounding box
+      const reps = sh.repeat && sh.repeat.count > 1 ? sh.repeat.count : 1
+      const rdx = sh.repeat?.dx ?? 0
+      const rdy = sh.repeat?.dy ?? 0
+      ctx.lineWidth = Math.max(sh.strokeWidth || 1, tol * 2)
+      ctx.lineJoin = 'round'
+      ctx.lineCap = 'round'
+      for (let r = 0; r < reps; r++) {
+        const q = { x: p.x - rdx * r, y: p.y - rdy * r }
+        traceShape(ctx, sh)
+        if (ctx.isPointInStroke(q.x, q.y)) return sh.id
+        if (!isOpen(sh.type) && sh.display !== 'stroke' && ctx.isPointInPath(q.x, q.y)) return sh.id
       }
     }
     return null
@@ -404,16 +477,49 @@ export function EditorCanvas(): React.JSX.Element {
     if (e.button !== 0) return
     const p = toCanvas(e.clientX, e.clientY)
     if (tool === 'select') {
-      const hit = hitTest(p)
+      const raw = toCanvasRaw(e.clientX, e.clientY)
+      // grab a handle of the already-selected shape first (resize/reshape)
+      const sel = chart.shapes.find((s) => s.id === selectedId)
+      if (sel) {
+        const tolH = 9 / viewRef.current.scale
+        const hd = shapeHandles(sel).find(
+          (hh) => Math.abs(hh.x - raw.x) <= tolH && Math.abs(hh.y - raw.y) <= tolH
+        )
+        if (hd) {
+          interaction.current =
+            hd.kind === 'vertex'
+              ? { kind: 'vertex', id: sel.id, idx: hd.idx }
+              : { kind: 'corner', id: sel.id, anchor: hd.anchor! }
+          canvasRef.current?.setPointerCapture(e.pointerId)
+          return
+        }
+      }
+      const hit = hitTest(toCanvasRaw(e.clientX, e.clientY))
       select(hit)
       if (hit) {
         const sh = chart.shapes.find((s) => s.id === hit)
         if (sh) {
-          const raw = toCanvasRaw(e.clientX, e.clientY)
-          moving.current = { id: hit, sx: raw.x, sy: raw.y, orig: sh.points.map((pp) => ({ ...pp })) }
+          interaction.current = {
+            kind: 'move',
+            id: hit,
+            sx: raw.x,
+            sy: raw.y,
+            orig: sh.points.map((pp) => ({ ...pp }))
+          }
           canvasRef.current?.setPointerCapture(e.pointerId)
         }
       }
+      return
+    }
+    if (tool === 'pixelpen') {
+      // paint: press fills the cell under the cursor, drag keeps filling
+      const cell = toCell(e.clientX, e.clientY)
+      const center = { x: cell.x + 0.5, y: cell.y + 0.5 }
+      if (mask && !isDrawable(center)) return
+      drawing.current = true
+      lastCell.current = cell
+      setDraft({ type: 'freehand', points: [center] })
+      canvasRef.current?.setPointerCapture(e.pointerId)
       return
     }
     if (mask && !isDrawable(p)) return
@@ -426,8 +532,7 @@ export function EditorCanvas(): React.JSX.Element {
       return
     }
     drawing.current = true
-    const dt: DrawType = tool === 'pixelpen' ? 'freehand' : (tool as DrawType)
-    setDraft({ type: dt, points: [p, p] })
+    setDraft({ type: tool as DrawType, points: [p, p] })
     canvasRef.current?.setPointerCapture(e.pointerId)
   }
 
@@ -438,21 +543,42 @@ export function EditorCanvas(): React.JSX.Element {
       setView((v) => ({ ...v, tx: pan.tx + (e.clientX - pan.x), ty: pan.ty + (e.clientY - pan.y) }))
       return
     }
-    if (moving.current) {
+    if (interaction.current) {
+      const it = interaction.current
       const raw = toCanvasRaw(e.clientX, e.clientY)
-      const free = e.metaKey || e.altKey // hold Cmd/Opt to move freely (no pixel snap)
-      let dx = raw.x - moving.current.sx
-      let dy = raw.y - moving.current.sy
-      if (!free) {
-        dx = Math.round(dx)
-        dy = Math.round(dy)
+      const free = e.metaKey || e.altKey // hold Cmd/Opt for free movement (no pixel snap)
+      const st = useStore.getState()
+      if (it.kind === 'move') {
+        let dx = raw.x - it.sx
+        let dy = raw.y - it.sy
+        if (!free) {
+          dx = Math.round(dx)
+          dy = Math.round(dy)
+        }
+        st.setShapePoints(it.id, it.orig.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })))
+        return
       }
-      useStore
-        .getState()
-        .setShapePoints(
-          moving.current.id,
-          moving.current.orig.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }))
-        )
+      const np = free ? raw : { x: Math.round(raw.x), y: Math.round(raw.y) }
+      const sh = st.chart.shapes.find((s) => s.id === it.id)
+      if (!sh) return
+      if (it.kind === 'vertex') {
+        st.setShapePoints(it.id, sh.points.map((pt, i) => (i === it.idx ? np : pt)))
+      } else {
+        st.setShapePoints(it.id, [it.anchor, np]) // box reshape: opposite corner anchored
+      }
+      return
+    }
+    if (drawing.current && tool === 'pixelpen' && draft) {
+      const cell = toCell(e.clientX, e.clientY)
+      const last = lastCell.current
+      if (!last || (cell.x === last.x && cell.y === last.y)) return
+      const adds: Point[] = []
+      for (const c of cellsBetween(last, cell)) {
+        const center = { x: c.x + 0.5, y: c.y + 0.5 }
+        if (!mask || isDrawable(center)) adds.push(center)
+      }
+      lastCell.current = cell
+      if (adds.length) setDraft((d) => (d ? { ...d, points: [...d.points, ...adds] } : d))
       return
     }
     const p = toCanvas(e.clientX, e.clientY)
@@ -474,10 +600,12 @@ export function EditorCanvas(): React.JSX.Element {
     const a = pts[0]
     const b = pts[pts.length - 1]
     if (draft.type === 'freehand') {
-      if (pts.length >= 2)
+      // a single painted dot is a valid shape (duplicate the point so the stroke renders)
+      const pp = pts.length === 1 ? [pts[0], pts[0]] : pts
+      if (pp.length >= 2)
         addShape({
           type: 'freehand',
-          points: pts,
+          points: pp,
           ...(tool === 'pixelpen' ? { strokeWidth: 1 } : {})
         })
     } else if (draft.type === 'line') {
@@ -495,8 +623,8 @@ export function EditorCanvas(): React.JSX.Element {
       canvasRef.current?.releasePointerCapture(e.pointerId)
       return
     }
-    if (moving.current) {
-      moving.current = null
+    if (interaction.current) {
+      interaction.current = null
       canvasRef.current?.releasePointerCapture(e.pointerId)
       return
     }

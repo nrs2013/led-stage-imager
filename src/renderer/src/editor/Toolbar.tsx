@@ -2,17 +2,65 @@ import { useEffect, useState } from 'react'
 import { useStore, type Tool } from '../state/store'
 import { C, F, buttonStyle } from '../ui/tokens'
 
-const TOOLS: { id: Tool; label: string }[] = [
-  { id: 'select', label: 'Select' },
-  { id: 'line', label: 'Line' },
-  { id: 'polyline', label: 'Poly-L' },
-  { id: 'freehand', label: 'Pen' },
-  { id: 'pixelpen', label: 'Pixel' },
-  { id: 'ellipse', label: 'Bulb' },
-  { id: 'triangle', label: 'Tri' },
-  { id: 'rect', label: 'Rect' },
-  { id: 'star', label: 'Star' },
-  { id: 'polygon', label: 'Poly' }
+/** Tool icons: the shape you click is the shape you draw next. */
+function ToolIcon({ id }: { id: Tool }): React.JSX.Element {
+  const s = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6 } as const
+  const body = ((): React.JSX.Element => {
+    switch (id) {
+      case 'select':
+        return <polygon points="4,2 12.5,8.7 8.1,9.4 10.3,13.8 8.4,14.7 6.3,10.3 4,12.6" fill="currentColor" stroke="none" />
+      case 'line':
+        return <line x1="2.5" y1="13.5" x2="13.5" y2="2.5" {...s} strokeLinecap="round" />
+      case 'polyline':
+        return <polyline points="2,13 5.5,4.5 9.5,10 14,3" {...s} strokeLinejoin="round" strokeLinecap="round" />
+      case 'freehand':
+        return <path d="M2 12 C 4.5 3.5, 8 14.5, 14 4.5" {...s} strokeLinecap="round" />
+      case 'pixelpen':
+        return (
+          <g fill="currentColor" stroke="none">
+            <rect x="1.5" y="11" width="3.4" height="3.4" />
+            <rect x="4.9" y="7.6" width="3.4" height="3.4" />
+            <rect x="8.3" y="4.2" width="3.4" height="3.4" />
+            <rect x="11.7" y="0.8" width="3.4" height="3.4" />
+          </g>
+        )
+      case 'ellipse':
+        return <circle cx="8" cy="8" r="5.6" {...s} />
+      case 'triangle':
+        return <polygon points="8,2.6 14,13.4 2,13.4" {...s} strokeLinejoin="round" />
+      case 'rect':
+        return <rect x="2.6" y="3.6" width="10.8" height="8.8" {...s} />
+      case 'star':
+        return (
+          <polygon
+            points="8,1.6 9.8,5.9 14.4,6.3 10.9,9.3 12,13.9 8,11.4 4,13.9 5.1,9.3 1.6,6.3 6.2,5.9"
+            {...s}
+            strokeWidth={1.3}
+            strokeLinejoin="round"
+          />
+        )
+      case 'polygon':
+        return <polygon points="8,1.9 13.3,5 13.3,11 8,14.1 2.7,11 2.7,5" {...s} strokeLinejoin="round" />
+    }
+  })()
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" style={{ display: 'block' }}>
+      {body}
+    </svg>
+  )
+}
+
+const TOOLS: { id: Tool; label: string; hint: string }[] = [
+  { id: 'select', label: 'Select', hint: '選択 / 移動 / 変形（四隅・点をドラッグ）' },
+  { id: 'line', label: 'Line', hint: '直線' },
+  { id: 'polyline', label: 'Poly Line', hint: '折れ線（クリックで角・ダブルクリックで確定）' },
+  { id: 'freehand', label: 'Pen', hint: 'なめらかな手描き' },
+  { id: 'pixelpen', label: 'Paint', hint: '1pxドット塗り（ドラッグで塗る）' },
+  { id: 'ellipse', label: 'Bulb', hint: '丸・電球' },
+  { id: 'triangle', label: 'Triangle', hint: '三角' },
+  { id: 'rect', label: 'Rect', hint: '四角' },
+  { id: 'star', label: 'Star', hint: '星' },
+  { id: 'polygon', label: 'Polygon', hint: '六角形' }
 ]
 
 interface PreviewApi {
@@ -71,10 +119,20 @@ export function Toolbar({
         {TOOLS.map((t) => (
           <button
             key={t.id}
-            style={buttonStyle({ active: tool === t.id })}
+            style={{
+              ...buttonStyle({ active: tool === t.id }),
+              width: 36,
+              height: 32,
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
             onClick={() => setTool(t.id)}
+            title={`${t.label} — ${t.hint}`}
+            aria-label={t.label}
           >
-            {t.label}
+            <ToolIcon id={t.id} />
           </button>
         ))}
       </div>

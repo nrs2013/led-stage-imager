@@ -137,6 +137,31 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
   }
 }
 
+/** 4-connected cell path from a to b (integer cells, Bresenham stairs — one axis per
+ *  step, no diagonal jumps), excluding a, including b. The pixel painter runs every
+ *  pointer sample through this so a fast drag still fills every dot on the way. */
+export function cellsBetween(a: Point, b: Point): Point[] {
+  const out: Point[] = []
+  const dx = Math.abs(b.x - a.x)
+  const dy = Math.abs(b.y - a.y)
+  const sx = b.x > a.x ? 1 : -1
+  const sy = b.y > a.y ? 1 : -1
+  let x = a.x
+  let y = a.y
+  let err = dx - dy
+  while (x !== b.x || y !== b.y) {
+    if (x !== b.x && (y === b.y || 2 * err > -dy)) {
+      err -= dy
+      x += sx
+    } else {
+      err += dx
+      y += sy
+    }
+    out.push({ x, y })
+  }
+  return out
+}
+
 /** Bounds of a shape including its repeat-array extent. */
 export function shapeArrayBounds(shape: Shape): Bounds {
   const b = shapeBounds(shape)
