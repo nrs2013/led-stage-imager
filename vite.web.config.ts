@@ -12,6 +12,9 @@ import { resolve } from 'path'
 // caller's cwd is (the preview tooling launches it from elsewhere).
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
+  // Relative base so the same build works at any subpath (e.g. nrs2013.github.io/decor-studio/).
+  base: './',
+  build: { outDir: resolve(__dirname, 'dist-web'), emptyOutDir: true },
   resolve: { alias: { '@renderer': resolve(__dirname, 'src/renderer/src') } },
   plugins: [
     react(),
