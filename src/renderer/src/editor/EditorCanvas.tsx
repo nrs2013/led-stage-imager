@@ -172,6 +172,8 @@ export function EditorCanvas(): React.JSX.Element {
   const selectedId = useStore((s) => s.selectedId)
   const selectedIds = useStore((s) => s.selectedIds)
   const select = useStore((s) => s.select)
+  const pasteArmed = useStore((s) => s.pasteArmed)
+  const clipboard = useStore((s) => s.clipboard)
   const addShape = useStore((s) => s.addShape)
   const snapToPixel = useStore((s) => s.snapToPixel)
   const setSnap = useStore((s) => s.setSnap)
@@ -217,6 +219,13 @@ export function EditorCanvas(): React.JSX.Element {
   /** Right-button press: becomes a context menu on click, a grab-move on drag. */
   const rcPending = useRef<{ id: string; x: number; y: number } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
+  /** Cursor position while paste mode is armed (the ghost preview follows it). */
+  const ghostPos = useRef<Point | null>(null)
+  useEffect(() => {
+    if (tool !== 'select' && useStore.getState().pasteArmed) {
+      useStore.getState().setPasteArmed(false) // leaving Select disarms paste mode
+    }
+  }, [tool])
   const posRef = useRef<HTMLSpanElement>(null)
   const [cursorOv, setCursorOv] = useState<string | null>(null)
   // "why didn't that draw?" toast — silent blocking is forbidden
@@ -443,6 +452,29 @@ export function EditorCanvas(): React.JSX.Element {
       ctx.stroke()
       ctx.setLineDash([])
     }
+    // paste-mode ghost: the clipboard follows the cursor, centred (whole-cell offset)
+    if (pasteArmed && clipboard && clipboard.shapes.length && ghostPos.current) {
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      for (const sh of clipboard.shapes) {
+        const b = shapeArrayBounds(sh)
+        minX = Math.min(minX, b.x)
+        minY = Math.min(minY, b.y)
+        maxX = Math.max(maxX, b.x + b.w)
+        maxY = Math.max(maxY, b.y + b.h)
+      }
+      const gdx = Math.round(ghostPos.current.x - (minX + maxX) / 2)
+      const gdy = Math.round(ghostPos.current.y - (minY + maxY) / 2)
+      ctx.save()
+      ctx.globalAlpha = 0.45
+      ctx.translate(gdx, gdy)
+      for (const sh of clipboard.shapes) {
+        drawShapeInto(ctx, sh, C.accent, 'rgba(123,197,232,0.2)', boostRef.current)
+      }
+      ctx.restore()
+    }
     // rubber-band rectangle
     const mq = marquee.current
     if (mq) {
@@ -537,11 +569,14 @@ export function EditorCanvas(): React.JSX.Element {
       } else if (e.code === 'Escape') {
         hideMeasure()
         setCtxMenu(null)
-        if (draftRef.current) {
+        const stp = useStore.getState()
+        if (stp.pasteArmed) {
+          stp.setPasteArmed(false) // leave stamp mode first
+        } else if (draftRef.current) {
           setDraft(null)
           drawing.current = false
         } else {
-          useStore.getState().select(null) // Esc with nothing in progress = deselect
+          stp.select(null) // Esc with nothing in progress = deselect
         }
       }
     }
@@ -570,6 +605,22 @@ export function EditorCanvas(): React.JSX.Element {
         if (e.shiftKey) st.redo()
         else st.undo()
         e.preventDefault()
+        return
+      }
+      // copy / paste (browser path; the Mac app routes these via the app menu)
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'c' || e.key === 'C')) {
+        if (st.selectedIds.length) {
+          st.copySelection()
+          e.preventDefault()
+        }
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'V')) {
+        if (st.clipboard) {
+          st.setTool('select')
+          st.setPasteArmed(true)
+          e.preventDefault()
+        }
         return
       }
       // quick tool keys (industry-standard letters) + F = fit + Z = one-key undo
@@ -795,6 +846,10 @@ export function EditorCanvas(): React.JSX.Element {
     const p = toCanvas(e.clientX, e.clientY)
     if (tool === 'select') {
       const raw = toCanvasRaw(e.clientX, e.clientY)
+      if (pasteArmed) {
+        useStore.getState().pasteAt(raw) // stamp! stays armed for the next click
+        return
+      }
       // grab a handle of the already-selected shape first (resize/reshape/pull)
       const sel = chart.shapes.find((s) => s.id === selectedId)
       if (sel) {
@@ -932,6 +987,10 @@ export function EditorCanvas(): React.JSX.Element {
         }
         if (cur !== cursorOv) setCursorOv(cur)
       }
+    }
+    if (pasteArmed) {
+      ghostPos.current = toCanvasRaw(e.clientX, e.clientY)
+      drawRef.current()
     }
     if (rcPending.current && (e.buttons & 2) !== 0) {
       // right-drag past the threshold = grab & move (otherwise it stays a menu click)
@@ -1351,7 +1410,11 @@ export function EditorCanvas(): React.JSX.Element {
     }
   }
 
-  const cursor = spaceUi ? 'grab' : (cursorOv ?? (tool === 'select' ? 'default' : 'crosshair'))
+  const cursor = spaceUi
+    ? 'grab'
+    : pasteArmed
+      ? 'copy'
+      : (cursorOv ?? (tool === 'select' ? 'default' : 'crosshair'))
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', flex: 1, overflow: 'hidden', background: C.canvas }}>
@@ -1403,6 +1466,9 @@ export function EditorCanvas(): React.JSX.Element {
         <div style={hintStyle}>Click to add points · Double-click to finish · Esc to cancel</div>
       )}
       {spaceUi && <div style={hintStyle}>Space + drag to pan</div>}
+      {pasteArmed && (
+        <div style={hintStyle}>クリックでペースト（連続OK）· Esc で終了 · 番地はコピー元と同じ</div>
+      )}
       {blocked && (
         <div style={{ ...hintStyle, border: '0.5px solid #8a6a31', color: C.amber }}>
           ここは描けないエリアです（チャートの絵がある所）。Invert で反転 / Mask OFF で解除

@@ -22,6 +22,10 @@ interface DecorApi {
   onChartUpdate?: (cb: (chart: unknown) => void) => void
   onEditUndo?: (cb: () => void) => void
   onEditRedo?: (cb: () => void) => void
+  onEditCopy?: (cb: () => void) => void
+  onEditPaste?: (cb: () => void) => void
+  nativeCopy?: () => void
+  nativePaste?: () => void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -79,6 +83,21 @@ function useMenuUndo(): void {
     a?.onEditRedo?.(() => {
       if (inText()) document.execCommand('redo')
       else useStore.getState().redo()
+    })
+    a?.onEditCopy?.(() => {
+      if (inText()) a?.nativeCopy?.()
+      else useStore.getState().copySelection()
+    })
+    a?.onEditPaste?.(() => {
+      if (inText()) {
+        a?.nativePaste?.()
+      } else {
+        const st = useStore.getState()
+        if (st.clipboard) {
+          st.setTool('select')
+          st.setPasteArmed(true)
+        }
+      }
     })
   }, [])
 }

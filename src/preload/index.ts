@@ -24,13 +24,21 @@ const api = {
     ipcRenderer.invoke('net:interfaces'),
   setBind: (ip: string): Promise<boolean> => ipcRenderer.invoke('net:bind', ip),
   getStatus: (): Promise<{ hasClients: boolean }> => ipcRenderer.invoke('engine:status'),
-  // Edit menu (Cmd+Z / Shift+Cmd+Z routed from the app menu)
+  // Edit menu (Cmd+Z/C/V routed from the app menu so the canvas gets them)
   onEditUndo: (cb: () => void): void => {
     ipcRenderer.on('edit:undo', () => cb())
   },
   onEditRedo: (cb: () => void): void => {
     ipcRenderer.on('edit:redo', () => cb())
   },
+  onEditCopy: (cb: () => void): void => {
+    ipcRenderer.on('edit:copy', () => cb())
+  },
+  onEditPaste: (cb: () => void): void => {
+    ipcRenderer.on('edit:paste', () => cb())
+  },
+  nativeCopy: (): void => ipcRenderer.send('edit:native-copy'),
+  nativePaste: (): void => ipcRenderer.send('edit:native-paste'),
   // Files
   saveChart: (json: string, name: string): Promise<string | null> =>
     ipcRenderer.invoke('chart:save', json, name),

@@ -4,6 +4,7 @@ import { createChart, addShape as addShapeToChart, newId } from '../model/chart-
 import { eraseCellsFromChart } from '../model/erase'
 import { mergeRunCells, applyMerge } from '../model/merge-runs'
 import { regenChain } from '../editor/stroke-fit'
+import { shapeArrayBounds } from '../editor/geometry'
 import type { MaskData } from '../ui/mask'
 import { addressAt } from '../dmx/address'
 
@@ -67,6 +68,13 @@ interface AppState {
   /** 「1本に結合」: merges the selected painted runs into one chain (one fixture),
    *  bridging gaps with straight dot runs. */
   mergeShapes: (ids: string[]) => void
+  /** Stamp copy/paste: ⌘C snapshots the selection, ⌘V arms paste mode, every click
+   *  stamps a copy centred there (fixtures cloned with the same address). */
+  clipboard: { shapes: Shape[]; fixtures: Fixture[] } | null
+  pasteArmed: boolean
+  copySelection: () => void
+  setPasteArmed: (on: boolean) => void
+  pasteAt: (center: Point) => void
   updateShape: (id: string, patch: Partial<Shape>) => void
   addShape: (init: { type: Shape['type']; points: Shape['points'] } & Partial<Shape>) => string
   removeShape: (id: string) => void
@@ -174,6 +182,8 @@ export const useStore = create<AppState>()((set, get) => ({
   snapToPixel: true,
   mask: null,
   maskEmpty: false,
+  clipboard: null,
+  pasteArmed: false,
   started: initialStarted(),
   history: [],
   future: [],
@@ -270,6 +280,67 @@ export const useStore = create<AppState>()((set, get) => ({
       chart: applyMerge(s.chart, m.keepId, points, verts, m.dropIds),
       selectedId: m.keepId,
       selectedIds: [m.keepId]
+    }))
+  },
+  copySelection: () => {
+    const s = get()
+    const ids = new Set(s.selectedIds)
+    if (ids.size === 0) return
+    const shapes = s.chart.shapes
+      .filter((sh) => ids.has(sh.id))
+      .map((sh) => ({ ...sh, points: sh.points.map((p) => ({ ...p })) }))
+    const fixtures = s.chart.fixtures
+      .filter((f) => ids.has(f.shapeId))
+      .map((f) => ({ ...f }))
+    set({ clipboard: { shapes, fixtures } })
+  },
+  setPasteArmed: (pasteArmed) => set({ pasteArmed }),
+  pasteAt: (center) => {
+    const cb = get().clipboard
+    if (!cb || cb.shapes.length === 0) return
+    get().beginHistory()
+    // whole-cell offset keeps painted dots crisp on their .5 centres
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const sh of cb.shapes) {
+      const b = shapeArrayBounds(sh)
+      minX = Math.min(minX, b.x)
+      minY = Math.min(minY, b.y)
+      maxX = Math.max(maxX, b.x + b.w)
+      maxY = Math.max(maxY, b.y + b.h)
+    }
+    const dx = Math.round(center.x - (minX + maxX) / 2)
+    const dy = Math.round(center.y - (minY + maxY) / 2)
+    const idMap = new Map<string, string>()
+    const newShapes: Shape[] = cb.shapes.map((sh) => {
+      const nid = newId('shape')
+      idMap.set(sh.id, nid)
+      return {
+        ...sh,
+        id: nid,
+        points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+        fixtureId: undefined // wired below when the original was patched
+      }
+    })
+    const newFixtures: Fixture[] = []
+    for (const f of cb.fixtures) {
+      const shapeId = idMap.get(f.shapeId)
+      if (!shapeId) continue
+      const nf: Fixture = { ...f, id: newId('fx'), shapeId } // same address: lights together
+      newFixtures.push(nf)
+      const sh = newShapes.find((x) => x.id === shapeId)
+      if (sh) sh.fixtureId = nf.id
+    }
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        shapes: [...s.chart.shapes, ...newShapes],
+        fixtures: [...s.chart.fixtures, ...newFixtures]
+      },
+      selectedIds: newShapes.map((x) => x.id),
+      selectedId: newShapes.length === 1 ? newShapes[0].id : null
     }))
   },
 

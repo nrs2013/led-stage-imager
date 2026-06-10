@@ -129,8 +129,8 @@ function buildMenu(): void {
           },
           { type: 'separator' },
           { role: 'cut' },
-          { role: 'copy' },
-          { role: 'paste' },
+          { label: 'Copy', accelerator: 'CmdOrCtrl+C', click: (): void => send('edit:copy') },
+          { label: 'Paste', accelerator: 'CmdOrCtrl+V', click: (): void => send('edit:paste') },
           { role: 'selectAll' }
         ]
       },
@@ -158,6 +158,14 @@ app.whenReady().then(() => {
     const ext = extname(file).slice(1).toLowerCase()
     const mime = ext === 'jpg' ? 'jpeg' : ext
     return `data:image/${mime};base64,${readFileSync(file).toString('base64')}`
+  })
+
+  // Text fields need native clipboard ops (the menu items above are app-level).
+  ipcMain.on('edit:native-copy', () => {
+    BrowserWindow.getFocusedWindow()?.webContents.copy()
+  })
+  ipcMain.on('edit:native-paste', () => {
+    BrowserWindow.getFocusedWindow()?.webContents.paste()
   })
 
   // Live frames from the renderer -> Syphon.
