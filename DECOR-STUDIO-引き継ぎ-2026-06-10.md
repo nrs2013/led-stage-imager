@@ -9,14 +9,15 @@
 
 **Art-Net受信トラブルの診断中。** のむさんは「実装（本番運用）に向けて走りたい」状況。
 
-- 構成：**別のMac（送信側・ソフト名未確認）→ このMac（nomura-mini, アプリ受信側）** にArt-Netを送りたいが、**アプリの受信ランプが点かない**。
+- 構成：**別のMac（送信側＝grandMA系 onPC・のむさん回答2026-06-10）→ このMac（nomura-mini, アプリ受信側）** にArt-Netを送りたいが、**アプリの受信ランプが点かない**。
+- **🔴 まず大前提**：受信側は必ず **`.app`（DECOR STUDIO.app）** で動かす。**Webアドレス `nrs2013.github.io/decor-studio` はブラウザ＝UDP不可で Art-Net を絶対に受けない**（今回のむさんはここで一度ハマった）。起動：`open "~/Documents/decor-studio/dist/mac-arm64/DECOR STUDIO.app"`
 - **診断済みの事実（このMac側は全て正常）：**
   - アプリ（Electron）は起動して **UDP `*:6454` を待ち受け中**（lsofで確認済み）
   - macOSファイアウォール無効
   - このMacのIP：**en0 Ethernet = `192.168.1.171/24`**、**en1 USB-LAN = `10.229.81.229/24`**（**2.x.x.x は持っていない**）
   - **OSレベルの盗み聞き（12秒×2回・120秒・480秒）→ 受信パケット0個**＝信号がMacの玄関にすら来ていない。**アプリのバグではない。**
 - **容疑（有力順）：**
-  1. 送信側が**Art-Net初期値の `2.x.x.x` 網**で `2.255.255.255` に同報 → このMacは2.xを持たないのでOSが破棄
+  1. 送信側が**Art-Net初期値の `2.x.x.x` 網**で `2.255.255.255` に同報 → このMacは2.xを持たないのでOSが破棄（**grandMA は既定でこの 2.x 網になりがち**＝今回の本命。grandMA側でArt-Net出力の宛先IP・出力NIC・Universeを要確認）
   2. 送信側Macの **macOS「ローカルネットワーク」許可がOFF**（設定→プライバシーとセキュリティ→ローカルネットワーク→送信ソフトをON→ソフト再起動）
   3. 物理的に別の網（送信側がどの口・どの網に繋がっているか未確認）
 - **次の一手（ここから再開）：**
@@ -24,7 +25,7 @@
   2. その間に**送信側Mac**のターミナルで通り道テスト：`echo hello | nc -u -w1 192.168.1.171 6454` → 見張りに `HIT: from <送信側IP> non-artnet len=6` が出れば**道は通っている**（残りはソフト設定）。出なければ網違い。
   3. のむさんから未回収の情報：**①送信ソフト名 ②送信側MacのIP ③送信設定画面のスクショ**
 - **直し方（どちらか）：**
-  - **A（推奨）**: 送信側で送信先IP（Unicast）に `192.168.1.171` を直指定＋送信側自身のIPも同網（例 `192.168.1.200/255.255.255.0`）
+  - **A（推奨）**: 送信側で送信先IP（Unicast）に `192.168.1.171` を直指定＋送信側自身のIPも同網（例 `192.168.1.200/255.255.255.0`）。**grandMA3 onPC**: Menu→Network→DMX Protocols→Art-Net で出力ON・宛先・Universe・出力NICを設定／**MA2 onPC**: Setup→Network。送信側Macは**設定→プライバシーとセキュリティ→ローカルネットワーク**で卓ソフトをON＋ソフト再起動。
   - **B**: このMacに 2.x を追加（システム設定→ネットワーク→卓が繋がる口→詳細→TCP/IP→手入力 `2.0.0.100` / `255.0.0.0`）
 - 備考：受信ランプはユニバース不問で点く（届きさえすれば点灯）。盗み聞きツールはアプリと同居可能（reuseAddr）。ただしUnicast受信中はパケットを奪い合う可能性があるので、最終確認はツールを止めてアプリのランプで。
 
@@ -64,6 +65,7 @@
 
 - 偽の卓：`node tools/artnet-test-sender.mjs 0`（U0のch1=R/ch3=Bを脈打たせる・127.0.0.1宛）
 - 到達確認：`node tools/artnet-sniff.mjs [秒]`（本書 §0 参照）
+- 点呼（ArtPollで機器を炙り出す）：`node tools/artnet-poll.mjs`（返事は sniff 側に HIT で出る）
 - Syphon検証は自前クライアントで可能（過去の検証スクリプトの作り方は git log の M0/M3 コミット参照）
 - ブラウザでUI確認：`npm run dev:web`（port 5174）。Claude のプレビューMCPは `~/Documents` を読めないため、`npm run build` → `out/renderer` を `~/.claude/decor-preview/` にコピー → launch.json の `decor-web`（python3静的配信 :8771）を使う
 - モデル切替直後に Claude のコマンド実行が「classifier unavailable」で止まることがある→少し待って再試行
@@ -78,5 +80,26 @@
 
 > `~/Documents/decor-studio` の引き継ぎ書（DECOR-STUDIO-引き継ぎ-2026-06-10.md）を読んで。Art-Net受信トラブルの続きから（§0）。
 
+## 8. 別のMacで作業を始める（ゼロから・クローン）
+
+別のMacへ移して続ける場合。**リポジトリはPublic**なので認証なしでクローンできる。
+
+```
+git clone https://github.com/nrs2013/decor-studio.git ~/Documents/decor-studio
+cd ~/Documents/decor-studio
+npm install
+```
+
+- node-syphon のビルドに **Xcode Command Line Tools** が要る。未導入なら：`xcode-select --install`
+- 編集画面を動かす：`npm run dev`
+- **`.app` を作る**（Art-Net受信・Syphon出力の本番動作はこれ必須。gitに入らないので各Macで毎回ビルド）：
+```
+npm run build && npx electron-builder --dir
+open "dist/mac-arm64/DECOR STUDIO.app"
+```
+（未署名なので初回は右クリック→開く）
+- **本書 §0 のIP（`192.168.1.171` 等）は今のMac（nomura-mini）専用**。別Macでは `ipconfig getifaddr en0`（必要なら en1）で**その機体のIPを取り直して**読み替え、Art-Netの送信先・サブネットも合わせる。
+- 引き継ぎ・使い方・設計書（`docs/superpowers/`）は全部リポジトリ内。クローンすれば付いてくる。
+
 ---
-*2026-06-10 作成。前版（2026-06-08・実装前のもの）は歴史資料として残置。*
+*2026-06-10 作成（同日追記：別Mac立ち上げ手順＋送信ソフト=grandMA系の情報）。前版（2026-06-08・実装前のもの）は歴史資料として残置。*
