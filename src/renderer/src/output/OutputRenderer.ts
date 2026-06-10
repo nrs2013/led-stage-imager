@@ -6,9 +6,11 @@ import { cornerBounds, trianglePoints, starPoints, regularPolygonPoints } from '
 const ZEROS = new Uint8Array(512)
 
 /**
- * Draws the live output frame: every patched shape on a pure-black background, in its
- * resolved DMX colour, with an additive glow (shadowBlur + 'lighter' compositing). This is
- * exactly what gets published to Syphon — black stays invisible on a Resolume Add layer.
+ * Draws the live output frame: every patched shape on a transparent-black background
+ * (RGBA 0,0,0,0), in its resolved DMX colour, with additive 'lighter' compositing. This is
+ * exactly what gets published to Syphon — on a Resolume Add layer the background adds
+ * nothing (as before), and on a normal Alpha layer it is fully transparent, so both
+ * blend workflows work.
  *
  * Implementation note: Canvas 2D (shadowBlur) is used instead of a WebGL glow shader — far
  * simpler and visually equivalent for soft glow. Can be upgraded to WebGL later if needed.
@@ -34,11 +36,10 @@ export class OutputRenderer {
     if (this.canvas.height !== h) this.canvas.height = h
     const ctx = this.ctx
 
-    // black background (opaque)
+    // transparent-black background (0,0,0,0): invisible on Add AND on Alpha layers
     ctx.globalCompositeOperation = 'source-over'
     ctx.globalAlpha = 1
-    ctx.fillStyle = '#000'
-    ctx.fillRect(0, 0, w, h)
+    ctx.clearRect(0, 0, w, h)
 
     // map shape -> fixture for colour resolution
     const fxByShape = new Map<string, Fixture>()
@@ -70,7 +71,7 @@ export class OutputRenderer {
             gamma
           )
         }
-        if (rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0) continue // off -> stays black
+        if (rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0) continue // off -> stays transparent
         this.drawShape(shape, rgb, dx * i, dy * i)
       }
     }
@@ -96,9 +97,19 @@ export class OutputRenderer {
     ctx.globalAlpha = 1
   }
 
-  /** RGBA pixels of the current frame (tightly packed w*h*4). */
+  /** RGBA pixels of the current frame (tightly packed w*h*4), premultiplied by alpha —
+   *  the Syphon convention. Anti-aliased edges and bloom thus carry the same RGB an
+   *  opaque-black background produced, so Resolume Add layers look exactly as before. */
   readRGBA(): Uint8ClampedArray {
-    return this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data
+    const d = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data
+    for (let i = 0; i < d.length; i += 4) {
+      const a = d[i + 3]
+      if (a === 255 || a === 0) continue // opaque/empty: premultiply is a no-op
+      d[i] = (d[i] * a) / 255
+      d[i + 1] = (d[i + 1] * a) / 255
+      d[i + 2] = (d[i + 2] * a) / 255
+    }
+    return d
   }
 
   private drawShape(shape: Shape, rgb: RGB, ox = 0, oy = 0): void {

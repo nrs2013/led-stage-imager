@@ -28,7 +28,13 @@ interface AppState {
   manualByFixture: Record<string, [number, number, number]>
   snapToPixel: boolean
   mask: MaskData | null
+  /** False until the user picks a doorway (chart image / blank / load); shows the start screen. */
+  started: boolean
 
+  setStarted: (on: boolean) => void
+  /** Loads a chart image: canvas snaps to the image's pixel size, the image becomes the
+   *  underlay, and the mask defaults to "opaque = LED face = drawable" (invert ON). */
+  applyChartImage: (dataUrl: string, w: number, h: number) => void
   setChart: (c: Chart) => void
   setMode: (m: Mode) => void
   setTool: (t: Tool) => void
@@ -119,6 +125,11 @@ function initialChart(): Chart {
   return createChart({ w: 1920, h: 1080 })
 }
 
+/** Demo charts arrive pre-populated, so they skip the start screen. */
+function initialStarted(): boolean {
+  return typeof window !== 'undefined' && window.location.search.includes('demo')
+}
+
 export const useStore = create<AppState>()((set, get) => ({
   chart: initialChart(),
   mode: typeof window !== 'undefined' && window.location.search.includes('live') ? 'live' : 'edit',
@@ -130,7 +141,22 @@ export const useStore = create<AppState>()((set, get) => ({
   manualByFixture: {},
   snapToPixel: true,
   mask: null,
+  started: initialStarted(),
 
+  setStarted: (started) => set({ started }),
+  applyChartImage: (dataUrl, w, h) =>
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        canvas: { w, h },
+        underlay: {
+          dataUrl,
+          opacity: 0.5,
+          visible: true,
+          mask: { enabled: true, invert: true }
+        }
+      }
+    })),
   setChart: (chart) => set({ chart, selectedId: null }),
   setMode: (mode) => set({ mode }),
   setTool: (tool) => set({ tool }),

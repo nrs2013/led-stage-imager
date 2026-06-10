@@ -16,14 +16,14 @@
   - macOSファイアウォール無効
   - このMacのIP：**en0 Ethernet = `192.168.1.171/24`**、**en1 USB-LAN = `10.229.81.229/24`**（**2.x.x.x は持っていない**）
   - **OSレベルの盗み聞き（12秒×2回・120秒・480秒）→ 受信パケット0個**＝信号がMacの玄関にすら来ていない。**アプリのバグではない。**
-- **容疑（有力順）：**
-  1. 送信側が**Art-Net初期値の `2.x.x.x` 網**で `2.255.255.255` に同報 → このMacは2.xを持たないのでOSが破棄（**grandMA は既定でこの 2.x 網になりがち**＝今回の本命。grandMA側でArt-Net出力の宛先IP・出力NIC・Universeを要確認）
-  2. 送信側Macの **macOS「ローカルネットワーク」許可がOFF**（設定→プライバシーとセキュリティ→ローカルネットワーク→送信ソフトをON→ソフト再起動）
-  3. 物理的に別の網（送信側がどの口・どの網に繋がっているか未確認）
+  - **（6/10 14時台 追加診断）同じ網に送信側らしき `macbookpro` = `192.168.1.101` を発見・pingは通る**＝道は物理的に通っている（容疑「網違い」はほぼシロ）。**ArtPoll点呼（`tools/artnet-poll.mjs`）には全機無応答**＝送信ソフトの電波が出ていない。
+- **容疑（有力順・6/10更新）：**
+  1. 送信側Macの **macOS「ローカルネットワーク」許可がOFF**（pingは通るのにソフトの通信だけ出ない症状と完全一致＝本命。設定→プライバシーとセキュリティ→ローカルネットワーク→卓ソフトON→ソフト再起動）
+  2. grandMA出力設定（**既定の `2.x.x.x` 網のまま** → 宛先IPを `192.168.1.171` にUnicast直指定が必要。grandMA3 onPC: Menu→Network→DMX Protocols→Art-Net／MA2: Setup→Network）
+  3. onPCの動作環境問題：**仮想Windows（Parallels等）なら「ブリッジ接続」必須**（共有/NATだと外に出られない）。Windows実機ならWin側Firewall。
 - **次の一手（ここから再開）：**
-  1. このMacで見張り：`cd ~/Documents/decor-studio && node tools/artnet-sniff.mjs 120`
-  2. その間に**送信側Mac**のターミナルで通り道テスト：`echo hello | nc -u -w1 192.168.1.171 6454` → 見張りに `HIT: from <送信側IP> non-artnet len=6` が出れば**道は通っている**（残りはソフト設定）。出なければ網違い。
-  3. のむさんから未回収の情報：**①送信ソフト名 ②送信側MacのIP ③送信設定画面のスクショ**
+  1. のむさんに依頼済み（6/10）：①送信側のローカルネットワーク許可ON→再起動 ②宛先 `192.168.1.171` ③ダメなら送信側から `echo hello | nc -u -w1 192.168.1.171 6454` ④**onPCが動いている機体はどれか（Mac直？仮想Win？Windows機？）の回答待ち**
+  2. このMacで見張り：`cd ~/Documents/decor-studio && node tools/artnet-sniff.mjs 1800`（1発でも届けば即HIT表示）
 - **直し方（どちらか）：**
   - **A（推奨）**: 送信側で送信先IP（Unicast）に `192.168.1.171` を直指定＋送信側自身のIPも同網（例 `192.168.1.200/255.255.255.0`）。**grandMA3 onPC**: Menu→Network→DMX Protocols→Art-Net で出力ON・宛先・Universe・出力NICを設定／**MA2 onPC**: Setup→Network。送信側Macは**設定→プライバシーとセキュリティ→ローカルネットワーク**で卓ソフトをON＋ソフト再起動。
   - **B**: このMacに 2.x を追加（システム設定→ネットワーク→卓が繋がる口→詳細→TCP/IP→手入力 `2.0.0.100` / `255.0.0.0`）
@@ -36,8 +36,13 @@
 ## 2. 到達点（全部実装・検証済み）
 
 - **M0〜M7 完了**：Art-Net受信／Syphon出力（自前Syphonクライアントでピクセル検証済み）／SVG→Canvas編集／Inspector／Patch表／全画面プレビュー窓／Programmer（手動テスト）／保存・読込／`.app` 化（`dist/mac-arm64/DECOR STUDIO.app`・背面スロットリング対策済み）
-- **精密化 A〜D 完了**：ズーム64x・1px/10pxグリッド・1px吸着・クリスプ／反復アレイ＋連番採番（`Shape.repeat`+`Fixture.addressStep`、512跨ぎは `dmx/address.ts addressAt`）／アルファPNGマスク（透明=描画領域・反転可）＋自動敷き詰め `autoFill`（上限4000）／ピクセルペン／編集Canvas化（数千要素OK・1280セル検証済み）
-- **テスト**：`npm test` 17本（純ロジック）。型 `npm run typecheck`。
+- **精密化 A〜D 完了**：ズーム64x・1px/10pxグリッド・1px吸着・クリスプ／反復アレイ＋連番採番（`Shape.repeat`+`Fixture.addressStep`、512跨ぎは `dmx/address.ts addressAt`）／アルファPNGマスク＋自動敷き詰め `autoFill`（上限4000）／ピクセルペン／編集Canvas化（数千要素OK・1280セル検証済み）
+- **チャート主導ワークフロー（6/10 のむさん相談→同日実装・ブラウザ検証済み）**：
+  - **スタート画面**＝正面玄関（`ui/StartScreen.tsx`）。チャート画像（LED面の図面）をD&D/クリックで読み込むと**キャンバスが画像の等倍ピクセルに自動設定**＋下絵＋Mask既定ON。逃げ道として Blank 1920×1080 / 3840×2160。`.decor.json` のドロップでも開ける。SubBar の New は玄関に戻る。
+  - **ピクセル規約（確定）**：**透明＝無いもの／不透明＝LED面（電飾を描ける場所）**＝ `mask.invert: true` 既定。アルファ無し画像（JPG等）は**黒判定救済**（`ui/mask.ts isEmptyPixel`、r+g+b<72=無し）。旧作品（透明=描画領域・invert無し）はそのまま開ける。
+  - **出力の透明化**：背景は**透明黒 (0,0,0,0)**＋Syphon送出は**premultiplied**（`OutputRenderer.readRGBA`）→ Resolume **Addは従来と完全一致**・**Alpha合成も新たに可能**に。
+  - SubBar の Background ボタンは **Chart** に改名（読み込みでキャンバス追従）。
+- **テスト**：`npm test` 19本（純ロジック）。型 `npm run typecheck`。
 
 ## 3. 確定済みの方針（変えない）
 
@@ -73,7 +78,7 @@
 ## 6. 残タスク
 
 1. **【進行中】Art-Net受信トラブル**（§0の手順から再開）
-2. **【本番Macで】Resolume最終目視**：`DECOR_QUERY='live&demo' npm run dev`＋偽の卓→ResolumeのSyphonソースに「DECOR STUDIO」→**Addで黒が消えて電飾だけ乗る**ことを確認（M0からの唯一の積み残し）
+2. **【本番Macで】Resolume最終目視**：`DECOR_QUERY='live&demo' npm run dev`＋偽の卓→ResolumeのSyphonソースに「DECOR STUDIO」→**Addで黒が消えて電飾だけ乗る**ことを確認（M0からの唯一の積み残し）。**追加確認**：出力が透明化されたので**Alpha合成でも抜けるか**・グロウのフチの見え方も目視。
 3. （任意）UI磨き：複数選択・整列、スクラブ感度調整など
 
 ## 7. 次チャットの始め方（のむさんがコピペ）
@@ -102,4 +107,4 @@ open "dist/mac-arm64/DECOR STUDIO.app"
 - 引き継ぎ・使い方・設計書（`docs/superpowers/`）は全部リポジトリ内。クローンすれば付いてくる。
 
 ---
-*2026-06-10 作成（同日追記：別Mac立ち上げ手順＋送信ソフト=grandMA系の情報）。前版（2026-06-08・実装前のもの）は歴史資料として残置。*
+*2026-06-10 作成（同日追記1：別Mac立ち上げ手順＋送信ソフト=grandMA系の情報／追記2：チャート主導ワークフロー実装＋出力透明化＋Art-Net追加診断。「別Macに移した」騒動はMACアドレス照合で同一機=nomura-miniと判明）。前版（2026-06-08・実装前のもの）は歴史資料として残置。*

@@ -15,8 +15,20 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Builds a drawable-area mask from an (alpha) PNG, scaled to the canvas size.
- * By default the transparent pixels are the drawable area; `invert` flips that.
+ * "Nothing there" test for one chart pixel. Alpha images: transparent = empty.
+ * Images without a usable alpha channel (JPG, flattened PNG): near-black = empty,
+ * so a black-background chart still yields the LED faces.
+ */
+export function isEmptyPixel(r: number, g: number, b: number, a: number, hasAlpha: boolean): boolean {
+  if (hasAlpha) return a < 128
+  return r + g + b < 72 // ≈24/channel: tolerates compression noise in "black"
+}
+
+/**
+ * Builds a drawable-area mask from a chart image, scaled to the canvas size.
+ * Empty pixels (transparent — or near-black when the image has no alpha) are the
+ * drawable area by default; `invert` flips that. The chart workflow loads images with
+ * invert ON, i.e. the visible/opaque LED faces are where decorations may be drawn.
  * Also returns an overlay image that shades the non-drawable area for the editor.
  */
 export async function computeMask(
@@ -36,6 +48,14 @@ export async function computeMask(
   ctx.drawImage(img, 0, 0, w, h)
   const src = ctx.getImageData(0, 0, w, h).data
 
+  let hasAlpha = false
+  for (let i = 0; i < w * h; i++) {
+    if (src[i * 4 + 3] < 250) {
+      hasAlpha = true
+      break
+    }
+  }
+
   const bitmap = new Uint8Array(w * h)
   const ov = document.createElement('canvas')
   ov.width = w
@@ -46,8 +66,8 @@ export async function computeMask(
   const od = oimg.data
 
   for (let i = 0; i < w * h; i++) {
-    const a = src[i * 4 + 3]
-    const drawable = (a < 128) !== invert // transparent => drawable (unless inverted)
+    const empty = isEmptyPixel(src[i * 4], src[i * 4 + 1], src[i * 4 + 2], src[i * 4 + 3], hasAlpha)
+    const drawable = empty !== invert // empty => drawable (unless inverted)
     bitmap[i] = drawable ? 1 : 0
     if (!drawable) {
       od[i * 4] = 6

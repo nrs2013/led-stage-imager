@@ -2,32 +2,10 @@ import { useState } from 'react'
 import { useStore } from '../state/store'
 import { createChart, newId } from '../model/chart-model'
 import { saveChartToFile, openChartFromFile } from '../io/file-ops'
+import { pickImage, imageSize } from '../io/image-pick'
 import { SettingsDialog } from '../ui/SettingsDialog'
 import { FillDialog } from '../ui/FillDialog'
 import { C, F, buttonStyle } from '../ui/tokens'
-
-interface DecorApi {
-  openImage?: () => Promise<string | null>
-}
-
-async function pickImage(): Promise<string | null> {
-  const api = (window as unknown as { api?: DecorApi }).api
-  if (api?.openImage) return api.openImage()
-  return new Promise((resolve) => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    input.onchange = (): void => {
-      const file = input.files?.[0]
-      if (!file) return resolve(null)
-      const reader = new FileReader()
-      reader.onload = (): void => resolve(reader.result as string)
-      reader.onerror = (): void => resolve(null)
-      reader.readAsDataURL(file)
-    }
-    input.click()
-  })
-}
 
 const fileBtn = { ...buttonStyle({}), padding: '6px 11px', fontSize: 11 }
 
@@ -38,15 +16,22 @@ export function SubBar(): React.JSX.Element {
   const setUnderlayOpacity = useStore((s) => s.setUnderlayOpacity)
   const setUnderlayVisible = useStore((s) => s.setUnderlayVisible)
   const setUnderlayMask = useStore((s) => s.setUnderlayMask)
+  const applyChartImage = useStore((s) => s.applyChartImage)
+  const setStarted = useStore((s) => s.setStarted)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fillOpen, setFillOpen] = useState(false)
   const u = chart.underlay
 
   const loadUnderlay = async (): Promise<void> => {
     const dataUrl = await pickImage()
-    if (dataUrl) setUnderlay({ dataUrl, opacity: 0.5, visible: true })
+    if (!dataUrl) return
+    const { w, h } = await imageSize(dataUrl)
+    applyChartImage(dataUrl, w, h)
   }
-  const newChart = (): void => setChart(createChart({ w: chart.canvas.w, h: chart.canvas.h }))
+  const newChart = (): void => {
+    setChart(createChart({ w: 1920, h: 1080 }))
+    setStarted(false) // back to the doorway: drop a chart or pick a blank canvas
+  }
   const openChart = async (): Promise<void> => {
     try {
       const c = await openChartFromFile()
@@ -80,8 +65,12 @@ export function SubBar(): React.JSX.Element {
 
       <div style={sep} />
 
-      <button style={{ ...buttonStyle({}), padding: '6px 12px' }} onClick={loadUnderlay}>
-        Background
+      <button
+        style={{ ...buttonStyle({}), padding: '6px 12px' }}
+        onClick={loadUnderlay}
+        title="チャート画像を読み込む（キャンバスは画像のピクセル数に合わせ直されます）"
+      >
+        Chart
       </button>
 
       {u && (
@@ -108,7 +97,7 @@ export function SubBar(): React.JSX.Element {
           <button
             style={{ ...buttonStyle({ active: u.mask?.enabled ?? false }), padding: '5px 10px' }}
             onClick={() => setUnderlayMask({ enabled: !(u.mask?.enabled ?? false) })}
-            title="アルファPNGの透明部を描画領域にする（はみ出し禁止）"
+            title="チャートの絵がある所＝LED面だけ描けるようにする（はみ出し禁止）"
           >
             Mask
           </button>
@@ -116,7 +105,7 @@ export function SubBar(): React.JSX.Element {
             <button
               style={{ ...buttonStyle({ active: u.mask?.invert ?? false }), padding: '5px 10px' }}
               onClick={() => setUnderlayMask({ invert: !(u.mask?.invert ?? false) })}
-              title="描画領域を反転（不透明部を描画領域に）"
+              title="描画領域を反転（OFFにすると透明・黒い所が描画領域になります）"
             >
               Invert
             </button>

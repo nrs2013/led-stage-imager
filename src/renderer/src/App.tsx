@@ -6,6 +6,7 @@ import { Inspector } from './editor/Inspector'
 import { PatchTable } from './editor/PatchTable'
 import { LiveView } from './output/LiveView'
 import { StatusBar } from './ui/StatusBar'
+import { StartScreen } from './ui/StartScreen'
 import { ManualFaders } from './test/ManualFaders'
 import { useStore } from './state/store'
 import { useDmxBridge } from './state/dmx-bridge'
@@ -60,12 +61,35 @@ function OutputApp(): React.JSX.Element {
   )
 }
 
+/** Dropping a file outside a drop zone must not navigate the window away. */
+function useDropGuard(): void {
+  useEffect(() => {
+    const prevent = (e: DragEvent): void => e.preventDefault()
+    window.addEventListener('dragover', prevent)
+    window.addEventListener('drop', prevent)
+    return () => {
+      window.removeEventListener('dragover', prevent)
+      window.removeEventListener('drop', prevent)
+    }
+  }, [])
+}
+
 function EditorApp(): React.JSX.Element {
   const mode = useStore((s) => s.mode)
+  const started = useStore((s) => s.started)
   const [testOpen, setTestOpen] = useState(false)
   useDmxBridge()
   useMask()
   usePreviewMirror()
+  useDropGuard()
+  if (mode === 'edit' && !started) {
+    return (
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.canvas }}>
+        <StartScreen />
+        <StatusBar />
+      </div>
+    )
+  }
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.canvas }}>
       <Toolbar testOpen={testOpen} onToggleTest={() => setTestOpen((v) => !v)} />
