@@ -2,9 +2,8 @@ export interface MaskData {
   bitmap: Uint8Array // length w*h, 1 = drawable
   w: number
   h: number
-  overlay: string // data URL: shades the NON-drawable area for the editor
-  /** data URL: neutral grey under the DRAWABLE area, so transparent punch-outs read
-   *  clearly against dark artwork (Photoshop-checkerboard idea, but calm). */
+  /** data URL: neutral grey under the DRAWABLE area — THE boundary indicator
+   *  (transparent punch-outs read clearly against dark artwork). */
   holes: string
 }
 
@@ -33,7 +32,6 @@ export function isEmptyPixel(r: number, g: number, b: number, a: number, hasAlph
  * drawable area by default: the chart is show artwork with the decoration areas
  * punched out as transparent (or black) holes. `invert` flips that for materials
  * authored the other way around (LED faces drawn as opaque panels).
- * Also returns an overlay image that shades the non-drawable area for the editor.
  */
 export async function computeMask(
   dataUrl: string,
@@ -61,13 +59,6 @@ export async function computeMask(
   }
 
   const bitmap = new Uint8Array(w * h)
-  const ov = document.createElement('canvas')
-  ov.width = w
-  ov.height = h
-  const octx = ov.getContext('2d')
-  if (!octx) return null
-  const oimg = octx.createImageData(w, h)
-  const od = oimg.data
   const hv = document.createElement('canvas')
   hv.width = w
   hv.height = h
@@ -80,20 +71,13 @@ export async function computeMask(
     const empty = isEmptyPixel(src[i * 4], src[i * 4 + 1], src[i * 4 + 2], src[i * 4 + 3], hasAlpha)
     const drawable = empty !== invert // empty => drawable (unless inverted)
     bitmap[i] = drawable ? 1 : 0
-    if (!drawable) {
-      od[i * 4] = 6
-      od[i * 4 + 1] = 6
-      od[i * 4 + 2] = 8
-      od[i * 4 + 3] = 175 // shade non-drawable
-    } else {
-      od[i * 4 + 3] = 0
+    if (drawable) {
       hd[i * 4] = 70 // neutral grey under the drawable area: edges read clearly,
       hd[i * 4 + 1] = 70 // and no hue is added anywhere near the artwork
       hd[i * 4 + 2] = 76
       hd[i * 4 + 3] = 255
     }
   }
-  octx.putImageData(oimg, 0, 0)
   hctx.putImageData(himg, 0, 0)
-  return { bitmap, w, h, overlay: ov.toDataURL(), holes: hv.toDataURL() }
+  return { bitmap, w, h, holes: hv.toDataURL() }
 }

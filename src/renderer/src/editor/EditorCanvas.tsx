@@ -213,7 +213,6 @@ export function EditorCanvas(): React.JSX.Element {
     contentRef.current = document.createElement('canvas')
   }
   const underlayImg = useRef<HTMLImageElement | null>(null)
-  const maskImg = useRef<HTMLImageElement | null>(null)
   const holesImg = useRef<HTMLImageElement | null>(null)
   const contentDirty = useRef(true)
   const boostRef = useRef(1) // display-only min stroke width (recomputed per zoom bucket)
@@ -343,7 +342,6 @@ export function EditorCanvas(): React.JSX.Element {
       ctx.drawImage(underlayImg.current, 0, 0, w, h)
       ctx.globalAlpha = 1
     }
-    if (maskImg.current) ctx.drawImage(maskImg.current, 0, 0, w, h)
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
     chart.shapes.forEach((shape, i) =>
@@ -612,21 +610,6 @@ export function EditorCanvas(): React.JSX.Element {
     }
     img.src = url
   }, [chart.underlay?.dataUrl])
-  useEffect(() => {
-    const url = mask?.overlay
-    if (!url) {
-      maskImg.current = null
-      contentDirty.current = true
-      return
-    }
-    const img = new Image()
-    img.onload = (): void => {
-      maskImg.current = img
-      contentDirty.current = true
-      drawRef.current()
-    }
-    img.src = url
-  }, [mask?.overlay])
   useEffect(() => {
     const url = mask?.holes
     if (!url) {
