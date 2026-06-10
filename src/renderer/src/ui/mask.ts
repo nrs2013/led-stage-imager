@@ -3,6 +3,9 @@ export interface MaskData {
   w: number
   h: number
   overlay: string // data URL: shades the NON-drawable area for the editor
+  /** data URL: neutral grey under the DRAWABLE area, so transparent punch-outs read
+   *  clearly against dark artwork (Photoshop-checkerboard idea, but calm). */
+  holes: string
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -65,6 +68,13 @@ export async function computeMask(
   if (!octx) return null
   const oimg = octx.createImageData(w, h)
   const od = oimg.data
+  const hv = document.createElement('canvas')
+  hv.width = w
+  hv.height = h
+  const hctx = hv.getContext('2d')
+  if (!hctx) return null
+  const himg = hctx.createImageData(w, h)
+  const hd = himg.data
 
   for (let i = 0; i < w * h; i++) {
     const empty = isEmptyPixel(src[i * 4], src[i * 4 + 1], src[i * 4 + 2], src[i * 4 + 3], hasAlpha)
@@ -77,8 +87,13 @@ export async function computeMask(
       od[i * 4 + 3] = 175 // shade non-drawable
     } else {
       od[i * 4 + 3] = 0
+      hd[i * 4] = 70 // neutral grey under the drawable area: edges read clearly,
+      hd[i * 4 + 1] = 70 // and no hue is added anywhere near the artwork
+      hd[i * 4 + 2] = 76
+      hd[i * 4 + 3] = 255
     }
   }
   octx.putImageData(oimg, 0, 0)
-  return { bitmap, w, h, overlay: ov.toDataURL() }
+  hctx.putImageData(himg, 0, 0)
+  return { bitmap, w, h, overlay: ov.toDataURL(), holes: hv.toDataURL() }
 }

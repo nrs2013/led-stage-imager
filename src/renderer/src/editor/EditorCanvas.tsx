@@ -172,6 +172,7 @@ export function EditorCanvas(): React.JSX.Element {
   }
   const underlayImg = useRef<HTMLImageElement | null>(null)
   const maskImg = useRef<HTMLImageElement | null>(null)
+  const holesImg = useRef<HTMLImageElement | null>(null)
   const contentDirty = useRef(true)
   const boostRef = useRef(1) // display-only min stroke width (recomputed per zoom bucket)
 
@@ -262,6 +263,9 @@ export function EditorCanvas(): React.JSX.Element {
     ctx.fillStyle = '#000'
     ctx.fillRect(0, 0, w, h)
     const u = chart.underlay
+    // neutral grey under the drawable punch-outs (before the artwork, so the artwork
+    // itself is never tinted) — makes transparent holes readable on dark charts
+    if (holesImg.current) ctx.drawImage(holesImg.current, 0, 0, w, h)
     if (u?.visible && underlayImg.current) {
       ctx.globalAlpha = u.opacity
       ctx.drawImage(underlayImg.current, 0, 0, w, h)
@@ -446,6 +450,21 @@ export function EditorCanvas(): React.JSX.Element {
     }
     img.src = url
   }, [mask?.overlay])
+  useEffect(() => {
+    const url = mask?.holes
+    if (!url) {
+      holesImg.current = null
+      contentDirty.current = true
+      return
+    }
+    const img = new Image()
+    img.onload = (): void => {
+      holesImg.current = img
+      contentDirty.current = true
+      drawRef.current()
+    }
+    img.src = url
+  }, [mask?.holes])
 
   useLayoutEffect(() => {
     fit()
