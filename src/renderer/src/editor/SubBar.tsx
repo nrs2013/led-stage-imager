@@ -18,6 +18,7 @@ export function SubBar(): React.JSX.Element {
   const setUnderlayMask = useStore((s) => s.setUnderlayMask)
   const applyChartImage = useStore((s) => s.applyChartImage)
   const setStarted = useStore((s) => s.setStarted)
+  const maskEmpty = useStore((s) => s.maskEmpty)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fillOpen, setFillOpen] = useState(false)
   const u = chart.underlay
@@ -124,6 +125,11 @@ export function SubBar(): React.JSX.Element {
             >
               Fill
             </button>
+          )}
+          {u.mask?.enabled && maskEmpty && (
+            <span style={{ ...lbl, color: C.amber }}>
+              この画像では描ける所が0 → 制限を解除中（Invert で反転を試して）
+            </span>
           )}
           <div style={sep} />
           <button

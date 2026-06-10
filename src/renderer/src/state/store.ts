@@ -30,6 +30,9 @@ interface AppState {
   manualByFixture: Record<string, [number, number, number]>
   snapToPixel: boolean
   mask: MaskData | null
+  /** True when the mask was computed but had ZERO drawable cells (wrong-polarity
+   *  image): the restriction is auto-lifted and the UI shows why. */
+  maskEmpty: boolean
   /** False until the user picks a doorway (chart image / blank / load); shows the start screen. */
   started: boolean
   /** Undo/redo: snapshots of `chart` (immutable, so stacking references is cheap). */
@@ -72,6 +75,7 @@ interface AppState {
   setSnap: (on: boolean) => void
   setUnderlayMask: (patch: { enabled?: boolean; invert?: boolean }) => void
   setMaskData: (m: MaskData | null) => void
+  setMaskEmpty: (on: boolean) => void
   /** Erases the given 1px cells ("x,y" keys) out of painted strokes (splits as needed). */
   eraseCells: (keys: string[]) => void
   /** Auto-fill the masked drawable area with a grid of addressed cells; returns the count. */
@@ -156,6 +160,7 @@ export const useStore = create<AppState>()((set, get) => ({
   manualByFixture: {},
   snapToPixel: true,
   mask: null,
+  maskEmpty: false,
   started: initialStarted(),
   history: [],
   future: [],
@@ -348,6 +353,7 @@ export const useStore = create<AppState>()((set, get) => ({
       }
     }),
   setMaskData: (m) => set({ mask: m }),
+  setMaskEmpty: (maskEmpty) => set({ maskEmpty }),
   eraseCells: (keys) => {
     get().beginHistory('erase')
     set((s) => {

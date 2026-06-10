@@ -178,15 +178,40 @@ export function EditorCanvas(): React.JSX.Element {
   const [view, setView] = useState<View>({ scale: 0.4, tx: 40, ty: 40 })
   const viewRef = useRef(view)
   viewRef.current = view
-  const [draft, setDraft] = useState<{ type: DrawType; points: Point[] } | null>(null)
+  const [draft, setDraftState] = useState<{ type: DrawType; points: Point[] } | null>(null)
   const draftRef = useRef(draft)
-  draftRef.current = draft
+  /** Draft writes go through here: the ref is updated SYNCHRONOUSLY so gesture handlers
+   *  (move/commit) never see a stale draft, regardless of React's render timing. */
+  const setDraft = (
+    u:
+      | { type: DrawType; points: Point[] }
+      | null
+      | ((d: { type: DrawType; points: Point[] } | null) => { type: DrawType; points: Point[] } | null)
+  ): void => {
+    const next = typeof u === 'function' ? u(draftRef.current) : u
+    draftRef.current = next
+    setDraftState(next)
+  }
   const drawing = useRef(false)
   const interaction = useRef<Interaction | null>(null)
   const lastCell = useRef<Point | null>(null)
   const guidesRef = useRef<{ x: number | null; y: number | null }>({ x: null, y: null })
   const posRef = useRef<HTMLSpanElement>(null)
   const [cursorOv, setCursorOv] = useState<string | null>(null)
+  // "why didn't that draw?" toast — silent blocking is forbidden
+  const [blocked, setBlocked] = useState(false)
+  const blockedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showBlocked = (): void => {
+    setBlocked(true)
+    if (blockedTimer.current) clearTimeout(blockedTimer.current)
+    blockedTimer.current = setTimeout(() => setBlocked(false), 2800)
+  }
+  useEffect(
+    () => () => {
+      if (blockedTimer.current) clearTimeout(blockedTimer.current)
+    },
+    []
+  )
   const scratchCtx = useRef<CanvasRenderingContext2D | null>(null)
   if (!scratchCtx.current && typeof document !== 'undefined') {
     scratchCtx.current = document.createElement('canvas').getContext('2d')
@@ -733,14 +758,20 @@ export function EditorCanvas(): React.JSX.Element {
       // paint: press fills the cell under the cursor, drag keeps filling
       const cell = toCell(e.clientX, e.clientY)
       const center = { x: cell.x + 0.5, y: cell.y + 0.5 }
-      if (mask && !isDrawable(center)) return
+      if (mask && !isDrawable(center)) {
+        showBlocked() // never block silently
+        return
+      }
       drawing.current = true
       lastCell.current = cell
       setDraft({ type: 'freehand', points: [center] })
       canvasRef.current?.setPointerCapture(e.pointerId)
       return
     }
-    if (mask && !isDrawable(p)) return
+    if (mask && !isDrawable(p)) {
+      showBlocked() // never block silently
+      return
+    }
     if (tool === 'polyline') {
       setDraft((d) =>
         d && d.type === 'polyline'
@@ -945,13 +976,13 @@ export function EditorCanvas(): React.JSX.Element {
       useStore.getState().eraseCells(keys)
       return
     }
-    if (drawing.current && tool === 'pixelpen' && draft) {
+    if (drawing.current && tool === 'pixelpen' && draftRef.current) {
       const cell = toCell(e.clientX, e.clientY)
       if (e.shiftKey) {
         // Shift: one straight run (H / V / 45°) from where the stroke started
         const anchor = {
-          x: Math.floor(draft.points[0].x),
-          y: Math.floor(draft.points[0].y)
+          x: Math.floor(draftRef.current.points[0].x),
+          y: Math.floor(draftRef.current.points[0].y)
         }
         const sn = axisSnap(anchor, cell)
         const target = { x: clamp(sn.x, 0, w - 1), y: clamp(sn.y, 0, h - 1) }
@@ -977,18 +1008,19 @@ export function EditorCanvas(): React.JSX.Element {
       return
     }
     const p = toCanvas(e.clientX, e.clientY)
-    if (tool === 'polyline' && draft?.type === 'polyline') {
+    if (tool === 'polyline' && draftRef.current?.type === 'polyline') {
       setDraft((d) => (d ? { ...d, points: [...d.points.slice(0, -1), p] } : d))
       return
     }
-    if (!drawing.current || !draft) return
-    if (draft.type === 'freehand') {
+    const d0 = draftRef.current // always the latest draft (state can lag a frame)
+    if (!drawing.current || !d0) return
+    if (d0.type === 'freehand') {
       if (!mask || isDrawable(p)) setDraft((d) => (d ? { ...d, points: [...d.points, p] } : d))
     } else {
       let b2 = p
-      const a = draft.points[0]
+      const a = d0.points[0]
       if (e.shiftKey) {
-        if (draft.type === 'line') {
+        if (d0.type === 'line') {
           b2 = axisSnap(a, p) // straight: H / V / 45°
         } else {
           // square / circle / regular shape
@@ -1003,11 +1035,12 @@ export function EditorCanvas(): React.JSX.Element {
   }
 
   const commit = (): void => {
-    if (!draft) return
-    const pts = draft.points
+    const d0 = draftRef.current // never commit a stale draft (state can lag a frame)
+    if (!d0) return
+    const pts = d0.points
     const a = pts[0]
     const b = pts[pts.length - 1]
-    if (draft.type === 'freehand') {
+    if (d0.type === 'freehand') {
       // a single painted dot is a valid shape (duplicate the point so the stroke renders)
       const pp = pts.length === 1 ? [pts[0], pts[0]] : pts
       if (pp.length >= 2)
@@ -1016,11 +1049,11 @@ export function EditorCanvas(): React.JSX.Element {
           points: pp,
           ...(tool === 'pixelpen' ? { strokeWidth: 1 } : {})
         })
-    } else if (draft.type === 'line') {
+    } else if (d0.type === 'line') {
       if (dist(a, b) >= MIN_SIZE) addShape({ type: 'line', points: [a, b] })
     } else {
       const bnd = cornerBounds(a, b)
-      if (bnd.w >= MIN_SIZE || bnd.h >= MIN_SIZE) addShape({ type: draft.type, points: [a, b] })
+      if (bnd.w >= MIN_SIZE || bnd.h >= MIN_SIZE) addShape({ type: d0.type, points: [a, b] })
     }
     setDraft(null)
   }
@@ -1044,8 +1077,9 @@ export function EditorCanvas(): React.JSX.Element {
   }
 
   const onDoubleClick = (): void => {
-    if (draft?.type === 'polyline') {
-      const verts = draft.points.slice(0, -1)
+    const d0 = draftRef.current
+    if (d0?.type === 'polyline') {
+      const verts = d0.points.slice(0, -1)
       if (verts.length >= 2) addShape({ type: 'polyline', points: verts })
       setDraft(null)
     }
@@ -1102,6 +1136,11 @@ export function EditorCanvas(): React.JSX.Element {
         <div style={hintStyle}>Click to add points · Double-click to finish · Esc to cancel</div>
       )}
       {spaceUi && <div style={hintStyle}>Space + drag to pan</div>}
+      {blocked && (
+        <div style={{ ...hintStyle, border: '0.5px solid #8a6a31', color: C.amber }}>
+          ここは描けないエリアです（チャートの絵がある所）。Invert で反転 / Mask OFF で解除
+        </div>
+      )}
     </div>
   )
 }
