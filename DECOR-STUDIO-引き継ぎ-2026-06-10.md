@@ -99,6 +99,7 @@
   - **⌘早とちり修正（同日）**：⌘押下は`pendingCmdPaint`で保留し、**別セルへ動いた瞬間だけ**描き始める。⌘クリック（ドラッグ無し）＝通常クリック（線上=選択／空=位置マーク）。これでゴミ1〜2ドット線と選択フラッシュが消滅。
   - **ペーストは左上スタート**（真ん中合わせ→クリック点=コピー内容の左上に変更・ゴーストも同基準）。
   - **表示太さ補正の再修正**：scale≥1 は boost=1 固定（100%で1px線が2px表示されていた）。描画中ドット下書きも同じ表示幅に統一。
+- **Pixel線のカッチリ表示＋最寄り選択（6/10）**：塗り線（セル中心run）は**線描画をやめてマス目を1個ずつfillRect**（編集室＝`drawShapeInto`／出力＝`OutputRenderer.drawShape`、`geometry.isCellRun`で判定・重複セルは加算しない）→ **端の丸キャップのAAぼけが消えて最後のドットまでピクセル実色**（実測：端の輝度=中央と完全一致）。当たり判定は**「一番上」→「カーソルに最寄りの線」優先**（freehand=点距離・line/polyline=線分距離 `segDist`・箱系=面ヒット0扱い）→ 1px線が3px間隔でも狙い分け可能（実測済み）。
 - **書く太さ（penWidth・6/10）**：道具バーPIXEL島に**pxスクラブ欄**（1〜500・自由な数値）。Paintと**矢印の⌘描き**の両方がこの太さで書く（既定1px）。塗り中プレビューも同太さ。**太い塗り線でも角編集・端引っ張り・結合・消しゴムが効く**よう、painted run判定を「太さ≤1」から「全点がセル中心(.5)」に緩和（`isPaintedRun`/`merge-runs.isRun`）。
 - **MVR書き出し（6/10 のむさん要望「GDTFに書き出せる？」→MVRが正解と整理→実装・自動解凍検査済み）**：PatchTableに **Export MVR** ボタン。`io/mvr-export.ts` が `.mvr`（ZIP・STORE圧縮）を生成：`GeneralSceneDescription.xml`（全Fixture＝**反復アレイも1灯ずつ展開**・絶対番地 `universe*512+start`・チャート座標→mm配置 1px=10mm）＋同梱 `DECOR Cell.gdtf`（DMXモード4種: RGB/RGB Dim/Dim/RGBW Dim・ColorAdd_R/G/B/W+Dimmer属性）。**grandMA3 onPC で Import MVR するとパッチ＋配置が一括で入る**。Macアプリは保存ダイアログ（`mvr:save` IPC）、Web版はダウンロード。**MA3実機での取り込み確認は未実施**（次回送信側Macで要確認）。テスト58本（MVR解凍検査3本込み）。
 - **くり抜きの寸法線（6/10 のむさん相談→GO→実装・目視確認済み）**：チャートの透明くり抜きの**島を自動検出**（`editor/regions.ts` 連結成分・bbox・minArea4・最大200島）し、**図面風の寸法線**（上辺に←→とX値・左辺に↕とY値・画面基準10pxモノ字+チップ）を編集室にのみ表示。**画面上46px未満の辺は自動省略**（ズームで出現）。SubBar **Sizes** ボタンでON/OFF（既定ON・store `showDims`）。L字等の変形は外接箱の寸法。Syphon出力には乗らない。テスト52本。
@@ -141,9 +142,18 @@
 2. **【本番Macで】Resolume最終目視**：`DECOR_QUERY='live&demo' npm run dev`＋偽の卓→ResolumeのSyphonソースに「DECOR STUDIO」→**Addで黒が消えて電飾だけ乗る**ことを確認（M0からの唯一の積み残し）。**追加確認**：出力が透明化されたので**Alpha合成でも抜けるか**・グロウのフチの見え方も目視。
 3. （任意）UI磨き：複数選択・整列、スクラブ感度調整など
 
+## 6.5 配布の仕方（人に渡す）
+
+- **渡す物＝DMG 1ファイル**：`npm run build && npx electron-builder --mac dmg` → `dist/decor-studio-1.0.0.dmg`（約208MB・**Apple Silicon専用**。Intel Mac向けは別途 `--mac dmg --x64` が必要で node-syphon の対応要確認）。最新版をデスクトップに `DECOR-STUDIO-1.0.0.dmg` として配置済み。
+- 受け取った人：DMGを開いて .app をアプリケーションへドラッグ。**未署名なので初回起動はGatekeeperに止められる**（macOS Sequoia以降：ダブルクリック→「開けません」→**システム設定→プライバシーとセキュリティ→下の方の「このまま開く」**）。正式に署名・公証するには Apple Developer Program（年99ドル）加入が必要（やる時は別工事）。
+- 別PCのResolumeへ送る人にはNDISyphonも案内（玄関の折りたたみに手順あり）。
+
 ## 7. 次チャットの始め方（のむさんがコピペ）
 
-> `~/Documents/decor-studio` の引き継ぎ書（DECOR-STUDIO-引き継ぎ-2026-06-10.md）を読んで。Art-Net受信トラブルの続きから（§0）。
+> `~/Documents/decor-studio` の引き継ぎ書（DECOR-STUDIO-引き継ぎ-2026-06-10.md）を読んで。続きから。
+
+- **別のMacで初めて作業する時**は、先に §8 のクローン＆ビルド（ターミナルにコピペ3行＋ビルド2行）。リポは常に最新が push 済み。
+- 主な続きの候補：①Art-Net受信（§0/§0.5・grandMA3側の設定待ち）②本番構成テスト（NDISyphon→WindowsのArena・アルファ確認）③MVRのMA3実機取り込み確認 ④操作性の追加要望。
 
 ## 8. 別のMacで作業を始める（ゼロから・クローン）
 

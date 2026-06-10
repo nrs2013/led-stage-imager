@@ -1,7 +1,13 @@
 import type { Chart, Shape, Fixture } from '../model/types'
 import { fixtureColor, type RGB } from '../dmx/channel-math'
 import { addressAt, repeatCount } from '../dmx/address'
-import { cornerBounds, trianglePoints, starPoints, regularPolygonPoints } from '../editor/geometry'
+import {
+  cornerBounds,
+  trianglePoints,
+  starPoints,
+  regularPolygonPoints,
+  isCellRun
+} from '../editor/geometry'
 
 const ZEROS = new Uint8Array(512)
 
@@ -117,6 +123,25 @@ export class OutputRenderer {
     ctx.save()
     if (ox || oy) ctx.translate(ox, oy)
     const col = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`
+    // painted dot runs render as exact filled cells — pixel-solid to the very last
+    // dot (no anti-aliased round caps fading the ends)
+    if (isCellRun(shape)) {
+      ctx.fillStyle = col
+      const n = Math.max(1, Math.round(shape.strokeWidth || 1))
+      const off = Math.floor((n - 1) / 2)
+      let px = NaN
+      let py = NaN
+      for (const p of shape.points) {
+        const cx = Math.floor(p.x)
+        const cy = Math.floor(p.y)
+        if (cx === px && cy === py) continue // duplicated dot: don't double-add
+        px = cx
+        py = cy
+        ctx.fillRect(cx - off, cy - off, n, n)
+      }
+      ctx.restore()
+      return
+    }
     const open = shape.type === 'line' || shape.type === 'polyline' || shape.type === 'freehand'
     const doStroke = open || shape.display !== 'fill'
     const doFill = !open && shape.display !== 'stroke'

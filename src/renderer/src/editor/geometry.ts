@@ -137,6 +137,29 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
   }
 }
 
+/** A painted dot run: freehand whose points all sit on cell centres (x.5/y.5) —
+ *  these render as crisp filled cells, never as anti-aliased strokes. */
+export function isCellRun(shape: Shape): boolean {
+  return (
+    shape.type === 'freehand' &&
+    shape.points.length >= 1 &&
+    shape.points.every(
+      (p) => Math.abs((p.x % 1) - 0.5) < 1e-6 && Math.abs((p.y % 1) - 0.5) < 1e-6
+    )
+  )
+}
+
+/** Distance from point p to segment ab. */
+export function segDist(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
+  if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y)
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
+  t = t < 0 ? 0 : t > 1 ? 1 : t
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+}
+
 /** 4-connected cell path from a to b (integer cells, Bresenham stairs — one axis per
  *  step, no diagonal jumps), excluding a, including b. The pixel painter runs every
  *  pointer sample through this so a fast drag still fills every dot on the way. */

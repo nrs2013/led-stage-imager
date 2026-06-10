@@ -15,6 +15,8 @@ import {
   shapeArrayBounds,
   shapeIntersectsRect,
   cellsBetween,
+  isCellRun,
+  segDist,
   type Bounds
 } from './geometry'
 import { buildCandidates, salientOf, snap1D, snapMoveDelta, softAxis, type SnapCand } from './snapping'
@@ -82,17 +84,8 @@ interface Handle {
   dir?: 'n' | 's' | 'e' | 'w'
 }
 
-/** A painted dot run (any width): freehand whose points all sit on cell centres
- *  (x.5/y.5) — that's what distinguishes it from a smooth Pen stroke. */
-function isPaintedRun(sh: Shape): boolean {
-  return (
-    sh.type === 'freehand' &&
-    sh.points.length >= 1 &&
-    sh.points.every(
-      (p) => Math.abs((p.x % 1) - 0.5) < 1e-6 && Math.abs((p.y % 1) - 0.5) < 1e-6
-    )
-  )
-}
+/** A painted dot run (any width) — shared cell-centre test from geometry. */
+const isPaintedRun = isCellRun
 
 /** Grabbable handles of a shape. Painted runs expose their two ends (pull = re-aim /
  *  change length); smooth pen strokes have none (move/delete/repaint). */
@@ -156,7 +149,8 @@ function axisSnap(a: Point, c: Point): Point {
 
 /** Draws one shape (with its repeat array) in a given colour into the content buffer.
  *  `boost` is a display-only minimum width so 1px LED lines stay visible (and their
- *  colours readable) when zoomed far out — the real output is always the exact width. */
+ *  colours readable) when zoomed far out — the real output is always the exact width.
+ *  Painted dot runs render as exact filled cells (pixel-solid, no AA fade). */
 function drawShapeInto(
   ctx: CanvasRenderingContext2D,
   shape: Shape,
@@ -167,6 +161,26 @@ function drawShapeInto(
   const reps = shape.repeat && shape.repeat.count > 1 ? shape.repeat.count : 1
   const dx = shape.repeat?.dx ?? 0
   const dy = shape.repeat?.dy ?? 0
+  if (isCellRun(shape)) {
+    ctx.fillStyle = stroke
+    const n = Math.max(Math.round(shape.strokeWidth || 1), boost)
+    const off = Math.floor((n - 1) / 2)
+    for (let i = 0; i < reps; i++) {
+      const ox = dx * i
+      const oy = dy * i
+      let px = NaN
+      let py = NaN
+      for (const p of shape.points) {
+        const cx = Math.floor(p.x + ox)
+        const cy = Math.floor(p.y + oy)
+        if (cx === px && cy === py) continue
+        px = cx
+        py = cy
+        ctx.fillRect(cx - off, cy - off, n, n)
+      }
+    }
+    return
+  }
   const open = isOpen(shape.type)
   ctx.strokeStyle = stroke
   ctx.fillStyle = fill
@@ -860,33 +874,59 @@ export function EditorCanvas(): React.JSX.Element {
     return mask.bitmap[yi * mask.w + xi] === 1
   }
 
-  /** Precise pick: distance to the actual stroke/fill (not just the bounding box),
-   *  so thin 1px lines are selectable without grabbing everything around them. */
+  /** Precise pick, NEAREST-first: among everything within reach of the cursor the
+   *  closest stroke wins — so tightly packed 1px lines pick the one you aimed at,
+   *  not whichever is on top. */
   const hitTest = (p: Point): string | null => {
     const ctx = scratchCtx.current
     const tol = Math.max(2, 6 / viewRef.current.scale)
+    let best: string | null = null
+    let bd = Infinity
     for (let i = chart.shapes.length - 1; i >= 0; i--) {
       const sh = chart.shapes[i]
       const b = shapeArrayBounds(sh)
-      const pad = tol + (sh.strokeWidth || 1) / 2
+      const half = (sh.strokeWidth || 1) / 2
+      const pad = tol + half
       if (p.x < b.x - pad || p.x > b.x + b.w + pad || p.y < b.y - pad || p.y > b.y + b.h + pad) {
         continue
       }
-      if (!ctx) return sh.id // no scratch context: fall back to the bounding box
       const reps = sh.repeat && sh.repeat.count > 1 ? sh.repeat.count : 1
       const rdx = sh.repeat?.dx ?? 0
       const rdy = sh.repeat?.dy ?? 0
-      ctx.lineWidth = Math.max(sh.strokeWidth || 1, tol * 2)
-      ctx.lineJoin = 'round'
-      ctx.lineCap = 'round'
+      let d = Infinity
       for (let r = 0; r < reps; r++) {
         const q = { x: p.x - rdx * r, y: p.y - rdy * r }
-        traceShape(ctx, sh)
-        if (ctx.isPointInStroke(q.x, q.y)) return sh.id
-        if (!isOpen(sh.type) && sh.display !== 'stroke' && ctx.isPointInPath(q.x, q.y)) return sh.id
+        if (sh.type === 'freehand') {
+          for (const pt of sh.points) {
+            const dd = Math.hypot(pt.x - q.x, pt.y - q.y)
+            if (dd < d) d = dd
+          }
+        } else if (sh.type === 'line' || sh.type === 'polyline') {
+          for (let k = 1; k < sh.points.length; k++) {
+            const dd = segDist(q, sh.points[k - 1], sh.points[k])
+            if (dd < d) d = dd
+          }
+        } else if (ctx) {
+          // box shapes: in/near = distance 0 (they're area targets, not hairlines)
+          ctx.lineWidth = Math.max(sh.strokeWidth || 1, tol * 2)
+          ctx.lineJoin = 'round'
+          ctx.lineCap = 'round'
+          traceShape(ctx, sh)
+          if (
+            ctx.isPointInStroke(q.x, q.y) ||
+            (sh.display !== 'stroke' && ctx.isPointInPath(q.x, q.y))
+          ) {
+            d = 0
+          }
+        }
+      }
+      const reach = tol + half
+      if (d <= reach && d < bd - 1e-9) {
+        bd = d
+        best = sh.id
       }
     }
-    return null
+    return best
   }
 
   /** Nearest grabbable handle of a shape around p. The radius shrinks for small shapes
