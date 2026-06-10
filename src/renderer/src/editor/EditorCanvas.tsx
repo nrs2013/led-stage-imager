@@ -366,8 +366,9 @@ export function EditorCanvas(): React.JSX.Element {
     if (cv.height !== ch) cv.height = ch
     const ctx = cv.getContext('2d')
     if (!ctx) return
-    // keep 1px lines >= ~1.3 screen px in the editor (quantised so we rarely redraw)
-    const boost = Math.min(8, Math.max(1, Math.ceil(1.3 / view.scale)))
+    // keep 1px lines visible when zoomed out — but NEVER fatten them at >=100% zoom
+    // (round, not ceil: at scale 1.0 a 1px line must display as exactly 1px)
+    const boost = view.scale >= 1 ? 1 : Math.min(8, Math.max(1, Math.round(1.3 / view.scale)))
     if (boost !== boostRef.current) {
       boostRef.current = boost
       contentDirty.current = true
@@ -398,10 +399,12 @@ export function EditorCanvas(): React.JSX.Element {
     // draft preview + selection (content transform)
     ctx.setTransform(v.scale, 0, 0, v.scale, v.tx, v.ty)
     if (draft) {
-      if (tool === 'pixelpen') {
-        // paint feel: every visited 1px cell fills in as you drag
+      if (tool === 'pixelpen' || paintFromSelect.current) {
+        // paint feel: every visited 1px cell fills in as you drag — drawn at the same
+        // display width as the committed stroke, so nothing "changes" on release
+        const s2 = Math.max(1, boostRef.current)
         ctx.fillStyle = C.accent
-        for (const pp of draft.points) ctx.fillRect(pp.x - 0.5, pp.y - 0.5, 1, 1)
+        for (const pp of draft.points) ctx.fillRect(pp.x - s2 / 2, pp.y - s2 / 2, s2, s2)
       } else {
         const dShape: Shape = {
           id: '__draft',
