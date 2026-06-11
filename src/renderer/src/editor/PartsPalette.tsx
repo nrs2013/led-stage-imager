@@ -9,26 +9,26 @@ import type { Shape } from '../model/types'
 
 /** Live-rendered thumbnail: the actual bulb renderer at a thumbnail-friendly size,
  *  lit warm — what you drag is what you get. */
-function BulbThumb({ size = 46 }: { size?: number }): React.JSX.Element {
+function BulbThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     const cv = ref.current
     if (!cv) return
     const ctx = cv.getContext('2d')
     if (!ctx) return
-    ctx.clearRect(0, 0, size, size)
+    ctx.clearRect(0, 0, w, h)
     ctx.fillStyle = '#000'
-    ctx.fillRect(0, 0, size, size)
-    const d = size * 0.62
-    drawBulbGlass(ctx, size / 2, size / 2, d, 'clear')
-    drawBulbLit(ctx, size / 2, size / 2, d, [255, 160, 60], 'clear')
-  }, [size])
+    ctx.fillRect(0, 0, w, h)
+    const d = h * 0.62
+    drawBulbGlass(ctx, w / 2, h / 2, d, 'clear')
+    drawBulbLit(ctx, w / 2, h / 2, d, [255, 160, 60], 'clear')
+  }, [w, h])
   return (
     <canvas
       ref={ref}
-      width={size}
-      height={size}
-      style={{ display: 'block', borderRadius: 4, pointerEvents: 'none' }}
+      width={w}
+      height={h}
+      style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 4, pointerEvents: 'none' }}
     />
   )
 }
@@ -78,7 +78,7 @@ function NeonThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX.El
       ref={ref}
       width={w}
       height={h}
-      style={{ display: 'block', borderRadius: 4, pointerEvents: 'none' }}
+      style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 4, pointerEvents: 'none' }}
     />
   )
 }
@@ -117,7 +117,7 @@ function StarsThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX.E
       ref={ref}
       width={w}
       height={h}
-      style={{ display: 'block', borderRadius: 4, pointerEvents: 'none' }}
+      style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 4, pointerEvents: 'none' }}
     />
   )
 }
@@ -162,7 +162,7 @@ function FestoonThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX
       ref={ref}
       width={w}
       height={h}
-      style={{ display: 'block', borderRadius: 4, pointerEvents: 'none' }}
+      style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 4, pointerEvents: 'none' }}
     />
   )
 }
@@ -193,7 +193,7 @@ function FixtureThumb({
       ref={ref}
       width={w}
       height={h}
-      style={{ display: 'block', borderRadius: 4, pointerEvents: 'none' }}
+      style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 4, pointerEvents: 'none' }}
     />
   )
 }
@@ -213,106 +213,98 @@ const paintBlinder = (ctx: CanvasRenderingContext2D): void => {
 }
 const paintPatt = (ctx: CanvasRenderingContext2D): void => drawPattLit(ctx, 37, 23, 42, WARM)
 
+/** The shelf line-up — のむさん指定の並び：上段=電球系の灯体、下段=ストリング/文字/面。 */
+const CARDS: {
+  part: string
+  label: string
+  hint: string
+  title: string
+  thumb: React.ReactNode
+}[] = [
+  {
+    part: 'bulb',
+    label: 'ボール球',
+    hint: `Φ${BULB_DEFAULT_DIAMETER}`,
+    title: 'ドラッグしてチャートに置く（中心がそのマスに乗る）',
+    thumb: <BulbThumb />
+  },
+  {
+    part: 'parlight',
+    label: 'PAR',
+    hint: 'FRONT',
+    title: '大型ステージ照明（正面）— フレネルの輪・フルで全体が白く飛ぶ',
+    thumb: <FixtureThumb paint={paintPar} />
+  },
+  {
+    part: 'patt',
+    label: 'PAT',
+    hint: 'MESH',
+    title: 'PAT — 金網メッシュ越しにジュワッと面で光る大物',
+    thumb: <FixtureThumb paint={paintPatt} />
+  },
+  {
+    part: 'blinder',
+    label: '8灯ミニブル',
+    hint: '2×4',
+    title: '8灯ミニブル — 既定は8球一斉（番地間隔3で8球バラバラ）',
+    thumb: <FixtureThumb paint={paintBlinder} />
+  },
+  {
+    part: 'festoon',
+    label: '垂れ電球',
+    hint: 'STRING',
+    title: 'ドラッグして張り、両端をつかんで掛け直す（1球=1番地・たわみはInspector）',
+    thumb: <FestoonThumb />
+  },
+  {
+    part: 'neon',
+    label: 'ネオン管',
+    hint: 'TEXT',
+    title: 'ドラッグしてチャートに置き、Inspectorで文字を打つ（1文字=1番地）',
+    thumb: <NeonThumb />
+  },
+  {
+    part: 'stars',
+    label: '星球',
+    hint: 'W+B 2ch',
+    title: 'ドラッグして置き、四隅で広げる（白ch+青chの2番地・密度はInspector）',
+    thumb: <StarsThumb />
+  }
+]
+
 /** アイコン棚 — drag a part onto the chart to place it (part centre = the dropped
- *  cell). Residents: bulb, neon, stars, festoon, PAR, blinder, PAT. */
+ *  cell). 4-up grid so every card stays readable as the family grows. */
 export function PartsPalette(): React.JSX.Element {
   return (
     <div style={wrapStyle}>
       <div style={titleStyle}>Parts</div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData('application/x-decor-part', 'bulb')
-            e.dataTransfer.effectAllowed = 'copy'
-          }}
-          title="ドラッグしてチャートに置く（中心がそのマスに乗る）"
-          style={cardStyle}
-        >
-          <BulbThumb />
-          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>ボール球</div>
-          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>
-            Φ{BULB_DEFAULT_DIAMETER}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+        {CARDS.map((c) => (
+          <div
+            key={c.part}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('application/x-decor-part', c.part)
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
+            title={c.title}
+            style={cardStyle}
+          >
+            {c.thumb}
+            <div
+              style={{
+                fontSize: 10,
+                color: C.text,
+                fontFamily: F.ui,
+                marginTop: 4,
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {c.label}
+            </div>
+            <div style={{ fontSize: 8.5, color: C.hint, fontFamily: F.mono }}>{c.hint}</div>
           </div>
-        </div>
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData('application/x-decor-part', 'neon')
-            e.dataTransfer.effectAllowed = 'copy'
-          }}
-          title="ドラッグしてチャートに置き、Inspectorで文字を打つ（1文字=1番地）"
-          style={cardStyle}
-        >
-          <NeonThumb />
-          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>ネオン管</div>
-          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>TEXT</div>
-        </div>
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData('application/x-decor-part', 'stars')
-            e.dataTransfer.effectAllowed = 'copy'
-          }}
-          title="ドラッグして置き、四隅で広げる（白ch+青chの2番地・密度はInspector）"
-          style={cardStyle}
-        >
-          <StarsThumb />
-          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>星球</div>
-          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>W+B 2ch</div>
-        </div>
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData('application/x-decor-part', 'festoon')
-            e.dataTransfer.effectAllowed = 'copy'
-          }}
-          title="ドラッグして張り、両端をつかんで掛け直す（1球=1番地・たわみはInspector）"
-          style={cardStyle}
-        >
-          <FestoonThumb />
-          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>垂れ電球</div>
-          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>STRING</div>
-        </div>
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData('application/x-decor-part', 'parlight')
-            e.dataTransfer.effectAllowed = 'copy'
-          }}
-          title="大型ステージ照明（正面）— フレネルの輪・フルで全体が白く飛ぶ"
-          style={cardStyle}
-        >
-          <FixtureThumb paint={paintPar} />
-          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>PAR</div>
-          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>FRONT</div>
-        </div>
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData('application/x-decor-part', 'blinder')
-            e.dataTransfer.effectAllowed = 'copy'
-          }}
-          title="8連ブラインダー — 既定は8球一斉（番地間隔3で8球バラバラ）"
-          style={cardStyle}
-        >
-          <FixtureThumb paint={paintBlinder} />
-          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>ブラインダー</div>
-          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>2×4</div>
-        </div>
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData('application/x-decor-part', 'patt')
-            e.dataTransfer.effectAllowed = 'copy'
-          }}
-          title="PAT — 金網メッシュ越しにジュワッと面で光る大物"
-          style={cardStyle}
-        >
-          <FixtureThumb paint={paintPatt} />
-          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>PAT</div>
-          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>MESH</div>
-        </div>
+        ))}
       </div>
       <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 8, lineHeight: 1.5 }}>
         ドラッグ＆ドロップで設置 · 2個目からは ⌘C → クリック → ⌘V

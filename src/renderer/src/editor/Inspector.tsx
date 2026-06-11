@@ -179,7 +179,8 @@ export function Inspector(): React.JSX.Element {
     <aside style={asideStyle}>
       <SectionTitle>Fixture</SectionTitle>
       <div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, marginBottom: 6 }}>
-        {shape.type.toUpperCase()} · {shape.id.slice(-6)}
+        {shape.type === 'blinder' ? '8灯ミニブル' : shape.type.toUpperCase()} ·{' '}
+        {shape.id.slice(-6)}
       </div>
       <div style={{ fontFamily: F.mono, fontSize: 12, color: C.accent, marginBottom: rowGap }}>
         {sizeText(shape)}

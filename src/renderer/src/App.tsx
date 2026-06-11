@@ -147,7 +147,7 @@ function EditorApp(): React.JSX.Element {
             <EditorCanvas />
             <div
               style={{
-                width: 280,
+                width: 340,
                 flexShrink: 0,
                 display: 'flex',
                 flexDirection: 'column',
