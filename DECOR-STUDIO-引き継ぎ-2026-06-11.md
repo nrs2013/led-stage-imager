@@ -5,6 +5,18 @@
 
 ---
 
+## 🏠 同日夕方 追記：iCloud圏外 `~/dev/decor-studio` へ引っ越し完了（最重要）
+
+- **作業場の正住所は今後 `~/dev/decor-studio`**。本書・過去の引き継ぎ書内の `~/Documents/decor-studio` は全てこれに読み替えること。
+- **経緯**：6/11朝のiCloud事故・第3波で、push済みだったのに**ローカルのgit台帳（mainの栞）が2コミット巻き戻され**、同日朝に施工したばかりの .nosync symlink 対策まで剥がされた。GitHub側（origin/main `cb38efa`）は無傷＝失われた物ゼロ。これを機に稽古場ごとiCloud圏外へ引っ越した。
+- **§1 のiCloud対策（.nosync symlink）は旧居用の歴史資料**。新居はiCloud圏外なので **不要・未施工が正しい**（node_modules / dist は普通のフォルダでOK）。
+- 旧フォルダは `~/Documents/decor-studio-旧2026-06-11` に封印（ソースとgit履歴のみ・部品とビルドは撤去済み・**いつ削除してもOK**）。`~/Documents/DECOR-STUDIO-引っ越しのお知らせ.md` に案内板あり。
+- デスクトップの再公開ボタン `DECOR-公開.command` は新住所に書き換え済み。
+- §3 の「push はのむさん確認待ち」は**解消済み**（ボール球 `e1162e4` ＋ Web版ビルド `cb38efa` をpush済み・GitHub Pages反映済み）。
+- 新居での検収：`npm test` 67本green・`.app` ビルド成功（264MB）。
+
+---
+
 ## 0. 今日やったこと（新機能：ボール球）
 
 **ボール球（電球）機能を実装・出荷済み。** のむさん要望の経緯：電飾アプリとして「リアルな電球を置いて、ゲージ（卓フェーダー）で光る強さが変わる」機能。デモを3回見せて方向確定（アニメっぽい十字光芒はNG→写真調へ、色は卓任せ、クリア質感）。
@@ -40,10 +52,10 @@ dist         -> dist.nosync           （同上）
 - **今後 npm がコケて「ファイルが無い」系エラーが出たら、まず iCloud を疑う**。直し方：`cd ~/Documents/decor-studio && rm -rf node_modules.nosync && npm ci`
 - 根本対策（未実施・のむさんに提案中）：リポジトリごと iCloud 外（例 `~/dev/`）へ引っ越し
 
-## 2. ビルド&起動（.nosync構造でもコマンドは従来どおり）
+## 2. ビルド&起動（新住所）
 
 ```
-cd ~/Documents/decor-studio
+cd ~/dev/decor-studio
 npm run build && npx electron-builder --dir
 open "dist/mac-arm64/DECOR STUDIO.app"
 ```
