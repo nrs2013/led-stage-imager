@@ -197,9 +197,9 @@ export function drawBulbLit(
     }
     // light scattering inside the glass; the rim catches the colour
     const gi = ctx.createRadialGradient(cx, fy, r * 0.05, cx, cy, r)
-    gi.addColorStop(0, rgba(hue, 0.3 * I))
+    gi.addColorStop(0, rgba(hue, 0.34 * I))
     gi.addColorStop(0.7, rgba(hue, 0.1 * I))
-    gi.addColorStop(1, rgba(hue, 0.16 * I))
+    gi.addColorStop(1, rgba(hue, 0.1 * I))
     ctx.fillStyle = gi
     ctx.beginPath()
     ctx.arc(cx, cy, r, 0, Math.PI * 2)
@@ -211,8 +211,9 @@ export function drawBulbLit(
     ctx.arc(cx, cy, r * 0.97, 0.4, 2.2)
     ctx.stroke()
   }
-  // tight saturated bloom + wide soft bloom (ジュワッ)
-  const hr1 = Math.max(r * 1.05, r * (1.15 + 1.0 * vis) * gs)
+  // tight saturated bloom + wide soft bloom (ジュワッ) — v6: trimmed ~20% so the
+  // core stays the star (のむさん「にじみすぎ・カッコよく」)
+  const hr1 = Math.max(r * 1.05, r * (1.15 + 1.0 * vis) * gs * 0.8)
   const gh1 = ctx.createRadialGradient(cx, cy, r * 0.4, cx, cy, hr1)
   gh1.addColorStop(0, rgba(hue, 0.4 * I))
   gh1.addColorStop(1, rgba(hue, 0))
@@ -220,10 +221,10 @@ export function drawBulbLit(
   ctx.beginPath()
   ctx.arc(cx, cy, hr1, 0, Math.PI * 2)
   ctx.fill()
-  const hr2 = Math.max(r * 1.2, bulbHaloRadius(r, I) * gs)
+  const hr2 = Math.max(r * 1.2, bulbHaloRadius(r, I) * gs * 0.72)
   const soft = mixc(hue, [255, 255, 255], 0.25 + 0.35 * blast)
   const gh2 = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, hr2)
-  gh2.addColorStop(0, rgba(soft, (0.22 + 0.3 * blast) * I))
+  gh2.addColorStop(0, rgba(soft, (0.22 + 0.3 * blast) * I * 0.85))
   gh2.addColorStop(0.45, rgba(soft, 0.08 * I))
   gh2.addColorStop(1, rgba(soft, 0))
   ctx.fillStyle = gh2
@@ -233,7 +234,7 @@ export function drawBulbLit(
   // white-out core surge at the top of the fader — the WHOLE bulb floods brighter
   // (のむさん: フルは線じゃなく全体的に明るく。旧・横方向の光条は廃止)
   if (blast > 0) {
-    const br = r * (1.3 + 1.1 * blast)
+    const br = r * (1.25 + 0.9 * blast)
     const gb = ctx.createRadialGradient(cx, cy, 0, cx, cy, br)
     gb.addColorStop(0, rgba([255, 255, 255], 0.95 * blast))
     gb.addColorStop(0.45, rgba(mixc(hue, [255, 255, 255], 0.75), 0.5 * blast))

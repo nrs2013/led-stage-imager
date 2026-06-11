@@ -16,7 +16,7 @@ import {
   festoonLength,
   FESTOON_DEFAULT_GLOW
 } from '../render/festoon'
-import { parDiameter, blinderWidth, pattDiameter } from '../render/fixtures'
+import { parDiameter, blinderWidth, pattDiameter, pixelPattDiameter } from '../render/fixtures'
 
 /** Human-readable size of a shape: spans, dot counts, lengths — diagonals included. */
 function sizeText(shape: Shape): string {
@@ -36,6 +36,7 @@ function sizeText(shape: Shape): string {
   }
   if (shape.type === 'parlight') return `Φ ${parDiameter(shape)} px`
   if (shape.type === 'patt') return `Φ ${pattDiameter(shape)} px`
+  if (shape.type === 'pixelpatt') return `Φ ${pixelPattDiameter(shape)} px · 7セル`
   if (shape.type === 'blinder') {
     const w = blinderWidth(shape)
     return `W ${w} × H ${w * 2} px · 8球`
@@ -403,7 +404,10 @@ export function Inspector(): React.JSX.Element {
       )}
 
       {/* stage fixtures: size only — colour & gauge come from the console */}
-      {(shape.type === 'parlight' || shape.type === 'patt' || shape.type === 'blinder') && (
+      {(shape.type === 'parlight' ||
+        shape.type === 'patt' ||
+        shape.type === 'pixelpatt' ||
+        shape.type === 'blinder') && (
         <Field label={shape.type === 'blinder' ? '幅（ドット）· 高さは自動で2倍' : '径（ドット）'}>
           <NumberField
             value={
@@ -411,7 +415,9 @@ export function Inspector(): React.JSX.Element {
                 ? parDiameter(shape)
                 : shape.type === 'patt'
                   ? pattDiameter(shape)
-                  : blinderWidth(shape)
+                  : shape.type === 'pixelpatt'
+                    ? pixelPattDiameter(shape)
+                    : blinderWidth(shape)
             }
             min={6}
             max={800}
@@ -428,7 +434,8 @@ export function Inspector(): React.JSX.Element {
         shape.type !== 'festoon' &&
         shape.type !== 'parlight' &&
         shape.type !== 'blinder' &&
-        shape.type !== 'patt' && (
+        shape.type !== 'patt' &&
+        shape.type !== 'pixelpatt' && (
         <Field label="Display">
           <div style={{ display: 'flex', gap: 6 }}>
             {DISPLAY_MODES.map((m) => (
@@ -450,7 +457,8 @@ export function Inspector(): React.JSX.Element {
         shape.type !== 'festoon' &&
         shape.type !== 'parlight' &&
         shape.type !== 'blinder' &&
-        shape.type !== 'patt' && (
+        shape.type !== 'patt' &&
+        shape.type !== 'pixelpatt' && (
           <Field label="Width">
           <NumberField
             value={shape.strokeWidth}
@@ -461,11 +469,12 @@ export function Inspector(): React.JSX.Element {
         </Field>
       )}
 
-      {/* repeat / array (neon, stars, festoon & blinder ARE their own arrays) */}
+      {/* repeat / array (neon, stars, festoon, blinder & pixelpatt ARE their own arrays) */}
       {shape.type !== 'neon' &&
         shape.type !== 'stars' &&
         shape.type !== 'festoon' &&
-        shape.type !== 'blinder' && (
+        shape.type !== 'blinder' &&
+        shape.type !== 'pixelpatt' && (
         <div style={{ marginBottom: rowGap }}>
           <label style={fieldLabel}>Array{hasRepeat ? `  ×${shape.repeat!.count}` : ''}</label>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -565,7 +574,9 @@ export function Inspector(): React.JSX.Element {
                   ? `文字間隔 ch（0=一斉 / 既定 ${channelCount(fixture.mode)}）`
                   : shape.type === 'stars'
                     ? `白→青 間隔 ch（既定 ${channelCount(fixture.mode)}）`
-                    : shape.type === 'festoon' || shape.type === 'blinder'
+                    : shape.type === 'festoon' ||
+                        shape.type === 'blinder' ||
+                        shape.type === 'pixelpatt'
                       ? `番地間隔 ch（0=一斉 / ${channelCount(fixture.mode)}でバラバラ）`
                       : `Offset (default ${channelCount(fixture.mode)})`
               }

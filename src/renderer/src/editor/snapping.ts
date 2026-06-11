@@ -45,7 +45,8 @@ export function salientOf(sh: Shape): { xs: number[]; ys: number[] } {
     sh.type === 'neon' ||
     sh.type === 'parlight' ||
     sh.type === 'blinder' ||
-    sh.type === 'patt'
+    sh.type === 'patt' ||
+    sh.type === 'pixelpatt'
   ) {
     return { xs: [b.x + b.w / 2], ys: [b.y + b.h / 2] }
   }

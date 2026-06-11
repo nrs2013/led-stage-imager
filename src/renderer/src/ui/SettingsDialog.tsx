@@ -88,7 +88,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
           offText="Zero"
         />
         <Toggle
-          label="Glow — whole output (smoke look)"
+          label="Smoke — 会場のスモーク（全灯体のにじみが育つ）"
           on={chart.settings.glow}
           onChange={setGlow}
           onText="ON"
@@ -96,7 +96,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
         />
         {chart.settings.glow && (
           <div style={{ marginBottom: 12 }}>
-            <label style={fieldLabel}>Glow Amount {chart.settings.glowAmount}px</label>
+            <label style={fieldLabel}>Smoke Amount {chart.settings.glowAmount}px</label>
             <input
               type="range"
               min={1}

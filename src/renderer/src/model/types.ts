@@ -14,6 +14,7 @@ export type ShapeType =
   | 'parlight'
   | 'blinder'
   | 'patt'
+  | 'pixelpatt'
 export type DisplayMode = 'stroke' | 'fill' | 'both'
 export type ChannelMode = 'rgb' | 'rgbdim' | 'dim' | 'rgbw'
 export type BulbStyle = 'clear' | 'frost'

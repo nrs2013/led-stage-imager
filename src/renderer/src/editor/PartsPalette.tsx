@@ -4,7 +4,12 @@ import { drawBulbGlass, drawBulbLit, BULB_DEFAULT_DIAMETER, type RGB } from '../
 import { drawNeonGlyphLit, clearNeonLayoutCache } from '../render/neon'
 import { drawStarsLit } from '../render/stars'
 import { drawFestoonBulbLit, festoonSamples, festoonCount } from '../render/festoon'
-import { drawParLit, drawBlinderCellLit, drawPattLit } from '../render/fixtures'
+import {
+  drawParLit,
+  drawBlinderCellLit,
+  drawPattLit,
+  drawPixelPattCellLit
+} from '../render/fixtures'
 import type { Shape } from '../model/types'
 
 /** Live-rendered thumbnail: the actual bulb renderer at a thumbnail-friendly size,
@@ -212,6 +217,17 @@ const paintBlinder = (ctx: CanvasRenderingContext2D): void => {
   for (let i = 0; i < 8; i++) drawBlinderCellLit(ctx, sh, WARM, i)
 }
 const paintPatt = (ctx: CanvasRenderingContext2D): void => drawPattLit(ctx, 37, 23, 42, WARM)
+const paintPixelPatt = (ctx: CanvasRenderingContext2D): void => {
+  const sh = {
+    id: 'th-pp',
+    type: 'pixelpatt',
+    points: [{ x: 37, y: 23 }],
+    display: 'fill',
+    strokeWidth: 1,
+    diameter: 42
+  } as Shape
+  for (let i = 0; i < 7; i++) drawPixelPattCellLit(ctx, sh, WARM, i)
+}
 
 /** The shelf line-up — のむさん指定の並び：上段=電球系の灯体、下段=ストリング/文字/面。 */
 const CARDS: {
@@ -241,6 +257,13 @@ const CARDS: {
     hint: 'MESH',
     title: 'PAT — 金網メッシュ越しにジュワッと面で光る大物',
     thumb: <FixtureThumb paint={paintPatt} />
+  },
+  {
+    part: 'pixelpatt',
+    label: 'Pixel PAT',
+    hint: '7CELL',
+    title: 'Pixel PAT — ミニPAT 7個の六角ユニット。1セル=1番地（中央→上から時計回り）・間隔0で一斉',
+    thumb: <FixtureThumb paint={paintPixelPatt} />
   },
   {
     part: 'blinder',

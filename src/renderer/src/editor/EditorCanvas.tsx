@@ -59,9 +59,11 @@ import {
   drawParSchematic,
   drawBlinderSchematic,
   drawPattSchematic,
+  drawPixelPattSchematic,
   PAR_DEFAULT_DIAMETER,
   BLINDER_DEFAULT_WIDTH,
-  PATT_DEFAULT_DIAMETER
+  PATT_DEFAULT_DIAMETER,
+  PIXELPATT_DEFAULT_DIAMETER
 } from '../render/fixtures'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
@@ -270,6 +272,10 @@ function drawShapeInto(
   }
   if (shape.type === 'patt') {
     drawPattSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
+  if (shape.type === 'pixelpatt') {
+    drawPixelPattSchematic(ctx, shape, stroke, fill, boost)
     return
   }
   const open = isOpen(shape.type)
@@ -1785,7 +1791,7 @@ export function EditorCanvas(): React.JSX.Element {
   }
   const onDrop = (e: React.DragEvent<HTMLCanvasElement>): void => {
     const part = e.dataTransfer.getData('application/x-decor-part')
-    const PARTS = ['bulb', 'neon', 'stars', 'festoon', 'parlight', 'blinder', 'patt']
+    const PARTS = ['bulb', 'neon', 'stars', 'festoon', 'parlight', 'blinder', 'patt', 'pixelpatt']
     if (!PARTS.includes(part)) return
     e.preventDefault()
     const cell = toCell(e.clientX, e.clientY)
@@ -1863,9 +1869,11 @@ export function EditorCanvas(): React.JSX.Element {
           ? PAR_DEFAULT_DIAMETER
           : part === 'blinder'
             ? BLINDER_DEFAULT_WIDTH
-            : PATT_DEFAULT_DIAMETER
+            : part === 'patt'
+              ? PATT_DEFAULT_DIAMETER
+              : PIXELPATT_DEFAULT_DIAMETER
       addShape({
-        type: part as 'parlight' | 'blinder' | 'patt',
+        type: part as 'parlight' | 'blinder' | 'patt' | 'pixelpatt',
         points: [center],
         display: 'fill',
         strokeWidth: 1,

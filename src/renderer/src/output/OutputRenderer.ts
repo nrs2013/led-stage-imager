@@ -17,6 +17,7 @@ import {
   drawParLit,
   drawBlinderCellLit,
   drawPattLit,
+  drawPixelPattCellLit,
   parDiameter,
   pattDiameter
 } from '../render/fixtures'
@@ -169,6 +170,12 @@ export class OutputRenderer {
     }
     if (shape.type === 'blinder') {
       drawBlinderCellLit(ctx, shape, rgb, rep)
+      ctx.restore()
+      return
+    }
+    // Pixel PAT: instance i lights ONLY cell #i (centre=1, ring 2..7) — pixel control
+    if (shape.type === 'pixelpatt') {
+      drawPixelPattCellLit(ctx, shape, rgb, rep)
       ctx.restore()
       return
     }

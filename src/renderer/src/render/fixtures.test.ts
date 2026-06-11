@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Shape } from '../model/types'
 import {
   blinderCells,
+  pixelPattCells,
   blinderWidth,
   parDiameter,
   pattDiameter,
@@ -59,5 +60,34 @@ describe('stage fixture addressing & defaults', () => {
     expect(parDiameter({} as Shape)).toBe(PAR_DEFAULT_DIAMETER)
     expect(blinderWidth({} as Shape)).toBe(BLINDER_DEFAULT_WIDTH)
     expect(pattDiameter({} as Shape)).toBe(PATT_DEFAULT_DIAMETER)
+  })
+})
+
+describe('pixelPattCells: the 7-cell hex unit', () => {
+  const pp = (over: Partial<Shape> = {}): Shape =>
+    ({
+      id: 'pp1',
+      type: 'pixelpatt',
+      points: [{ x: 300, y: 300 }],
+      display: 'fill',
+      strokeWidth: 1,
+      diameter: 90,
+      ...over
+    }) as Shape
+  it('centre first, then the ring from the top clockwise — 7 cells', () => {
+    const cells = pixelPattCells(pp())
+    expect(cells).toHaveLength(7)
+    expect(cells[0]).toEqual({ x: 300, y: 300 })
+    expect(cells[1].x).toBeCloseTo(300)
+    expect(cells[1].y).toBeCloseTo(270)
+  })
+  it('ring cells sit at equal distance from the centre', () => {
+    const cells = pixelPattCells(pp())
+    for (let i = 1; i < 7; i++) {
+      expect(Math.hypot(cells[i].x - 300, cells[i].y - 300)).toBeCloseTo(30)
+    }
+  })
+  it('is its own 7-instance array', () => {
+    expect(repeatCount(pp())).toBe(7)
   })
 })
