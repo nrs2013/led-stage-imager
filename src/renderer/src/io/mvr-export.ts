@@ -3,6 +3,7 @@ import type { Chart, Fixture, Shape } from '../model/types'
 import { addressAt, repeatCount } from '../dmx/address'
 import { neonGlyphCenter } from '../render/neon'
 import { festoonBulbs } from '../render/festoon'
+import { blinderCells } from '../render/fixtures'
 
 // MVR export: one .mvr (ZIP) containing GeneralSceneDescription.xml (every patched
 // DECOR fixture with its absolute DMX address and stage position) plus an embedded
@@ -116,7 +117,9 @@ export function patchRows(chart: Chart): MvrFixtureRow[] {
               }
             : sh.type === 'festoon'
               ? (festoonBulbs(sh)[i] ?? p0)
-              : { x: p0.x + (sh.repeat?.dx ?? 0) * i, y: p0.y + (sh.repeat?.dy ?? 0) * i }
+              : sh.type === 'blinder'
+                ? (blinderCells(sh)[i] ?? p0)
+                : { x: p0.x + (sh.repeat?.dx ?? 0) * i, y: p0.y + (sh.repeat?.dy ?? 0) * i }
       rows.push({
         name: reps > 1 ? `${sh.id.slice(-6)} #${i + 1}` : sh.id.slice(-6),
         mode: fx.mode,

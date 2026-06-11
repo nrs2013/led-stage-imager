@@ -38,9 +38,15 @@ export function buildCandidates(shapes: Shape[], exclude: string | null | Set<st
  *  Includes the bbox CENTRE so a part can land dead-centre on a cutout island. */
 export function salientOf(sh: Shape): { xs: number[]; ys: number[] } {
   const b = shapeArrayBounds(sh)
-  // parts (bulb / neon) are anchored bodies: the CENTRE is their only salient — the
-  // edge of a tiny glass or a text box must not out-compete the centre for island snaps
-  if (sh.type === 'bulb' || sh.type === 'neon') {
+  // parts (bulb / neon / stage fixtures) are anchored bodies: the CENTRE is their only
+  // salient — an edge must not out-compete the centre for island snaps
+  if (
+    sh.type === 'bulb' ||
+    sh.type === 'neon' ||
+    sh.type === 'parlight' ||
+    sh.type === 'blinder' ||
+    sh.type === 'patt'
+  ) {
     return { xs: [b.x + b.w / 2], ys: [b.y + b.h / 2] }
   }
   const xs = [b.x, b.x + b.w, b.x + b.w / 2]

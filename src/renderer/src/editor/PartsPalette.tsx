@@ -4,6 +4,7 @@ import { drawBulbGlass, drawBulbLit, BULB_DEFAULT_DIAMETER, type RGB } from '../
 import { drawNeonGlyphLit, clearNeonLayoutCache } from '../render/neon'
 import { drawStarsLit } from '../render/stars'
 import { drawFestoonBulbLit, festoonSamples, festoonCount } from '../render/festoon'
+import { drawParLit, drawBlinderCellLit, drawPattLit } from '../render/fixtures'
 import type { Shape } from '../model/types'
 
 /** Live-rendered thumbnail: the actual bulb renderer at a thumbnail-friendly size,
@@ -166,8 +167,54 @@ function FestoonThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX
   )
 }
 
+/** Generic live thumbnail: black stage + whatever the real renderer paints. */
+function FixtureThumb({
+  paint,
+  w = 74,
+  h = 46
+}: {
+  paint: (ctx: CanvasRenderingContext2D) => void
+  w?: number
+  h?: number
+}): React.JSX.Element {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const ctx = cv.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, w, h)
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, w, h)
+    paint(ctx)
+  }, [w, h, paint])
+  return (
+    <canvas
+      ref={ref}
+      width={w}
+      height={h}
+      style={{ display: 'block', borderRadius: 4, pointerEvents: 'none' }}
+    />
+  )
+}
+
+const WARM: [number, number, number] = [255, 178, 96]
+const paintPar = (ctx: CanvasRenderingContext2D): void => drawParLit(ctx, 37, 23, 36, WARM)
+const paintBlinder = (ctx: CanvasRenderingContext2D): void => {
+  const sh = {
+    id: 'th-bl',
+    type: 'blinder',
+    points: [{ x: 37, y: 23 }],
+    display: 'fill',
+    strokeWidth: 1,
+    diameter: 20
+  } as Shape
+  for (let i = 0; i < 8; i++) drawBlinderCellLit(ctx, sh, WARM, i)
+}
+const paintPatt = (ctx: CanvasRenderingContext2D): void => drawPattLit(ctx, 37, 23, 42, WARM)
+
 /** アイコン棚 — drag a part onto the chart to place it (part centre = the dropped
- *  cell). Residents: ball bulb, neon sign, star field, festoon string. */
+ *  cell). Residents: bulb, neon, stars, festoon, PAR, blinder, PAT. */
 export function PartsPalette(): React.JSX.Element {
   return (
     <div style={wrapStyle}>
@@ -226,6 +273,45 @@ export function PartsPalette(): React.JSX.Element {
           <FestoonThumb />
           <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>垂れ電球</div>
           <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>STRING</div>
+        </div>
+        <div
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('application/x-decor-part', 'parlight')
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+          title="大型ステージ照明（正面）— フレネルの輪・フルで全体が白く飛ぶ"
+          style={cardStyle}
+        >
+          <FixtureThumb paint={paintPar} />
+          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>PAR</div>
+          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>FRONT</div>
+        </div>
+        <div
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('application/x-decor-part', 'blinder')
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+          title="8連ブラインダー — 既定は8球一斉（番地間隔3で8球バラバラ）"
+          style={cardStyle}
+        >
+          <FixtureThumb paint={paintBlinder} />
+          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>ブラインダー</div>
+          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>2×4</div>
+        </div>
+        <div
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('application/x-decor-part', 'patt')
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+          title="PAT — 金網メッシュ越しにジュワッと面で光る大物"
+          style={cardStyle}
+        >
+          <FixtureThumb paint={paintPatt} />
+          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>PAT</div>
+          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>MESH</div>
         </div>
       </div>
       <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 8, lineHeight: 1.5 }}>

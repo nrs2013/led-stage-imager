@@ -11,6 +11,9 @@ export type ShapeType =
   | 'neon'
   | 'stars'
   | 'festoon'
+  | 'parlight'
+  | 'blinder'
+  | 'patt'
 export type DisplayMode = 'stroke' | 'fill' | 'both'
 export type ChannelMode = 'rgb' | 'rgbdim' | 'dim' | 'rgbw'
 export type BulbStyle = 'clear' | 'frost'
@@ -37,7 +40,8 @@ export interface Shape {
    *  patch chip below can still select it (= the unlock door). */
   locked?: boolean
   fixtureId?: string
-  /** Bulb only: glass diameter in canvas px (points[0] is the centre). */
+  /** Bulb / PAR / PAT: diameter in canvas px; Blinder: housing WIDTH (height = 2×).
+   *  points[0] is always the part's centre. */
   diameter?: number
   /** Bulb only: clear glass (filament visible) or frosted (milky globe). */
   bulbStyle?: BulbStyle

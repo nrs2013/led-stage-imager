@@ -16,6 +16,7 @@ import {
   festoonLength,
   FESTOON_DEFAULT_GLOW
 } from '../render/festoon'
+import { parDiameter, blinderWidth, pattDiameter } from '../render/fixtures'
 
 /** Human-readable size of a shape: spans, dot counts, lengths — diagonals included. */
 function sizeText(shape: Shape): string {
@@ -32,6 +33,12 @@ function sizeText(shape: Shape): string {
   }
   if (shape.type === 'festoon') {
     return `ワイヤー ${Math.round(festoonLength(shape))} px · ${festoonCount(shape)} 球`
+  }
+  if (shape.type === 'parlight') return `Φ ${parDiameter(shape)} px`
+  if (shape.type === 'patt') return `Φ ${pattDiameter(shape)} px`
+  if (shape.type === 'blinder') {
+    const w = blinderWidth(shape)
+    return `W ${w} × H ${w * 2} px · 8球`
   }
   if (shape.type === 'freehand') {
     const single =
@@ -394,12 +401,33 @@ export function Inspector(): React.JSX.Element {
         </>
       )}
 
+      {/* stage fixtures: size only — colour & gauge come from the console */}
+      {(shape.type === 'parlight' || shape.type === 'patt' || shape.type === 'blinder') && (
+        <Field label={shape.type === 'blinder' ? '幅（ドット）· 高さは自動で2倍' : '径（ドット）'}>
+          <NumberField
+            value={
+              shape.type === 'parlight'
+                ? parDiameter(shape)
+                : shape.type === 'patt'
+                  ? pattDiameter(shape)
+                  : blinderWidth(shape)
+            }
+            min={6}
+            max={800}
+            onChange={(v) => updateShape(shape.id, { diameter: v })}
+          />
+        </Field>
+      )}
+
       {/* display mode */}
       {!open &&
         shape.type !== 'bulb' &&
         shape.type !== 'neon' &&
         shape.type !== 'stars' &&
-        shape.type !== 'festoon' && (
+        shape.type !== 'festoon' &&
+        shape.type !== 'parlight' &&
+        shape.type !== 'blinder' &&
+        shape.type !== 'patt' && (
         <Field label="Display">
           <div style={{ display: 'flex', gap: 6 }}>
             {DISPLAY_MODES.map((m) => (
@@ -418,7 +446,10 @@ export function Inspector(): React.JSX.Element {
       {shape.type !== 'bulb' &&
         shape.type !== 'neon' &&
         shape.type !== 'stars' &&
-        shape.type !== 'festoon' && (
+        shape.type !== 'festoon' &&
+        shape.type !== 'parlight' &&
+        shape.type !== 'blinder' &&
+        shape.type !== 'patt' && (
           <Field label="Width">
           <NumberField
             value={shape.strokeWidth}
@@ -429,8 +460,11 @@ export function Inspector(): React.JSX.Element {
         </Field>
       )}
 
-      {/* repeat / array (neon, stars & festoon ARE their own arrays) */}
-      {shape.type !== 'neon' && shape.type !== 'stars' && shape.type !== 'festoon' && (
+      {/* repeat / array (neon, stars, festoon & blinder ARE their own arrays) */}
+      {shape.type !== 'neon' &&
+        shape.type !== 'stars' &&
+        shape.type !== 'festoon' &&
+        shape.type !== 'blinder' && (
         <div style={{ marginBottom: rowGap }}>
           <label style={fieldLabel}>Array{hasRepeat ? `  ×${shape.repeat!.count}` : ''}</label>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -465,8 +499,13 @@ export function Inspector(): React.JSX.Element {
           onClick={() =>
             upsertFixture(
               shape.id,
-              // a star field runs on two plain dimmer channels (White / Blue)
-              shape.type === 'stars' ? { mode: 'dim', fixedColor: [255, 255, 255] } : {}
+              // stars = two plain dimmer channels (White / Blue);
+              // blinder = 8 cells on ONE address by default (間隔3で8球バラバラ)
+              shape.type === 'stars'
+                ? { mode: 'dim', fixedColor: [255, 255, 255] }
+                : shape.type === 'blinder'
+                  ? { addressStep: 0 }
+                  : {}
             )
           }
         >
@@ -525,8 +564,8 @@ export function Inspector(): React.JSX.Element {
                   ? `文字間隔 ch（0=一斉 / 既定 ${channelCount(fixture.mode)}）`
                   : shape.type === 'stars'
                     ? `白→青 間隔 ch（既定 ${channelCount(fixture.mode)}）`
-                    : shape.type === 'festoon'
-                      ? `番地間隔 ch（0=一斉 / 既定 ${channelCount(fixture.mode)}）`
+                    : shape.type === 'festoon' || shape.type === 'blinder'
+                      ? `番地間隔 ch（0=一斉 / ${channelCount(fixture.mode)}でバラバラ）`
                       : `Offset (default ${channelCount(fixture.mode)})`
               }
             >

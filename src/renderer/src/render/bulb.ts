@@ -223,35 +223,25 @@ export function drawBulbLit(
   const hr2 = Math.max(r * 1.2, bulbHaloRadius(r, I) * gs)
   const soft = mixc(hue, [255, 255, 255], 0.25 + 0.35 * blast)
   const gh2 = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, hr2)
-  gh2.addColorStop(0, rgba(soft, (0.22 + 0.18 * blast) * I))
+  gh2.addColorStop(0, rgba(soft, (0.22 + 0.3 * blast) * I))
   gh2.addColorStop(0.45, rgba(soft, 0.08 * I))
   gh2.addColorStop(1, rgba(soft, 0))
   ctx.fillStyle = gh2
   ctx.beginPath()
   ctx.arc(cx, cy, hr2, 0, Math.PI * 2)
   ctx.fill()
-  // white-out core surge at the top of the fader
+  // white-out core surge at the top of the fader — the WHOLE bulb floods brighter
+  // (のむさん: フルは線じゃなく全体的に明るく。旧・横方向の光条は廃止)
   if (blast > 0) {
-    const gb = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * (1.0 + 0.6 * blast))
-    gb.addColorStop(0, rgba([255, 255, 255], 0.85 * blast))
-    gb.addColorStop(0.5, rgba(mixc(hue, [255, 255, 255], 0.7), 0.35 * blast))
+    const br = r * (1.3 + 1.1 * blast)
+    const gb = ctx.createRadialGradient(cx, cy, 0, cx, cy, br)
+    gb.addColorStop(0, rgba([255, 255, 255], 0.95 * blast))
+    gb.addColorStop(0.45, rgba(mixc(hue, [255, 255, 255], 0.75), 0.5 * blast))
     gb.addColorStop(1, rgba(hue, 0))
     ctx.fillStyle = gb
     ctx.beginPath()
-    ctx.arc(cx, cy, r * (1.0 + 0.6 * blast), 0, Math.PI * 2)
+    ctx.arc(cx, cy, br, 0, Math.PI * 2)
     ctx.fill()
-  }
-  // faint anamorphic streak (photographic, NOT an anime cross): horizontal only
-  if (I > 0.6 && style === 'clear') {
-    const f = (I - 0.6) / 0.4
-    const L = hr2 * 0.95
-    const sc = mixc(hue, [255, 255, 255], 0.6)
-    const gs = ctx.createLinearGradient(cx - L, cy, cx + L, cy)
-    gs.addColorStop(0, rgba(sc, 0))
-    gs.addColorStop(0.5, rgba(sc, (0.1 + 0.1 * blast) * f))
-    gs.addColorStop(1, rgba(sc, 0))
-    ctx.fillStyle = gs
-    ctx.fillRect(cx - L, cy - r * 0.06, 2 * L, r * 0.12)
   }
   ctx.restore()
 }

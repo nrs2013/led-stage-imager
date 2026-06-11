@@ -20,6 +20,7 @@ export function repeatCount(
   if (shape.type === 'neon') return neonCharCount(shape.text ?? '')
   if (shape.type === 'stars') return 2
   if (shape.type === 'festoon') return festoonCount(shape)
+  if (shape.type === 'blinder') return 8
   const c = shape.repeat?.count ?? 1
   return c > 1 ? c : 1
 }

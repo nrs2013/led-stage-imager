@@ -2,6 +2,7 @@ import type { Point, Shape } from '../model/types'
 import { BULB_DEFAULT_DIAMETER } from '../render/bulb'
 import { neonBounds } from '../render/neon'
 import { festoonSamples } from '../render/festoon'
+import { parDiameter, blinderWidth, pattDiameter } from '../render/fixtures'
 
 export interface Bounds {
   x: number
@@ -95,6 +96,16 @@ export function shapeBounds(shape: Shape): Bounds {
   if (shape.type === 'festoon' && shape.points.length >= 2) {
     return boundsOfPoints(festoonSamples(shape, 48)) // the belly hangs below the chord
   }
+  if ((shape.type === 'parlight' || shape.type === 'patt') && shape.points.length >= 1) {
+    const c = shape.points[0]
+    const r = ((shape.type === 'parlight' ? parDiameter(shape) : pattDiameter(shape)) / 2) * 1.14
+    return { x: c.x - r, y: c.y - r, w: r * 2, h: r * 2 }
+  }
+  if (shape.type === 'blinder' && shape.points.length >= 1) {
+    const c = shape.points[0]
+    const w = blinderWidth(shape)
+    return { x: c.x - w / 2, y: c.y - w, w, h: w * 2 }
+  }
   if (shape.points.length < 2) return boundsOfPoints(shape.points)
   switch (shape.type) {
     case 'rect':
@@ -138,6 +149,18 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
     ctx.beginPath()
     ctx.moveTo(pts[0].x, pts[0].y)
     for (const q of pts) ctx.lineTo(q.x, q.y)
+    return
+  }
+  if ((shape.type === 'parlight' || shape.type === 'patt') && p.length >= 1) {
+    const r = ((shape.type === 'parlight' ? parDiameter(shape) : pattDiameter(shape)) / 2) * 1.14
+    ctx.beginPath()
+    ctx.arc(p[0].x, p[0].y, r, 0, Math.PI * 2)
+    return
+  }
+  if (shape.type === 'blinder' && p.length >= 1) {
+    const w = blinderWidth(shape)
+    ctx.beginPath()
+    ctx.rect(p[0].x - w / 2, p[0].y - w, w, w * 2)
     return
   }
   if (p.length < 2) return
@@ -288,12 +311,16 @@ export function pasteDelta(shapes: Shape[], at: Point): Point {
     maxX = Math.max(maxX, b.x + b.w)
     maxY = Math.max(maxY, b.y + b.h)
   }
-  const allBulbs =
-    shapes.length > 0 &&
-    shapes.every(
-      (sh) =>
-        sh.type === 'bulb' || sh.type === 'neon' || sh.type === 'stars' || sh.type === 'festoon'
-    )
+  const PARTS = new Set<Shape['type']>([
+    'bulb',
+    'neon',
+    'stars',
+    'festoon',
+    'parlight',
+    'blinder',
+    'patt'
+  ])
+  const allBulbs = shapes.length > 0 && shapes.every((sh) => PARTS.has(sh.type))
   if (allBulbs) {
     return {
       x: Math.round(at.x - (minX + maxX) / 2),

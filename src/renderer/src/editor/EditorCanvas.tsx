@@ -55,6 +55,14 @@ import {
   FESTOON_DEFAULT_DIAMETER,
   FESTOON_DEFAULT_GLOW
 } from '../render/festoon'
+import {
+  drawParSchematic,
+  drawBlinderSchematic,
+  drawPattSchematic,
+  PAR_DEFAULT_DIAMETER,
+  BLINDER_DEFAULT_WIDTH,
+  PATT_DEFAULT_DIAMETER
+} from '../render/fixtures'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 
@@ -249,6 +257,19 @@ function drawShapeInto(
   // festoon strings: the sagging wire + cold sockets
   if (shape.type === 'festoon') {
     drawFestoonSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
+  // stage fixtures: cold housings (the lit render lives in Live / Syphon output)
+  if (shape.type === 'parlight') {
+    drawParSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
+  if (shape.type === 'blinder') {
+    drawBlinderSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
+  if (shape.type === 'patt') {
+    drawPattSchematic(ctx, shape, stroke, fill, boost)
     return
   }
   const open = isOpen(shape.type)
@@ -1764,7 +1785,8 @@ export function EditorCanvas(): React.JSX.Element {
   }
   const onDrop = (e: React.DragEvent<HTMLCanvasElement>): void => {
     const part = e.dataTransfer.getData('application/x-decor-part')
-    if (part !== 'bulb' && part !== 'neon' && part !== 'stars' && part !== 'festoon') return
+    const PARTS = ['bulb', 'neon', 'stars', 'festoon', 'parlight', 'blinder', 'patt']
+    if (!PARTS.includes(part)) return
     e.preventDefault()
     const cell = toCell(e.clientX, e.clientY)
     let center = { x: cell.x + 0.5, y: cell.y + 0.5 }
@@ -1819,7 +1841,7 @@ export function EditorCanvas(): React.JSX.Element {
         starSize: STARS_DEFAULT_SIZE,
         starSeed: (Math.random() * 0xffffffff) >>> 0
       })
-    } else {
+    } else if (part === 'festoon') {
       // festoon string: drops as a horizontal 160px wire — then grab either end
       addShape({
         type: 'festoon',
@@ -1833,6 +1855,21 @@ export function EditorCanvas(): React.JSX.Element {
         bulbPitch: FESTOON_DEFAULT_PITCH,
         diameter: FESTOON_DEFAULT_DIAMETER,
         neonGlow: FESTOON_DEFAULT_GLOW
+      })
+    } else {
+      // stage fixtures: one-point parts, size = diameter (blinder: housing width)
+      const dia =
+        part === 'parlight'
+          ? PAR_DEFAULT_DIAMETER
+          : part === 'blinder'
+            ? BLINDER_DEFAULT_WIDTH
+            : PATT_DEFAULT_DIAMETER
+      addShape({
+        type: part as 'parlight' | 'blinder' | 'patt',
+        points: [center],
+        display: 'fill',
+        strokeWidth: 1,
+        diameter: dia
       })
     }
   }

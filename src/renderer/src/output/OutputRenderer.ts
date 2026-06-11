@@ -13,6 +13,13 @@ import { drawBulbLit, BULB_DEFAULT_STYLE } from '../render/bulb'
 import { drawNeonGlyphLit } from '../render/neon'
 import { drawStarsLit } from '../render/stars'
 import { drawFestoonBulbLit } from '../render/festoon'
+import {
+  drawParLit,
+  drawBlinderCellLit,
+  drawPattLit,
+  parDiameter,
+  pattDiameter
+} from '../render/fixtures'
 
 const ZEROS = new Uint8Array(512)
 
@@ -147,6 +154,21 @@ export class OutputRenderer {
     // festoon strings: instance i lights ONLY bulb #i — per-bulb chase for free
     if (shape.type === 'festoon') {
       drawFestoonBulbLit(ctx, shape, rgb, rep)
+      ctx.restore()
+      return
+    }
+    // stage fixtures: PAR / PAT light as one face, the blinder per cell (8 instances)
+    if (shape.type === 'parlight' || shape.type === 'patt') {
+      const c = shape.points[0]
+      if (c) {
+        if (shape.type === 'parlight') drawParLit(ctx, c.x, c.y, parDiameter(shape), rgb)
+        else drawPattLit(ctx, c.x, c.y, pattDiameter(shape), rgb)
+      }
+      ctx.restore()
+      return
+    }
+    if (shape.type === 'blinder') {
+      drawBlinderCellLit(ctx, shape, rgb, rep)
       ctx.restore()
       return
     }
