@@ -12,6 +12,7 @@ import {
 import { drawBulbLit, BULB_DEFAULT_STYLE } from '../render/bulb'
 import { drawNeonGlyphLit } from '../render/neon'
 import { drawStarsLit } from '../render/stars'
+import { drawFestoonBulbLit } from '../render/festoon'
 
 const ZEROS = new Uint8Array(512)
 
@@ -140,6 +141,12 @@ export class OutputRenderer {
     // faders run the whole curtain; the channel level IS the population's gauge
     if (shape.type === 'stars') {
       drawStarsLit(ctx, shape, rgb, rep, this.frameTime)
+      ctx.restore()
+      return
+    }
+    // festoon strings: instance i lights ONLY bulb #i — per-bulb chase for free
+    if (shape.type === 'festoon') {
+      drawFestoonBulbLit(ctx, shape, rgb, rep)
       ctx.restore()
       return
     }

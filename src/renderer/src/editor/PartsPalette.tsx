@@ -3,6 +3,7 @@ import { C, F } from '../ui/tokens'
 import { drawBulbGlass, drawBulbLit, BULB_DEFAULT_DIAMETER, type RGB } from '../render/bulb'
 import { drawNeonGlyphLit, clearNeonLayoutCache } from '../render/neon'
 import { drawStarsLit } from '../render/stars'
+import { drawFestoonBulbLit, festoonSamples, festoonCount } from '../render/festoon'
 import type { Shape } from '../model/types'
 
 /** Live-rendered thumbnail: the actual bulb renderer at a thumbnail-friendly size,
@@ -120,8 +121,53 @@ function StarsThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX.E
   )
 }
 
+/** Live-rendered thumbnail: a warm sagging string — the real festoon renderer. */
+function FestoonThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX.Element {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const ctx = cv.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, w, h)
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, w, h)
+    const shape = {
+      id: 'festoon-thumb',
+      type: 'festoon',
+      points: [
+        { x: 6, y: 9 },
+        { x: w - 6, y: 12 }
+      ],
+      display: 'fill',
+      strokeWidth: 1,
+      sagPct: 30,
+      bulbPitch: 13,
+      diameter: 5,
+      neonGlow: 55
+    } as Shape
+    const pts = festoonSamples(shape, 48)
+    ctx.strokeStyle = 'rgba(140,120,90,0.5)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(pts[0].x, pts[0].y)
+    for (const p of pts) ctx.lineTo(p.x, p.y)
+    ctx.stroke()
+    const n = festoonCount(shape)
+    for (let i = 0; i < n; i++) drawFestoonBulbLit(ctx, shape, [255, 170, 80], i)
+  }, [w, h])
+  return (
+    <canvas
+      ref={ref}
+      width={w}
+      height={h}
+      style={{ display: 'block', borderRadius: 4, pointerEvents: 'none' }}
+    />
+  )
+}
+
 /** アイコン棚 — drag a part onto the chart to place it (part centre = the dropped
- *  cell). Residents: the ball bulb, the neon sign and the star field. */
+ *  cell). Residents: ball bulb, neon sign, star field, festoon string. */
 export function PartsPalette(): React.JSX.Element {
   return (
     <div style={wrapStyle}>
@@ -167,6 +213,19 @@ export function PartsPalette(): React.JSX.Element {
           <StarsThumb />
           <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>星球</div>
           <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>W+B 2ch</div>
+        </div>
+        <div
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('application/x-decor-part', 'festoon')
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+          title="ドラッグして張り、両端をつかんで掛け直す（1球=1番地・たわみはInspector）"
+          style={cardStyle}
+        >
+          <FestoonThumb />
+          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>垂れ電球</div>
+          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>STRING</div>
         </div>
       </div>
       <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 8, lineHeight: 1.5 }}>

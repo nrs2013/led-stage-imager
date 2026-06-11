@@ -136,11 +136,13 @@ export function drawBulbLit(
   cy: number,
   d: number,
   rgb: RGB,
-  style: BulbStyle
+  style: BulbStyle,
+  glowScale = 1 // halo-reach multiplier (1 = the ball bulb's standard; festoon's dial)
 ): void {
   const { hue, intensity: I } = bulbHueIntensity(rgb)
   if (I <= 0.004) return
   const r = d / 2
+  const gs = glowScale < 0.05 ? 0.05 : glowScale > 2.5 ? 2.5 : glowScale
   const vis = Math.pow(I, 1.5) // perceptual bloom curve: low = ぽっ, high = ジュワッ
   const blast = I > 0.92 ? (I - 0.92) / 0.08 : 0 // top-end white surge
   const hot = mixc(hue, [255, 255, 255], 0.85)
@@ -210,7 +212,7 @@ export function drawBulbLit(
     ctx.stroke()
   }
   // tight saturated bloom + wide soft bloom (ジュワッ)
-  const hr1 = r * (1.15 + 1.0 * vis)
+  const hr1 = Math.max(r * 1.05, r * (1.15 + 1.0 * vis) * gs)
   const gh1 = ctx.createRadialGradient(cx, cy, r * 0.4, cx, cy, hr1)
   gh1.addColorStop(0, rgba(hue, 0.4 * I))
   gh1.addColorStop(1, rgba(hue, 0))
@@ -218,7 +220,7 @@ export function drawBulbLit(
   ctx.beginPath()
   ctx.arc(cx, cy, hr1, 0, Math.PI * 2)
   ctx.fill()
-  const hr2 = bulbHaloRadius(r, I)
+  const hr2 = Math.max(r * 1.2, bulbHaloRadius(r, I) * gs)
   const soft = mixc(hue, [255, 255, 255], 0.25 + 0.35 * blast)
   const gh2 = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, hr2)
   gh2.addColorStop(0, rgba(soft, (0.22 + 0.18 * blast) * I))

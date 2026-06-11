@@ -17,7 +17,12 @@ export function buildCandidates(shapes: Shape[], exclude: string | null | Set<st
     const b = shapeArrayBounds(sh)
     xs.push(b.x, b.x + b.w)
     ys.push(b.y, b.y + b.h)
-    if (sh.type === 'line' || sh.type === 'polyline' || sh.type === 'freehand') {
+    if (
+      sh.type === 'line' ||
+      sh.type === 'polyline' ||
+      sh.type === 'freehand' ||
+      sh.type === 'festoon'
+    ) {
       const a = sh.points[0]
       const z = sh.points[sh.points.length - 1]
       if (a && z) {
@@ -40,7 +45,12 @@ export function salientOf(sh: Shape): { xs: number[]; ys: number[] } {
   }
   const xs = [b.x, b.x + b.w, b.x + b.w / 2]
   const ys = [b.y, b.y + b.h, b.y + b.h / 2]
-  if (sh.type === 'line' || sh.type === 'polyline' || sh.type === 'freehand') {
+  if (
+    sh.type === 'line' ||
+    sh.type === 'polyline' ||
+    sh.type === 'freehand' ||
+    sh.type === 'festoon'
+  ) {
     const a = sh.points[0]
     const z = sh.points[sh.points.length - 1]
     if (a && z) {

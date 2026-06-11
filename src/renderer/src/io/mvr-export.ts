@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import type { Chart, Fixture, Shape } from '../model/types'
 import { addressAt, repeatCount } from '../dmx/address'
 import { neonGlyphCenter } from '../render/neon'
+import { festoonBulbs } from '../render/festoon'
 
 // MVR export: one .mvr (ZIP) containing GeneralSceneDescription.xml (every patched
 // DECOR fixture with its absolute DMX address and stage position) plus an embedded
@@ -103,7 +104,8 @@ export function patchRows(chart: Chart): MvrFixtureRow[] {
           ? addressAt(fx.universe, fx.start, fx.mode, fx.addressStep, i)
           : { universe: fx.universe, start: fx.start }
       // neon: each tube (character) lands at its real glyph centre on the chart;
-      // stars: both skies (White/Blue) sit at the field's centre
+      // stars: both skies (White/Blue) sit at the field's centre;
+      // festoon: each bulb at its true spot on the sagging wire
       const pos =
         sh.type === 'neon'
           ? neonGlyphCenter(sh, i)
@@ -112,7 +114,9 @@ export function patchRows(chart: Chart): MvrFixtureRow[] {
                 x: (p0.x + (sh.points[sh.points.length - 1]?.x ?? p0.x)) / 2,
                 y: (p0.y + (sh.points[sh.points.length - 1]?.y ?? p0.y)) / 2
               }
-            : { x: p0.x + (sh.repeat?.dx ?? 0) * i, y: p0.y + (sh.repeat?.dy ?? 0) * i }
+            : sh.type === 'festoon'
+              ? (festoonBulbs(sh)[i] ?? p0)
+              : { x: p0.x + (sh.repeat?.dx ?? 0) * i, y: p0.y + (sh.repeat?.dy ?? 0) * i }
       rows.push({
         name: reps > 1 ? `${sh.id.slice(-6)} #${i + 1}` : sh.id.slice(-6),
         mode: fx.mode,

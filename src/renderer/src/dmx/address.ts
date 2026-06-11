@@ -1,6 +1,7 @@
 import type { ChannelMode, Shape } from '../model/types'
 import { channelCount } from './channel-math'
 import { neonCharCount } from '../render/neon'
+import { festoonCount } from '../render/festoon'
 
 export interface Addr {
   universe: number
@@ -12,10 +13,13 @@ export const formatDmx = (universe: number, address: number): string => `${unive
 
 /** How many addressed instances a shape expands to: repeat arrays = count,
  *  neon signs = one per non-space character, star fields = 2 (white sky / blue sky),
- *  otherwise 1. */
-export function repeatCount(shape: Pick<Shape, 'repeat' | 'type' | 'text'>): number {
+ *  festoon strings = one per bulb, otherwise 1. */
+export function repeatCount(
+  shape: Pick<Shape, 'repeat' | 'type' | 'text' | 'points' | 'sagPct' | 'bulbPitch'>
+): number {
   if (shape.type === 'neon') return neonCharCount(shape.text ?? '')
   if (shape.type === 'stars') return 2
+  if (shape.type === 'festoon') return festoonCount(shape)
   const c = shape.repeat?.count ?? 1
   return c > 1 ? c : 1
 }

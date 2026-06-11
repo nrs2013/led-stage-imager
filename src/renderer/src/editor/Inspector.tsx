@@ -8,6 +8,14 @@ import { shapeBounds, bulbDiameter } from './geometry'
 import { BULB_DEFAULT_STYLE } from '../render/bulb'
 import { NEON_FONTS, neonFont, neonSize, neonGlowAmount, neonCharCount } from '../render/neon'
 import { genStars, starsDensity, starsWhiteRatio, starsSize } from '../render/stars'
+import {
+  festoonSag,
+  festoonPitch,
+  festoonDiameter,
+  festoonCount,
+  festoonLength,
+  FESTOON_DEFAULT_GLOW
+} from '../render/festoon'
 
 /** Human-readable size of a shape: spans, dot counts, lengths — diagonals included. */
 function sizeText(shape: Shape): string {
@@ -21,6 +29,9 @@ function sizeText(shape: Shape): string {
   if (shape.type === 'stars') {
     const f = genStars(shape)
     return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · 白${f.white.length}+青${f.blue.length} 粒`
+  }
+  if (shape.type === 'festoon') {
+    return `ワイヤー ${Math.round(festoonLength(shape))} px · ${festoonCount(shape)} 球`
   }
   if (shape.type === 'freehand') {
     const single =
@@ -240,8 +251,76 @@ export function Inspector(): React.JSX.Element {
         </>
       )}
 
+      {/* festoon: sag / pitch / glass size / glow / texture (colour & gauge come from
+          the console — one address per bulb, like the ball bulb) */}
+      {shape.type === 'festoon' && (
+        <>
+          <Field label="たわみ（張った長さの %）">
+            <NumberField
+              value={festoonSag(shape)}
+              min={0}
+              max={60}
+              onChange={(v) => updateShape(shape.id, { sagPct: v })}
+            />
+          </Field>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Field label="球の間隔 (px)">
+              <NumberField
+                value={festoonPitch(shape)}
+                min={4}
+                max={500}
+                onChange={(v) => updateShape(shape.id, { bulbPitch: v })}
+              />
+            </Field>
+            <Field label="径（ドット）">
+              <NumberField
+                value={festoonDiameter(shape)}
+                min={1}
+                max={50}
+                step={0.5}
+                onChange={(v) => updateShape(shape.id, { diameter: v })}
+              />
+            </Field>
+          </div>
+          <Field label="グロウ (%)">
+            <NumberField
+              value={shape.neonGlow ?? FESTOON_DEFAULT_GLOW}
+              min={0}
+              max={100}
+              onChange={(v) => updateShape(shape.id, { neonGlow: v })}
+            />
+          </Field>
+          <Field label="質感">
+            <div style={{ display: 'flex', gap: 6 }}>
+              {(
+                [
+                  { id: 'clear', label: 'クリア' },
+                  { id: 'frost', label: 'フロスト' }
+                ] as { id: BulbStyle; label: string }[]
+              ).map((m) => (
+                <button
+                  key={m.id}
+                  style={{
+                    ...buttonStyle({ active: (shape.bulbStyle ?? BULB_DEFAULT_STYLE) === m.id }),
+                    flex: 1,
+                    padding: '6px 0'
+                  }}
+                  onClick={() => updateShape(shape.id, { bulbStyle: m.id })}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </Field>
+        </>
+      )}
+
       {/* display mode */}
-      {!open && shape.type !== 'bulb' && shape.type !== 'neon' && shape.type !== 'stars' && (
+      {!open &&
+        shape.type !== 'bulb' &&
+        shape.type !== 'neon' &&
+        shape.type !== 'stars' &&
+        shape.type !== 'festoon' && (
         <Field label="Display">
           <div style={{ display: 'flex', gap: 6 }}>
             {DISPLAY_MODES.map((m) => (
@@ -257,8 +336,11 @@ export function Inspector(): React.JSX.Element {
         </Field>
       )}
 
-      {shape.type !== 'bulb' && shape.type !== 'neon' && shape.type !== 'stars' && (
-        <Field label="Width">
+      {shape.type !== 'bulb' &&
+        shape.type !== 'neon' &&
+        shape.type !== 'stars' &&
+        shape.type !== 'festoon' && (
+          <Field label="Width">
           <NumberField
             value={shape.strokeWidth}
             min={1}
@@ -268,8 +350,8 @@ export function Inspector(): React.JSX.Element {
         </Field>
       )}
 
-      {/* repeat / array (neon & stars ARE their own arrays — per character / per sky) */}
-      {shape.type !== 'neon' && shape.type !== 'stars' && (
+      {/* repeat / array (neon, stars & festoon ARE their own arrays) */}
+      {shape.type !== 'neon' && shape.type !== 'stars' && shape.type !== 'festoon' && (
         <div style={{ marginBottom: rowGap }}>
           <label style={fieldLabel}>Array{hasRepeat ? `  ×${shape.repeat!.count}` : ''}</label>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -357,14 +439,16 @@ export function Inspector(): React.JSX.Element {
             </Field>
           )}
 
-          {(hasRepeat || shape.type === 'neon' || shape.type === 'stars') && (
+          {(hasRepeat || repeatCount(shape) > 1) && (
             <Field
               label={
                 shape.type === 'neon'
                   ? `文字間隔 ch（0=一斉 / 既定 ${channelCount(fixture.mode)}）`
                   : shape.type === 'stars'
                     ? `白→青 間隔 ch（既定 ${channelCount(fixture.mode)}）`
-                    : `Offset (default ${channelCount(fixture.mode)})`
+                    : shape.type === 'festoon'
+                      ? `番地間隔 ch（0=一斉 / 既定 ${channelCount(fixture.mode)}）`
+                      : `Offset (default ${channelCount(fixture.mode)})`
               }
             >
               <NumberField

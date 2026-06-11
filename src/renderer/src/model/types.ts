@@ -10,6 +10,7 @@ export type ShapeType =
   | 'bulb'
   | 'neon'
   | 'stars'
+  | 'festoon'
 export type DisplayMode = 'stroke' | 'fill' | 'both'
 export type ChannelMode = 'rgb' | 'rgbdim' | 'dim' | 'rgbw'
 export type BulbStyle = 'clear' | 'frost'
@@ -43,8 +44,12 @@ export interface Shape {
   fontId?: string
   /** Neon only: glyph height in canvas px. */
   fontSize?: number
-  /** Neon only: glow reach 0–100 (halo around the tubes; のむさんの「光りすぎ防止」ツマミ). */
+  /** Neon / Festoon: glow dial 0–100 (halo reach; のむさんの「光りすぎ防止」ツマミ). */
   neonGlow?: number
+  /** Festoon only: sag depth as % of the span between the two grabbed ends. */
+  sagPct?: number
+  /** Festoon only: bulb spacing in px along the wire (longer string = more bulbs). */
+  bulbPitch?: number
   /** Stars only: density dial 0–100 — more = a thick sky, less = sparse and airy.
    *  points[0]/[1] are the field's corners (a rect the sky fills). */
   starDensity?: number

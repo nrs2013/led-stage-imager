@@ -1,6 +1,7 @@
 import type { Point, Shape } from '../model/types'
 import { BULB_DEFAULT_DIAMETER } from '../render/bulb'
 import { neonBounds } from '../render/neon'
+import { festoonSamples } from '../render/festoon'
 
 export interface Bounds {
   x: number
@@ -91,6 +92,9 @@ export function shapeBounds(shape: Shape): Bounds {
   if (shape.type === 'neon' && shape.points.length >= 1) {
     return neonBounds(shape)
   }
+  if (shape.type === 'festoon' && shape.points.length >= 2) {
+    return boundsOfPoints(festoonSamples(shape, 48)) // the belly hangs below the chord
+  }
   if (shape.points.length < 2) return boundsOfPoints(shape.points)
   switch (shape.type) {
     case 'rect':
@@ -127,6 +131,13 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
     const b = neonBounds(shape)
     ctx.beginPath()
     ctx.rect(b.x, b.y, b.w, b.h)
+    return
+  }
+  if (shape.type === 'festoon' && p.length >= 2) {
+    const pts = festoonSamples(shape, 48)
+    ctx.beginPath()
+    ctx.moveTo(pts[0].x, pts[0].y)
+    for (const q of pts) ctx.lineTo(q.x, q.y)
     return
   }
   if (p.length < 2) return
@@ -279,7 +290,10 @@ export function pasteDelta(shapes: Shape[], at: Point): Point {
   }
   const allBulbs =
     shapes.length > 0 &&
-    shapes.every((sh) => sh.type === 'bulb' || sh.type === 'neon' || sh.type === 'stars')
+    shapes.every(
+      (sh) =>
+        sh.type === 'bulb' || sh.type === 'neon' || sh.type === 'stars' || sh.type === 'festoon'
+    )
   if (allBulbs) {
     return {
       x: Math.round(at.x - (minX + maxX) / 2),

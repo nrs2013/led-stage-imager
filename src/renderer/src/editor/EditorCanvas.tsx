@@ -47,6 +47,14 @@ import {
   STARS_DEFAULT_WHITE_RATIO,
   STARS_DEFAULT_SIZE
 } from '../render/stars'
+import {
+  drawFestoonSchematic,
+  festoonSamples,
+  FESTOON_DEFAULT_SAG,
+  FESTOON_DEFAULT_PITCH,
+  FESTOON_DEFAULT_DIAMETER,
+  FESTOON_DEFAULT_GLOW
+} from '../render/festoon'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 
@@ -115,7 +123,7 @@ const isPaintedRun = isCellRun
 /** Grabbable handles of a shape. Painted runs expose their two ends (pull = re-aim /
  *  change length); smooth pen strokes have none (move/delete/repaint). */
 function shapeHandles(sh: Shape): Handle[] {
-  if (sh.type === 'line' || sh.type === 'polyline') {
+  if (sh.type === 'line' || sh.type === 'polyline' || sh.type === 'festoon') {
     return sh.points.map((p, i) => ({ x: p.x, y: p.y, kind: 'vertex' as const, idx: i }))
   }
   if (sh.type === 'freehand' && isPaintedRun(sh)) {
@@ -236,6 +244,11 @@ function drawShapeInto(
   // star fields: dashed frame + the cold dots (same sky the output will light)
   if (shape.type === 'stars') {
     drawStarsSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
+  // festoon strings: the sagging wire + cold sockets
+  if (shape.type === 'festoon') {
+    drawFestoonSchematic(ctx, shape, stroke, fill, boost)
     return
   }
   const open = isOpen(shape.type)
@@ -990,6 +1003,12 @@ export function EditorCanvas(): React.JSX.Element {
             const dd = Math.hypot(pt.x - q.x, pt.y - q.y)
             if (dd < d) d = dd
           }
+        } else if (sh.type === 'festoon') {
+          // the belly sags below the chord: test against the sampled wire itself
+          for (const pt of festoonSamples(sh, 48)) {
+            const dd = Math.hypot(pt.x - q.x, pt.y - q.y)
+            if (dd < d) d = dd
+          }
         } else if (sh.type === 'line' || sh.type === 'polyline') {
           for (let k = 1; k < sh.points.length; k++) {
             const dd = segDist(q, sh.points[k - 1], sh.points[k])
@@ -1718,7 +1737,7 @@ export function EditorCanvas(): React.JSX.Element {
   }
   const onDrop = (e: React.DragEvent<HTMLCanvasElement>): void => {
     const part = e.dataTransfer.getData('application/x-decor-part')
-    if (part !== 'bulb' && part !== 'neon' && part !== 'stars') return
+    if (part !== 'bulb' && part !== 'neon' && part !== 'stars' && part !== 'festoon') return
     e.preventDefault()
     const cell = toCell(e.clientX, e.clientY)
     let center = { x: cell.x + 0.5, y: cell.y + 0.5 }
@@ -1757,7 +1776,7 @@ export function EditorCanvas(): React.JSX.Element {
         fontSize: NEON_DEFAULT_SIZE,
         neonGlow: NEON_DEFAULT_GLOW
       })
-    } else {
+    } else if (part === 'stars') {
       // star field: a corner-box part — drops as a 120×70 sky centred on the cell,
       // then the ordinary corner/edge handles stretch it over the LED area
       addShape({
@@ -1772,6 +1791,21 @@ export function EditorCanvas(): React.JSX.Element {
         starWhiteRatio: STARS_DEFAULT_WHITE_RATIO,
         starSize: STARS_DEFAULT_SIZE,
         starSeed: (Math.random() * 0xffffffff) >>> 0
+      })
+    } else {
+      // festoon string: drops as a horizontal 160px wire — then grab either end
+      addShape({
+        type: 'festoon',
+        points: [
+          { x: center.x - 80, y: center.y },
+          { x: center.x + 80, y: center.y }
+        ],
+        display: 'fill',
+        strokeWidth: 1,
+        sagPct: FESTOON_DEFAULT_SAG,
+        bulbPitch: FESTOON_DEFAULT_PITCH,
+        diameter: FESTOON_DEFAULT_DIAMETER,
+        neonGlow: FESTOON_DEFAULT_GLOW
       })
     }
   }
