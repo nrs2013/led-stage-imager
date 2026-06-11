@@ -8,6 +8,7 @@ export type ShapeType =
   | 'star'
   | 'polygon'
   | 'bulb'
+  | 'neon'
 export type DisplayMode = 'stroke' | 'fill' | 'both'
 export type ChannelMode = 'rgb' | 'rgbdim' | 'dim' | 'rgbw'
 export type BulbStyle = 'clear' | 'frost'
@@ -34,6 +35,15 @@ export interface Shape {
   diameter?: number
   /** Bulb only: clear glass (filament visible) or frosted (milky globe). */
   bulbStyle?: BulbStyle
+  /** Neon only: the sign text (one line). Each non-space character is one
+   *  addressable tube; points[0] is the sign's centre. */
+  text?: string
+  /** Neon only: id into render/neon NEON_FONTS. */
+  fontId?: string
+  /** Neon only: glyph height in canvas px. */
+  fontSize?: number
+  /** Neon only: glow reach 0–100 (halo around the tubes; のむさんの「光りすぎ防止」ツマミ). */
+  neonGlow?: number
 }
 
 export interface Fixture {

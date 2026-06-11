@@ -1,5 +1,6 @@
 import type { Point, Shape } from '../model/types'
 import { BULB_DEFAULT_DIAMETER } from '../render/bulb'
+import { neonBounds } from '../render/neon'
 
 export interface Bounds {
   x: number
@@ -87,6 +88,9 @@ export function shapeBounds(shape: Shape): Bounds {
     const d = bulbDiameter(shape)
     return { x: c.x - d / 2, y: c.y - d / 2, w: d, h: d }
   }
+  if (shape.type === 'neon' && shape.points.length >= 1) {
+    return neonBounds(shape)
+  }
   if (shape.points.length < 2) return boundsOfPoints(shape.points)
   switch (shape.type) {
     case 'rect':
@@ -116,6 +120,12 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
     const d = bulbDiameter(shape)
     ctx.beginPath()
     ctx.arc(p[0].x, p[0].y, d / 2, 0, Math.PI * 2)
+    return
+  }
+  if (shape.type === 'neon' && p.length >= 1) {
+    const b = neonBounds(shape)
+    ctx.beginPath()
+    ctx.rect(b.x, b.y, b.w, b.h)
     return
   }
   if (p.length < 2) return
@@ -250,9 +260,9 @@ export function shapeIntersectsRect(
   return true // closed box shapes fill their bbox closely enough
 }
 
-/** Where pasted clipboard content lands relative to the clicked spot: bulbs anchor by
- *  their CENTRE (the clicked dot becomes the glass centre — のむさん指定), everything
- *  else keeps the original top-left anchor. Whole-cell deltas keep .5 centres crisp. */
+/** Where pasted clipboard content lands relative to the clicked spot: PARTS (bulbs,
+ *  neon signs) anchor by their CENTRE (the clicked dot becomes the centre — のむさん指定),
+ *  everything else keeps the original top-left anchor. Whole-cell deltas keep .5 centres crisp. */
 export function pasteDelta(shapes: Shape[], at: Point): Point {
   let minX = Infinity
   let minY = Infinity
@@ -265,7 +275,8 @@ export function pasteDelta(shapes: Shape[], at: Point): Point {
     maxX = Math.max(maxX, b.x + b.w)
     maxY = Math.max(maxY, b.y + b.h)
   }
-  const allBulbs = shapes.length > 0 && shapes.every((sh) => sh.type === 'bulb')
+  const allBulbs =
+    shapes.length > 0 && shapes.every((sh) => sh.type === 'bulb' || sh.type === 'neon')
   if (allBulbs) {
     return {
       x: Math.round(at.x - (minX + maxX) / 2),

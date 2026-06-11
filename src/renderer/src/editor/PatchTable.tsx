@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useStore } from '../state/store'
 import { C, F, buttonStyle } from '../ui/tokens'
 import { channelRange, detectOverlaps } from '../dmx/patch'
-import { formatDmx } from '../dmx/address'
+import { formatDmx, repeatCount } from '../dmx/address'
 import { resolveColor } from '../dmx/resolve'
 import { buildMvr } from '../io/mvr-export'
 
@@ -109,7 +109,8 @@ export function PatchTable(): React.JSX.Element {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
           {chart.fixtures.map((f, i) => {
             const [s, e] = channelRange(f)
-            const cnt = chart.shapes.find((x) => x.id === f.shapeId)?.repeat?.count ?? 1
+            const sh = chart.shapes.find((x) => x.id === f.shapeId)
+            const cnt = sh ? repeatCount(sh) : 1
             const isFlagged = flagged.has(f.id)
             const isSel = selectedIds.includes(f.shapeId)
             const [r, g, b] = resolveColor(

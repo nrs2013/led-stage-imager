@@ -10,6 +10,7 @@ import {
   bulbDiameter
 } from '../editor/geometry'
 import { drawBulbLit, BULB_DEFAULT_STYLE } from '../render/bulb'
+import { drawNeonGlyphLit } from '../render/neon'
 
 const ZEROS = new Uint8Array(512)
 
@@ -80,7 +81,7 @@ export class OutputRenderer {
           )
         }
         if (rgb[0] === 0 && rgb[1] === 0 && rgb[2] === 0) continue // off -> stays transparent
-        this.drawShape(shape, rgb, dx * i, dy * i)
+        this.drawShape(shape, rgb, dx * i, dy * i, i)
       }
     }
 
@@ -120,10 +121,17 @@ export class OutputRenderer {
     return d
   }
 
-  private drawShape(shape: Shape, rgb: RGB, ox = 0, oy = 0): void {
+  private drawShape(shape: Shape, rgb: RGB, ox = 0, oy = 0, rep = 0): void {
     const ctx = this.ctx
     ctx.save()
     if (ox || oy) ctx.translate(ox, oy)
+    // neon signs: instance i lights ONLY tube #i (its own console colour) — the
+    // per-character chase falls out of the ordinary repeat addressing
+    if (shape.type === 'neon') {
+      drawNeonGlyphLit(ctx, shape, rgb, rep)
+      ctx.restore()
+      return
+    }
     // ball bulbs: photoreal lit render (hue + gauge both come from the console RGB)
     if (shape.type === 'bulb') {
       const c = shape.points[0]

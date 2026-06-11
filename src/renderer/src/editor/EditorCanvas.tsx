@@ -24,6 +24,14 @@ import {
 import { buildCandidates, salientOf, snap1D, snapMoveDelta, softAxis, type SnapCand } from './snapping'
 import { cleanPaintStroke, regenChain } from './stroke-fit'
 import { findDrawableRegions, type Region } from './regions'
+import {
+  drawNeonSchematic,
+  clearNeonLayoutCache,
+  NEON_DEFAULT_TEXT,
+  NEON_DEFAULT_FONT,
+  NEON_DEFAULT_SIZE,
+  NEON_DEFAULT_GLOW
+} from '../render/neon'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 
@@ -202,6 +210,12 @@ function drawShapeInto(
       ctx.fillStyle = stroke
       ctx.fillRect(x - 0.5, y - 0.5, 1, 1)
     }
+    return
+  }
+  // neon signs: schematic cold tubes in the editor (the lit render lives in
+  // Live / Syphon output, like the bulb)
+  if (shape.type === 'neon') {
+    drawNeonSchematic(ctx, shape, stroke, fill, boost)
     return
   }
   const open = isOpen(shape.type)
@@ -652,6 +666,18 @@ export function EditorCanvas(): React.JSX.Element {
     contentDirty.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chart.shapes, chart.canvas, chart.underlay, mask])
+
+  // neon webfonts arrive async: stale measurements (taken against the fallback
+  // font) must be thrown away and the offscreen repainted once the real font lands
+  useEffect(() => {
+    const onDone = (): void => {
+      clearNeonLayoutCache()
+      contentDirty.current = true
+      drawRef.current()
+    }
+    document.fonts?.addEventListener('loadingdone', onDone)
+    return () => document.fonts?.removeEventListener('loadingdone', onDone)
+  }, [])
 
   // cache underlay + mask images
   useEffect(() => {
@@ -1643,17 +1669,28 @@ export function EditorCanvas(): React.JSX.Element {
   }
   const onDrop = (e: React.DragEvent<HTMLCanvasElement>): void => {
     const part = e.dataTransfer.getData('application/x-decor-part')
-    if (!part) return
+    if (part !== 'bulb' && part !== 'neon') return
     e.preventDefault()
+    const cell = toCell(e.clientX, e.clientY)
+    const center = { x: cell.x + 0.5, y: cell.y + 0.5 }
+    if (mask && !isDrawable(center)) {
+      showBlocked()
+      return
+    }
+    useStore.getState().setTool('select')
     if (part === 'bulb') {
-      const cell = toCell(e.clientX, e.clientY)
-      const center = { x: cell.x + 0.5, y: cell.y + 0.5 }
-      if (mask && !isDrawable(center)) {
-        showBlocked()
-        return
-      }
-      useStore.getState().setTool('select')
       addShape({ type: 'bulb', points: [center], display: 'fill', strokeWidth: 1 })
+    } else {
+      addShape({
+        type: 'neon',
+        points: [center],
+        display: 'fill',
+        strokeWidth: 1,
+        text: NEON_DEFAULT_TEXT,
+        fontId: NEON_DEFAULT_FONT,
+        fontSize: NEON_DEFAULT_SIZE,
+        neonGlow: NEON_DEFAULT_GLOW
+      })
     }
   }
 

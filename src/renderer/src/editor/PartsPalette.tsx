@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { C, F } from '../ui/tokens'
-import { drawBulbGlass, drawBulbLit, BULB_DEFAULT_DIAMETER } from '../render/bulb'
+import { drawBulbGlass, drawBulbLit, BULB_DEFAULT_DIAMETER, type RGB } from '../render/bulb'
+import { drawNeonGlyphLit, clearNeonLayoutCache } from '../render/neon'
+import type { Shape } from '../model/types'
 
 /** Live-rendered thumbnail: the actual bulb renderer at a thumbnail-friendly size,
  *  lit warm — what you drag is what you get. */
@@ -28,8 +30,58 @@ function BulbThumb({ size = 46 }: { size?: number }): React.JSX.Element {
   )
 }
 
-/** アイコン棚 — drag a part onto the chart to place it (bulb centre = the dropped
- *  cell). First resident: the ball bulb. Future parts join this grid. */
+/** Live-rendered thumbnail: the real neon renderer — front half pink, back half
+ *  ice blue, demonstrating 1文字=1番地 right on the shelf. */
+function NeonThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX.Element {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const draw = (): void => {
+      const ctx = cv.getContext('2d')
+      if (!ctx) return
+      ctx.clearRect(0, 0, w, h)
+      ctx.fillStyle = '#000'
+      ctx.fillRect(0, 0, w, h)
+      const shape = {
+        id: 'neon-thumb',
+        type: 'neon',
+        points: [{ x: w / 2, y: h / 2 }],
+        display: 'fill',
+        strokeWidth: 1,
+        text: 'Neon',
+        fontId: 'neonderthaw',
+        fontSize: 30,
+        neonGlow: 55
+      } as Shape
+      const cols: RGB[] = [
+        [255, 90, 205],
+        [255, 90, 205],
+        [110, 195, 255],
+        [110, 195, 255]
+      ]
+      for (let i = 0; i < cols.length; i++) drawNeonGlyphLit(ctx, shape, cols[i], i)
+    }
+    draw()
+    const onFonts = (): void => {
+      clearNeonLayoutCache()
+      draw()
+    }
+    document.fonts?.addEventListener('loadingdone', onFonts)
+    return () => document.fonts?.removeEventListener('loadingdone', onFonts)
+  }, [w, h])
+  return (
+    <canvas
+      ref={ref}
+      width={w}
+      height={h}
+      style={{ display: 'block', borderRadius: 4, pointerEvents: 'none' }}
+    />
+  )
+}
+
+/** アイコン棚 — drag a part onto the chart to place it (part centre = the dropped
+ *  cell). Residents: the ball bulb and the neon sign. Future parts join this grid. */
 export function PartsPalette(): React.JSX.Element {
   return (
     <div style={wrapStyle}>
@@ -49,6 +101,19 @@ export function PartsPalette(): React.JSX.Element {
           <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>
             Φ{BULB_DEFAULT_DIAMETER}
           </div>
+        </div>
+        <div
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('application/x-decor-part', 'neon')
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+          title="ドラッグしてチャートに置き、Inspectorで文字を打つ（1文字=1番地）"
+          style={cardStyle}
+        >
+          <NeonThumb />
+          <div style={{ fontSize: 11, color: C.text, fontFamily: F.ui, marginTop: 5 }}>ネオン管</div>
+          <div style={{ fontSize: 9, color: C.hint, fontFamily: F.mono }}>TEXT</div>
         </div>
       </div>
       <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 8, lineHeight: 1.5 }}>

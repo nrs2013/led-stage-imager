@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import type { Chart, Fixture, Shape } from '../model/types'
 import { addressAt, repeatCount } from '../dmx/address'
+import { neonGlyphCenter } from '../render/neon'
 
 // MVR export: one .mvr (ZIP) containing GeneralSceneDescription.xml (every patched
 // DECOR fixture with its absolute DMX address and stage position) plus an embedded
@@ -101,12 +102,17 @@ export function patchRows(chart: Chart): MvrFixtureRow[] {
         reps > 1
           ? addressAt(fx.universe, fx.start, fx.mode, fx.addressStep, i)
           : { universe: fx.universe, start: fx.start }
+      // neon: each tube (character) lands at its real glyph centre on the chart
+      const pos =
+        sh.type === 'neon'
+          ? neonGlyphCenter(sh, i)
+          : { x: p0.x + (sh.repeat?.dx ?? 0) * i, y: p0.y + (sh.repeat?.dy ?? 0) * i }
       rows.push({
         name: reps > 1 ? `${sh.id.slice(-6)} #${i + 1}` : sh.id.slice(-6),
         mode: fx.mode,
         absAddress: a.universe * 512 + a.start,
-        x: (p0.x + (sh.repeat?.dx ?? 0) * i) * MM_PER_PX,
-        y: -(p0.y + (sh.repeat?.dy ?? 0) * i) * MM_PER_PX
+        x: pos.x * MM_PER_PX,
+        y: -pos.y * MM_PER_PX
       })
     }
   }

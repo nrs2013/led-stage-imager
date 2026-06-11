@@ -2,16 +2,20 @@ import { useStore } from '../state/store'
 import type { BulbStyle, ChannelMode, DisplayMode, Shape } from '../model/types'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
 import { channelCount } from '../dmx/channel-math'
-import { addressAt, formatDmx } from '../dmx/address'
+import { addressAt, formatDmx, repeatCount } from '../dmx/address'
 import { NumberField } from '../ui/NumberField'
 import { shapeBounds, bulbDiameter } from './geometry'
 import { BULB_DEFAULT_STYLE } from '../render/bulb'
+import { NEON_FONTS, neonFont, neonSize, neonGlowAmount, neonCharCount } from '../render/neon'
 
 /** Human-readable size of a shape: spans, dot counts, lengths — diagonals included. */
 function sizeText(shape: Shape): string {
   const b = shapeBounds(shape)
   if (shape.type === 'bulb') {
     return `Φ ${bulbDiameter(shape)} px`
+  }
+  if (shape.type === 'neon') {
+    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${neonCharCount(shape.text ?? '')} 管`
   }
   if (shape.type === 'freehand') {
     const single =
@@ -116,8 +120,79 @@ export function Inspector(): React.JSX.Element {
         </>
       )}
 
+      {/* neon: text + font + size + glow (colour & gauge come from the console,
+          one address per character — the Offset field below sets the 文字間隔) */}
+      {shape.type === 'neon' && (
+        <>
+          <Field label="テキスト（1行）">
+            <input
+              value={shape.text ?? ''}
+              placeholder="OPEN"
+              style={{ ...inputStyle, fontFamily: F.ui, width: '100%', boxSizing: 'border-box' }}
+              onChange={(e) => updateShape(shape.id, { text: e.target.value })}
+            />
+          </Field>
+          <Field label="書体">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {NEON_FONTS.map((f) => {
+                const active = neonFont(shape).id === f.id
+                return (
+                  <button
+                    key={f.id}
+                    style={{
+                      ...buttonStyle({ active }),
+                      padding: '6px 4px 4px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 2
+                    }}
+                    onClick={() => updateShape(shape.id, { fontId: f.id })}
+                  >
+                    <span
+                      style={{
+                        fontFamily: `"${f.family}"`,
+                        fontWeight: f.weight,
+                        fontSize: 15,
+                        lineHeight: 1.15,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        maxWidth: '100%'
+                      }}
+                    >
+                      {f.sample}
+                    </span>
+                    <span style={{ fontFamily: F.mono, fontSize: 8.5, opacity: 0.65 }}>
+                      {f.label}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </Field>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Field label="文字サイズ (px)">
+              <NumberField
+                value={neonSize(shape)}
+                min={6}
+                max={500}
+                onChange={(v) => updateShape(shape.id, { fontSize: v })}
+              />
+            </Field>
+            <Field label="グロウ (%)">
+              <NumberField
+                value={neonGlowAmount(shape)}
+                min={0}
+                max={100}
+                onChange={(v) => updateShape(shape.id, { neonGlow: v })}
+              />
+            </Field>
+          </div>
+        </>
+      )}
+
       {/* display mode */}
-      {!open && shape.type !== 'bulb' && (
+      {!open && shape.type !== 'bulb' && shape.type !== 'neon' && (
         <Field label="Display">
           <div style={{ display: 'flex', gap: 6 }}>
             {DISPLAY_MODES.map((m) => (
@@ -133,7 +208,7 @@ export function Inspector(): React.JSX.Element {
         </Field>
       )}
 
-      {shape.type !== 'bulb' && (
+      {shape.type !== 'bulb' && shape.type !== 'neon' && (
         <Field label="Width">
           <NumberField
             value={shape.strokeWidth}
@@ -144,29 +219,31 @@ export function Inspector(): React.JSX.Element {
         </Field>
       )}
 
-      {/* repeat / array */}
-      <div style={{ marginBottom: rowGap }}>
-        <label style={fieldLabel}>Array{hasRepeat ? `  ×${shape.repeat!.count}` : ''}</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <label style={fieldLabel}>Count</label>
-            <NumberField
-              value={shape.repeat?.count ?? 1}
-              min={1}
-              max={4096}
-              onChange={(v) => setRepeat({ count: v })}
-            />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={fieldLabel}>Pitch X</label>
-            <NumberField value={shape.repeat?.dx ?? 10} onChange={(v) => setRepeat({ dx: v })} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={fieldLabel}>Pitch Y</label>
-            <NumberField value={shape.repeat?.dy ?? 0} onChange={(v) => setRepeat({ dy: v })} />
+      {/* repeat / array (a neon sign IS its own array — one instance per character) */}
+      {shape.type !== 'neon' && (
+        <div style={{ marginBottom: rowGap }}>
+          <label style={fieldLabel}>Array{hasRepeat ? `  ×${shape.repeat!.count}` : ''}</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <label style={fieldLabel}>Count</label>
+              <NumberField
+                value={shape.repeat?.count ?? 1}
+                min={1}
+                max={4096}
+                onChange={(v) => setRepeat({ count: v })}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={fieldLabel}>Pitch X</label>
+              <NumberField value={shape.repeat?.dx ?? 10} onChange={(v) => setRepeat({ dx: v })} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={fieldLabel}>Pitch Y</label>
+              <NumberField value={shape.repeat?.dy ?? 0} onChange={(v) => setRepeat({ dy: v })} />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div style={{ height: 1, background: C.border, margin: `${rowGap}px 0` }} />
 
@@ -225,11 +302,17 @@ export function Inspector(): React.JSX.Element {
             </Field>
           )}
 
-          {hasRepeat && (
-            <Field label={`Offset (default ${channelCount(fixture.mode)})`}>
+          {(hasRepeat || shape.type === 'neon') && (
+            <Field
+              label={
+                shape.type === 'neon'
+                  ? `文字間隔 ch（0=一斉 / 既定 ${channelCount(fixture.mode)}）`
+                  : `Offset (default ${channelCount(fixture.mode)})`
+              }
+            >
               <NumberField
                 value={fixture.addressStep ?? channelCount(fixture.mode)}
-                min={1}
+                min={0}
                 max={512}
                 onChange={(v) => upsertFixture(shape.id, { addressStep: v })}
               />
@@ -245,18 +328,19 @@ export function Inspector(): React.JSX.Element {
               letterSpacing: '0.04em'
             }}
           >
-            {!hasRepeat
-              ? `${formatDmx(fixture.universe, fixture.start)} – ${formatDmx(fixture.universe, fixture.start + channelCount(fixture.mode) - 1)}`
-              : (() => {
-                  const last = addressAt(
-                    fixture.universe,
-                    fixture.start,
-                    fixture.mode,
-                    fixture.addressStep,
-                    shape.repeat!.count - 1
-                  )
-                  return `${formatDmx(fixture.universe, fixture.start)} … ${formatDmx(last.universe, last.start)} ×${shape.repeat!.count}`
-                })()}
+            {(() => {
+              const reps = repeatCount(shape)
+              if (reps <= 1)
+                return `${formatDmx(fixture.universe, fixture.start)} – ${formatDmx(fixture.universe, fixture.start + channelCount(fixture.mode) - 1)}`
+              const last = addressAt(
+                fixture.universe,
+                fixture.start,
+                fixture.mode,
+                fixture.addressStep,
+                reps - 1
+              )
+              return `${formatDmx(fixture.universe, fixture.start)} … ${formatDmx(last.universe, last.start)} ×${reps}`
+            })()}
           </div>
         </>
       )}
