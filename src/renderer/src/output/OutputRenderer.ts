@@ -1,6 +1,14 @@
 import type { Chart, Shape, Fixture } from '../model/types'
-import { fixtureColor, type RGB } from '../dmx/channel-math'
+import { fixtureColor, beamPose, type RGB, type BeamPose } from '../dmx/channel-math'
 import { addressAt, repeatCount } from '../dmx/address'
+import { bulbHueIntensity } from '../render/bulb'
+import {
+  drawWallBeamInto,
+  drawAirBeamInto,
+  imageAlbedo,
+  imageBox,
+  darkTone
+} from '../render/uplight'
 import {
   cornerBounds,
   trianglePoints,
@@ -39,6 +47,12 @@ const ZEROS = new Uint8Array(512)
 export class OutputRenderer {
   private ctx: CanvasRenderingContext2D
   private bloom?: HTMLCanvasElement
+  /** Uplight pipeline buffers (写真×光マップの乗算合成用). */
+  private lightMap?: HTMLCanvasElement
+  private smoothMap?: HTMLCanvasElement
+  private workMap?: HTMLCanvasElement
+  private airMap?: HTMLCanvasElement
+  private noiseTile?: HTMLCanvasElement
   /** Frame timestamp (ms) — drives the star fields' subtle twinkle. */
   private frameTime = 0
 
@@ -110,6 +124,9 @@ export class OutputRenderer {
       }
     }
 
+    // Photo materials lit by uplight beams (light map → multiply → additive)
+    this.renderUplights(chart, fxByShape, dmxByUniverse, gamma, manual)
+
     // Optional global "smoke" glow: a whole-output bloom. The LEDs themselves stay crisp;
     // this just mimics how stage haze spreads them. Off by default.
     if (chart.settings.glow) {
@@ -131,6 +148,145 @@ export class OutputRenderer {
     ctx.globalAlpha = 1
   }
 
+  /** Photo materials + uplights: every lit beam pours into ONE light map (linear
+   *  additive mixing — red+green meets as yellow), the photo (albedo) shows only
+   *  where the map washes it (multiply + dark tone), and the air beam is visible
+   *  only through smoke and is cut where a photo stands in front of it.
+   *  All-off → draws nothing at all (完全な闇). */
+  private renderUplights(
+    chart: Chart,
+    fxByShape: Map<string, Fixture>,
+    dmxByUniverse: Record<number, Uint8Array>,
+    gamma: boolean,
+    manual: Record<string, RGB> | null
+  ): void {
+    const images = chart.shapes.filter((s) => s.type === 'image' && s.imageData)
+    const lights: { shape: Shape; hue: RGB; I: number; pose: BeamPose }[] = []
+    for (const s of chart.shapes) {
+      if (s.type !== 'uplight') continue
+      const fx = fxByShape.get(s.id)
+      if (!fx) continue
+      const data = dmxByUniverse[fx.universe] ?? ZEROS
+      const man = manual?.[fx.id]
+      const rgb = man ?? fixtureColor(fx, data, gamma)
+      const { hue, intensity } = bulbHueIntensity(rgb)
+      if (intensity <= 0.004) continue
+      const pose = man ? { pan: 0, tilt: 0, zoom: 0 } : beamPose(fx, data)
+      lights.push({ shape: s, hue, I: intensity, pose })
+    }
+    if (lights.length === 0) return
+    const w = this.canvas.width
+    const h = this.canvas.height
+    const get = (key: 'lightMap' | 'smoothMap' | 'workMap' | 'airMap'): HTMLCanvasElement => {
+      let cvs = this[key]
+      if (!cvs) {
+        cvs = document.createElement('canvas')
+        this[key] = cvs
+      }
+      if (cvs.width !== w) cvs.width = w
+      if (cvs.height !== h) cvs.height = h
+      return cvs
+    }
+    // ---- the light map: all beams summed once (additive colour mixing)
+    const lm = get('lightMap')
+    const lmc = lm.getContext('2d')
+    if (!lmc) return
+    lmc.globalCompositeOperation = 'source-over'
+    lmc.fillStyle = '#000'
+    lmc.fillRect(0, 0, w, h)
+    for (const L of lights) drawWallBeamInto(lmc, L.shape, L.hue, L.I, L.pose)
+    // melt the 8-bit contour bands with a fine blur write-back…
+    const sm = get('smoothMap')
+    const smc = sm.getContext('2d')
+    if (smc) {
+      smc.clearRect(0, 0, w, h)
+      smc.filter = 'blur(1.6px)'
+      smc.drawImage(lm, 0, 0)
+      smc.filter = 'none'
+      lmc.fillStyle = '#000'
+      lmc.fillRect(0, 0, w, h)
+      lmc.drawImage(sm, 0, 0)
+    }
+    // …then stir what remains with a static noise dither
+    if (!this.noiseTile) {
+      const n = document.createElement('canvas')
+      n.width = 64
+      n.height = 64
+      const nc = n.getContext('2d')
+      if (nc) {
+        const id = nc.createImageData(64, 64)
+        let seed = 12345
+        for (let i = 0; i < id.data.length; i += 4) {
+          seed = (seed * 1103515245 + 12345) & 0x7fffffff
+          const v = (seed >> 16) & 255
+          id.data[i] = v
+          id.data[i + 1] = v
+          id.data[i + 2] = v
+          id.data[i + 3] = 255
+        }
+        nc.putImageData(id, 0, 0)
+      }
+      this.noiseTile = n
+    }
+    const pat = lmc.createPattern(this.noiseTile, 'repeat')
+    if (pat) {
+      lmc.save()
+      lmc.globalCompositeOperation = 'lighter'
+      lmc.globalAlpha = 0.035
+      lmc.fillStyle = pat
+      lmc.fillRect(0, 0, w, h)
+      lmc.restore()
+    }
+    // ---- each photo: albedo × light (+ dark tone at low gauge), added to the frame
+    let maxI = 0
+    for (const L of lights) if (L.I > maxI) maxI = L.I
+    const tone = darkTone(maxI)
+    const wk = get('workMap')
+    const wkc = wk.getContext('2d')
+    if (!wkc) return
+    for (const img of images) {
+      const alb = imageAlbedo(img)
+      if (!alb) continue
+      const b = imageBox(img)
+      wkc.globalCompositeOperation = 'source-over'
+      wkc.clearRect(0, 0, w, h)
+      wkc.drawImage(alb, b.x, b.y, b.w, b.h)
+      wkc.globalCompositeOperation = 'multiply'
+      wkc.drawImage(lm, 0, 0)
+      if (tone > 0.01) {
+        wkc.globalAlpha = tone
+        wkc.drawImage(lm, 0, 0)
+        wkc.globalAlpha = 1
+      }
+      wkc.globalCompositeOperation = 'destination-in'
+      wkc.drawImage(alb, b.x, b.y, b.w, b.h)
+      wkc.globalCompositeOperation = 'source-over'
+      this.ctx.drawImage(wk, 0, 0)
+    }
+    // ---- the air beam: visible only through smoke, cut where a photo stands
+    const smoke = chart.settings.glow ? Math.max(1, chart.settings.glowAmount || 12) : 0
+    const airA = (Math.min(30, smoke) / 30) * 0.42
+    if (airA > 0.01) {
+      const am = get('airMap')
+      const amc = am.getContext('2d')
+      if (!amc) return
+      amc.globalCompositeOperation = 'source-over'
+      amc.clearRect(0, 0, w, h)
+      for (const L of lights) drawAirBeamInto(amc, L.shape, L.hue, L.I, L.pose)
+      amc.globalCompositeOperation = 'destination-out'
+      for (const img of images) {
+        const alb = imageAlbedo(img)
+        if (!alb) continue
+        const b = imageBox(img)
+        amc.drawImage(alb, b.x, b.y, b.w, b.h)
+      }
+      amc.globalCompositeOperation = 'source-over'
+      this.ctx.globalAlpha = airA
+      this.ctx.drawImage(am, 0, 0)
+      this.ctx.globalAlpha = 1
+    }
+  }
+
   /** RGBA pixels of the current frame (tightly packed w*h*4), premultiplied by alpha —
    *  the Syphon convention. Anti-aliased edges and bloom thus carry the same RGB an
    *  opaque-black background produced, so Resolume Add layers look exactly as before. */
@@ -148,6 +304,8 @@ export class OutputRenderer {
 
   private drawShape(shape: Shape, rgb: RGB, ox = 0, oy = 0, rep = 0): void {
     const ctx = this.ctx
+    // photos & uplights are composited in the dedicated light-map pass
+    if (shape.type === 'image' || shape.type === 'uplight') return
     ctx.save()
     if (ox || oy) ctx.translate(ox, oy)
     // neon signs: instance i lights ONLY tube #i (its own console colour) — the

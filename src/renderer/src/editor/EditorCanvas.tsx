@@ -65,6 +65,13 @@ import {
   PATT_DEFAULT_DIAMETER,
   PIXELPATT_DEFAULT_DIAMETER
 } from '../render/fixtures'
+import {
+  drawImageSchematic,
+  drawUplightSchematic,
+  UPLIGHT_DEFAULT_W0,
+  UPLIGHT_DEFAULT_W1,
+  UPLIGHT_DEFAULT_LEN
+} from '../render/uplight'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 
@@ -95,7 +102,15 @@ interface View {
 const isOpen = (t: Shape['type']): boolean => t === 'line' || t === 'polyline' || t === 'freehand'
 
 /** Two-corner box shapes: resized by dragging a bounding-box corner. */
-const BOXY = new Set<Shape['type']>(['rect', 'ellipse', 'triangle', 'star', 'polygon', 'stars'])
+const BOXY = new Set<Shape['type']>([
+  'rect',
+  'ellipse',
+  'triangle',
+  'star',
+  'polygon',
+  'stars',
+  'image'
+])
 
 /** One pointer gesture on the canvas: move the whole shape, drag one vertex
  *  (line/polyline), drag a box corner/edge against its fixed opposite side, or pull
@@ -276,6 +291,16 @@ function drawShapeInto(
   }
   if (shape.type === 'pixelpatt') {
     drawPixelPattSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
+  // photo material: the albedo at half strength + dashed frame (lights up in Live)
+  if (shape.type === 'image') {
+    drawImageSchematic(ctx, shape, stroke, boost)
+    return
+  }
+  // uplight: housing mark + dashed beam outline (the rigging plot)
+  if (shape.type === 'uplight') {
+    drawUplightSchematic(ctx, shape, stroke, fill, boost)
     return
   }
   const open = isOpen(shape.type)
@@ -764,6 +789,16 @@ export function EditorCanvas(): React.JSX.Element {
     }
     document.fonts?.addEventListener('loadingdone', onDone)
     return () => document.fonts?.removeEventListener('loadingdone', onDone)
+  }, [])
+
+  // photo materials decode async (dataURL → albedo): repaint once each one lands
+  useEffect(() => {
+    const onImg = (): void => {
+      contentDirty.current = true
+      drawRef.current()
+    }
+    window.addEventListener('decor:image-loaded', onImg)
+    return () => window.removeEventListener('decor:image-loaded', onImg)
   }, [])
 
   // cache underlay + mask images
@@ -1791,7 +1826,18 @@ export function EditorCanvas(): React.JSX.Element {
   }
   const onDrop = (e: React.DragEvent<HTMLCanvasElement>): void => {
     const part = e.dataTransfer.getData('application/x-decor-part')
-    const PARTS = ['bulb', 'neon', 'stars', 'festoon', 'parlight', 'blinder', 'patt', 'pixelpatt']
+    const PARTS = [
+      'bulb',
+      'neon',
+      'stars',
+      'festoon',
+      'parlight',
+      'blinder',
+      'patt',
+      'pixelpatt',
+      'image',
+      'uplight'
+    ]
     if (!PARTS.includes(part)) return
     e.preventDefault()
     const cell = toCell(e.clientX, e.clientY)
@@ -1861,6 +1907,28 @@ export function EditorCanvas(): React.JSX.Element {
         bulbPitch: FESTOON_DEFAULT_PITCH,
         diameter: FESTOON_DEFAULT_DIAMETER,
         neonGlow: FESTOON_DEFAULT_GLOW
+      })
+    } else if (part === 'image') {
+      // photo material: drops as a 160×100 frame — pick the picture in the Inspector
+      addShape({
+        type: 'image',
+        points: [
+          { x: center.x - 80, y: center.y - 50 },
+          { x: center.x + 80, y: center.y + 50 }
+        ],
+        display: 'fill',
+        strokeWidth: 1
+      })
+    } else if (part === 'uplight') {
+      // uplight: one-point lamp, beam aims up — works outside the chart too
+      addShape({
+        type: 'uplight',
+        points: [center],
+        display: 'fill',
+        strokeWidth: 1,
+        beamW0: UPLIGHT_DEFAULT_W0,
+        beamW1: UPLIGHT_DEFAULT_W1,
+        beamLen: UPLIGHT_DEFAULT_LEN
       })
     } else {
       // stage fixtures: one-point parts, size = diameter (blinder: housing width)

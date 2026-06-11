@@ -41,6 +41,12 @@ function sizeText(shape: Shape): string {
     const w = blinderWidth(shape)
     return `W ${w} × H ${w * 2} px · 8球`
   }
+  if (shape.type === 'image') {
+    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${shape.imageData ? '写真あり' : '写真未設定'}`
+  }
+  if (shape.type === 'uplight') {
+    return `出口 ${Math.round(shape.beamW0 ?? 14)} · 広がり ${Math.round(shape.beamW1 ?? 90)} · 届く高さ ${Math.round(shape.beamLen ?? 200)} px`
+  }
   if (shape.type === 'freehand') {
     const single =
       shape.points.length === 2 &&
@@ -61,7 +67,8 @@ const CHANNEL_MODES: { id: ChannelMode; label: string }[] = [
   { id: 'rgb', label: 'RGB (3ch)' },
   { id: 'rgbdim', label: 'RGB+Dim (4ch)' },
   { id: 'dim', label: 'Dim (1ch)' },
-  { id: 'rgbw', label: 'RGBW (5ch)' }
+  { id: 'rgbw', label: 'RGBW (5ch)' },
+  { id: 'beam6', label: 'Beam ムービング (6ch)' }
 ]
 
 const rowGap = 14
@@ -403,6 +410,79 @@ export function Inspector(): React.JSX.Element {
         </>
       )}
 
+      {/* photo material: pick the picture — it lights up only under a beam */}
+      {shape.type === 'image' && (
+        <Field label="写真素材">
+          <button
+            style={{ ...buttonStyle({}), width: '100%', padding: '8px 0' }}
+            onClick={() => {
+              const input = document.createElement('input')
+              input.type = 'file'
+              input.accept = 'image/*'
+              input.onchange = () => {
+                const f = input.files?.[0]
+                if (!f) return
+                const fr = new FileReader()
+                fr.onload = () => {
+                  const dataUrl = String(fr.result)
+                  const im = new Image()
+                  im.onload = () => {
+                    const b = shapeBounds(shape)
+                    const sc = Math.min(1, 480 / Math.max(1, im.naturalWidth))
+                    const w = Math.max(8, Math.round(im.naturalWidth * sc))
+                    const h = Math.max(8, Math.round(im.naturalHeight * sc))
+                    updateShape(shape.id, {
+                      imageData: dataUrl,
+                      points: [
+                        { x: b.x, y: b.y },
+                        { x: b.x + w, y: b.y + h }
+                      ]
+                    })
+                  }
+                  im.src = dataUrl
+                }
+                fr.readAsDataURL(f)
+              }
+              input.click()
+            }}
+          >
+            {shape.imageData ? '写真を差し替える…' : '写真を選ぶ…（PNG/JPG）'}
+          </button>
+        </Field>
+      )}
+
+      {/* uplight: rigging values — the desk steers colour/gauge (+Pan/Tilt/Zoom in 6ch) */}
+      {shape.type === 'uplight' && (
+        <>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Field label="出口の幅 (px)">
+              <NumberField
+                value={shape.beamW0 ?? 14}
+                min={2}
+                max={300}
+                onChange={(v) => updateShape(shape.id, { beamW0: v })}
+              />
+            </Field>
+            <Field label="広がり (px)">
+              <NumberField
+                value={shape.beamW1 ?? 90}
+                min={4}
+                max={1200}
+                onChange={(v) => updateShape(shape.id, { beamW1: v })}
+              />
+            </Field>
+          </div>
+          <Field label="届く高さ (px)">
+            <NumberField
+              value={shape.beamLen ?? 200}
+              min={20}
+              max={3000}
+              onChange={(v) => updateShape(shape.id, { beamLen: v })}
+            />
+          </Field>
+        </>
+      )}
+
       {/* stage fixtures: size only — colour & gauge come from the console */}
       {(shape.type === 'parlight' ||
         shape.type === 'patt' ||
@@ -435,7 +515,9 @@ export function Inspector(): React.JSX.Element {
         shape.type !== 'parlight' &&
         shape.type !== 'blinder' &&
         shape.type !== 'patt' &&
-        shape.type !== 'pixelpatt' && (
+        shape.type !== 'pixelpatt' &&
+        shape.type !== 'image' &&
+        shape.type !== 'uplight' && (
         <Field label="Display">
           <div style={{ display: 'flex', gap: 6 }}>
             {DISPLAY_MODES.map((m) => (
@@ -503,7 +585,11 @@ export function Inspector(): React.JSX.Element {
 
       {/* DMX address */}
       <SectionTitle>Patch</SectionTitle>
-      {!fixture ? (
+      {shape.type === 'image' ? (
+        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8, lineHeight: 1.6 }}>
+          写真は光りません — 「照らし」をパッチして当てると浮かびます
+        </div>
+      ) : !fixture ? (
         <button
           style={{ ...buttonStyle({}), width: '100%', marginTop: 8 }}
           onClick={() =>

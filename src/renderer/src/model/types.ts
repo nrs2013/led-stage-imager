@@ -15,8 +15,10 @@ export type ShapeType =
   | 'blinder'
   | 'patt'
   | 'pixelpatt'
+  | 'image'
+  | 'uplight'
 export type DisplayMode = 'stroke' | 'fill' | 'both'
-export type ChannelMode = 'rgb' | 'rgbdim' | 'dim' | 'rgbw'
+export type ChannelMode = 'rgb' | 'rgbdim' | 'dim' | 'rgbw' | 'beam6'
 export type BulbStyle = 'clear' | 'frost'
 
 export interface Point {
@@ -68,6 +70,18 @@ export interface Shape {
   starSize?: number
   /** Stars only: layout seed — locked so a saved chart reopens with the same sky. */
   starSeed?: number
+  /** Image (photo material) only: the picture itself as a data URL, persisted inside
+   *  the chart file like the underlay. points[0]/[1] are the placed corners. The
+   *  photo never emits light — it shows only where an uplight's beam washes it. */
+  imageData?: string
+  /** Uplight only: beam exit width in canvas px (出口の幅). points[0] is the lamp —
+   *  it may sit outside the chart. The standing pose is the desk's home position. */
+  beamW0?: number
+  /** Uplight only: beam tip width in canvas px (広がり). */
+  beamW1?: number
+  /** Uplight only: throw height in canvas px (届く高さ — a rigging value, NOT a desk
+   *  channel: the desk steers Pan/Tilt/Zoom only, のむさん確定 2026-06-11). */
+  beamLen?: number
 }
 
 export interface Fixture {

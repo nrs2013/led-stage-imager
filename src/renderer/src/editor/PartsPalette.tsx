@@ -12,6 +12,7 @@ import {
   drawPixelPattFrame,
   drawBlinderHousing
 } from '../render/fixtures'
+import { drawWallBeamInto } from '../render/uplight'
 import type { Shape } from '../model/types'
 
 /** Live-rendered thumbnail: the actual bulb renderer at a thumbnail-friendly size,
@@ -227,6 +228,46 @@ const paintPixelPatt = (ctx: CanvasRenderingContext2D): void => {
   drawPixelPattFrame(ctx, sh, new Array(7).fill(WARM))
   for (let i = 0; i < 7; i++) drawPixelPattCellLit(ctx, sh, WARM, i)
 }
+const paintUplight = (ctx: CanvasRenderingContext2D): void => {
+  drawWallBeamInto(
+    ctx,
+    {
+      id: 'th-up',
+      type: 'uplight',
+      points: [{ x: 37, y: 44 }],
+      display: 'fill',
+      strokeWidth: 1,
+      beamW0: 8,
+      beamW1: 50,
+      beamLen: 42
+    } as Shape,
+    WARM,
+    0.8,
+    { pan: 0, tilt: 0, zoom: 0 }
+  )
+}
+const paintImage = (ctx: CanvasRenderingContext2D): void => {
+  // 額縁＋下から照らされた写真の面影（素材カードの絵）
+  ctx.save()
+  ctx.strokeStyle = 'rgba(170,176,188,0.8)'
+  ctx.setLineDash([3, 3])
+  ctx.lineWidth = 1
+  ctx.strokeRect(14, 7, 46, 32)
+  ctx.setLineDash([])
+  const g = ctx.createLinearGradient(0, 39, 0, 10)
+  g.addColorStop(0, 'rgba(255,178,96,0.85)')
+  g.addColorStop(1, 'rgba(255,178,96,0)')
+  ctx.fillStyle = g
+  ctx.beginPath()
+  ctx.moveTo(17, 36)
+  ctx.lineTo(31, 14)
+  ctx.lineTo(40, 26)
+  ctx.lineTo(47, 18)
+  ctx.lineTo(57, 36)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+}
 
 /** The shelf line-up — のむさん指定の並び：上段=電球系の灯体、下段=ストリング/文字/面。 */
 const CARDS: {
@@ -291,6 +332,20 @@ const CARDS: {
     hint: 'W+B 2ch',
     title: 'ドラッグして置き、四隅で広げる（白ch+青chの2番地・密度はInspector）',
     thumb: <StarsThumb />
+  },
+  {
+    part: 'image',
+    label: '写真素材',
+    hint: 'ALBEDO',
+    title: '写真（実物の電飾やセット）を置く — 自分では光らず、「照らし」が当たった所だけ浮かぶ。写真はInspectorで選ぶ',
+    thumb: <FixtureThumb paint={paintImage} />
+  },
+  {
+    part: 'uplight',
+    label: '照らし',
+    hint: 'BEAM',
+    title: 'アッパーライト — 1灯ずつ置いて、出口の幅・広がり・届く高さをInspectorで決める。チャートの外にも置ける。Beam 6chモードで卓からPan/Tilt/Zoom',
+    thumb: <FixtureThumb paint={paintUplight} />
   }
 ]
 

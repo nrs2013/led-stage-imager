@@ -115,6 +115,12 @@ export function shapeBounds(shape: Shape): Bounds {
     const w = blinderWidth(shape)
     return { x: c.x - w / 2, y: c.y - w, w, h: w * 2 }
   }
+  if (shape.type === 'uplight' && shape.points.length >= 1) {
+    // pick the housing mark only — the beam itself is light, not a grab target
+    const c = shape.points[0]
+    const hw = Math.max(6, (shape.beamW0 ?? 14) * 0.6)
+    return { x: c.x - hw, y: c.y - hw * 0.55, w: hw * 2, h: hw * 1.1 }
+  }
   if (shape.points.length < 2) return boundsOfPoints(shape.points)
   switch (shape.type) {
     case 'rect':
@@ -123,6 +129,7 @@ export function shapeBounds(shape: Shape): Bounds {
     case 'star':
     case 'polygon':
     case 'stars':
+    case 'image':
       // 'polygon' from the tool uses two-corner box; explicit polylines use their points.
       return cornerBounds(shape.points[0], shape.points[shape.points.length - 1])
     default:
@@ -180,6 +187,12 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
     ctx.rect(p[0].x - w / 2, p[0].y - w, w, w * 2)
     return
   }
+  if (shape.type === 'uplight' && p.length >= 1) {
+    const hw = Math.max(6, (shape.beamW0 ?? 14) * 0.6)
+    ctx.beginPath()
+    ctx.rect(p[0].x - hw, p[0].y - hw * 0.55, hw * 2, hw * 1.1)
+    return
+  }
   if (p.length < 2) return
   ctx.beginPath()
   switch (shape.type) {
@@ -193,7 +206,8 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
       for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y)
       break
     case 'rect':
-    case 'stars': {
+    case 'stars':
+    case 'image': {
       const b = cornerBounds(p[0], p[p.length - 1])
       ctx.rect(b.x, b.y, b.w, b.h)
       break
@@ -336,7 +350,9 @@ export function pasteDelta(shapes: Shape[], at: Point): Point {
     'parlight',
     'blinder',
     'patt',
-    'pixelpatt'
+    'pixelpatt',
+    'image',
+    'uplight'
   ])
   const allBulbs = shapes.length > 0 && shapes.every((sh) => PARTS.has(sh.type))
   if (allBulbs) {

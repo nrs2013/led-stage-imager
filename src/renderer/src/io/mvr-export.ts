@@ -18,7 +18,8 @@ const MODE_NAMES: Record<Fixture['mode'], string> = {
   rgb: 'RGB',
   rgbdim: 'RGB Dim',
   dim: 'Dim',
-  rgbw: 'RGBW Dim'
+  rgbw: 'RGBW Dim',
+  beam6: 'Beam 6ch'
 }
 
 const esc = (s: string): string =>
@@ -33,10 +34,16 @@ const uuid = (): string =>
       })
 
 function dmxChannel(offset: number, attribute: string, geometry: string): string {
+  // Pan/Tilt/Zoom home at 128 = exactly the pose placed in DECOR (beamPose centre)
+  const def = attribute === 'Pan' || attribute === 'Tilt' || attribute === 'Zoom' ? '128/1' : '0/1'
+  const phys =
+    attribute === 'Pan' || attribute === 'Tilt'
+      ? 'PhysicalFrom="-1" PhysicalTo="1"'
+      : 'PhysicalFrom="0" PhysicalTo="1"'
   return (
     `<DMXChannel DMXBreak="1" Offset="${offset}" Geometry="${geometry}" Highlight="255/1">` +
     `<LogicalChannel Attribute="${attribute}" Snap="No" Master="None">` +
-    `<ChannelFunction Name="${attribute} 1" Attribute="${attribute}" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/>` +
+    `<ChannelFunction Name="${attribute} 1" Attribute="${attribute}" DMXFrom="0/1" Default="${def}" ${phys}/>` +
     `</LogicalChannel></DMXChannel>`
   )
 }
@@ -58,6 +65,8 @@ export function buildGdtfXml(fixtureTypeId: string): string {
     `<FeatureGroups>` +
     `<FeatureGroup Name="Color" Pretty="Color"><Feature Name="RGB"/></FeatureGroup>` +
     `<FeatureGroup Name="Dimmer" Pretty="Dim"><Feature Name="Dimmer"/></FeatureGroup>` +
+    `<FeatureGroup Name="Position" Pretty="Pos"><Feature Name="PanTilt"/></FeatureGroup>` +
+    `<FeatureGroup Name="Beam" Pretty="Beam"><Feature Name="Beam"/></FeatureGroup>` +
     `</FeatureGroups>` +
     `<Attributes>` +
     `<Attribute Name="ColorAdd_R" Pretty="R" ActivationGroup="ColorRGB" Feature="Color.RGB" Color="0.640000,0.330000,21.222100"/>` +
@@ -65,6 +74,9 @@ export function buildGdtfXml(fixtureTypeId: string): string {
     `<Attribute Name="ColorAdd_B" Pretty="B" ActivationGroup="ColorRGB" Feature="Color.RGB" Color="0.150000,0.060000,7.221600"/>` +
     `<Attribute Name="ColorAdd_W" Pretty="W" ActivationGroup="ColorRGB" Feature="Color.RGB" Color="0.312700,0.329000,100.000000"/>` +
     `<Attribute Name="Dimmer" Pretty="Dim" Feature="Dimmer.Dimmer"/>` +
+    `<Attribute Name="Pan" Pretty="P" Feature="Position.PanTilt"/>` +
+    `<Attribute Name="Tilt" Pretty="T" Feature="Position.PanTilt"/>` +
+    `<Attribute Name="Zoom" Pretty="Z" Feature="Beam.Beam"/>` +
     `</Attributes>` +
     `</AttributeDefinitions>` +
     `<Wheels/><PhysicalDescriptions/><Models/>` +
@@ -74,6 +86,7 @@ export function buildGdtfXml(fixtureTypeId: string): string {
     dmxMode('RGB Dim', ['ColorAdd_R', 'ColorAdd_G', 'ColorAdd_B', 'Dimmer']) +
     dmxMode('Dim', ['Dimmer']) +
     dmxMode('RGBW Dim', ['ColorAdd_R', 'ColorAdd_G', 'ColorAdd_B', 'ColorAdd_W', 'Dimmer']) +
+    dmxMode('Beam 6ch', ['ColorAdd_R', 'ColorAdd_G', 'ColorAdd_B', 'Pan', 'Tilt', 'Zoom']) +
     `</DMXModes><Revisions/></FixtureType></GDTF>`
   )
 }

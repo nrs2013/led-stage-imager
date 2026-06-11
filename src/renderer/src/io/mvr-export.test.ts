@@ -59,13 +59,25 @@ describe('MVR export', () => {
     const gdtf = await JSZip.loadAsync(await gdtfFile!.async('uint8array'))
     const desc = await gdtf.file('description.xml')!.async('string')
     expect(desc).toContain('FixtureType Name="DECOR Cell"')
-    expect((desc.match(/<DMXMode /g) || []).length).toBe(4) // RGB / RGB Dim / Dim / RGBW Dim
+    expect((desc.match(/<DMXMode /g) || []).length).toBe(5) // RGB / RGB Dim / Dim / RGBW Dim / Beam 6ch
     expect(desc).toContain('Attribute="ColorAdd_R"')
   })
 
   it('buildGdtfXml: RGBW Dim は5ch構成', () => {
     const xml = buildGdtfXml('{TEST}')
-    const rgbw = xml.slice(xml.indexOf('Name="RGBW Dim"'))
+    const start = xml.indexOf('Name="RGBW Dim"')
+    const end = xml.indexOf('<DMXMode', start)
+    const rgbw = xml.slice(start, end === -1 ? undefined : end)
     expect((rgbw.match(/<DMXChannel /g) || []).length).toBe(5)
+  })
+
+  it('buildGdtfXml: Beam 6ch は R,G,B,Pan,Tilt,Zoom — Pan/Tilt/Zoom は 128 ホーム', () => {
+    const xml = buildGdtfXml('{TEST}')
+    const beam = xml.slice(xml.indexOf('Name="Beam 6ch"'))
+    expect((beam.match(/<DMXChannel /g) || []).length).toBe(6)
+    expect(beam).toContain('Attribute="Pan"')
+    expect(beam).toContain('Attribute="Tilt"')
+    expect(beam).toContain('Attribute="Zoom"')
+    expect(beam).toContain('Default="128/1"')
   })
 })
