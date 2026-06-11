@@ -104,6 +104,9 @@ interface AppState {
    *  missing) — ONE undo step; the multi-select Inspector's 一括変更. */
   bulkPatch: (shapeIds: string[], patch: Partial<Omit<Fixture, 'id' | 'shapeId'>>) => void
   setStepPatch: (on: boolean) => void
+  /** Lock/unlock shapes (one undo step). Locking also drops them from the selection
+   *  so they become untouchable immediately. */
+  setLocked: (shapeIds: string[], on: boolean) => void
   removeFixture: (shapeId: string) => void
   setManualMode: (on: boolean) => void
   setManualColor: (fixtureId: string, rgb: [number, number, number]) => void
@@ -480,6 +483,25 @@ export const useStore = create<AppState>()((set, get) => ({
           fixtures: [...s.chart.fixtures, fx],
           shapes: s.chart.shapes.map((sh) => (sh.id === shapeId ? { ...sh, fixtureId: fx.id } : sh))
         }
+      }
+    })
+  },
+
+  setLocked: (shapeIds, on) => {
+    get().beginHistory()
+    set((s) => {
+      const idSet = new Set(shapeIds)
+      return {
+        chart: {
+          ...s.chart,
+          shapes: s.chart.shapes.map((sh) => (idSet.has(sh.id) ? { ...sh, locked: on } : sh))
+        },
+        ...(on
+          ? {
+              selectedIds: s.selectedIds.filter((i) => !idSet.has(i)),
+              selectedId: s.selectedId && idSet.has(s.selectedId) ? null : s.selectedId
+            }
+          : {})
       }
     })
   },

@@ -444,9 +444,11 @@ export function EditorCanvas(): React.JSX.Element {
     }
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
-    chart.shapes.forEach((shape, i) =>
+    chart.shapes.forEach((shape, i) => {
+      if (shape.locked) ctx.globalAlpha = 0.4 // locked backdrops sit back quietly
       drawShapeInto(ctx, shape, shapeColor(i), shapeFill(i), boostRef.current)
-    )
+      if (shape.locked) ctx.globalAlpha = 1
+    })
   }
 
   const drawGrid = (ctx: CanvasRenderingContext2D, cw: number, ch: number, v: View): void => {
@@ -875,6 +877,24 @@ export function EditorCanvas(): React.JSX.Element {
         e.preventDefault()
         return
       }
+      // ⌘L = lock the selection (locked = canvas picking ignores it; unlock via the
+      // patch chip → Inspector, or ⌘L again after chip-selecting)
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'l' || e.key === 'L')) {
+        const ids = st.selectedIds.length
+          ? st.selectedIds
+          : st.selectedId
+            ? [st.selectedId]
+            : []
+        if (ids.length) {
+          const shs = st.chart.shapes.filter((s) => ids.includes(s.id))
+          st.setLocked(
+            ids,
+            shs.some((s) => !s.locked)
+          )
+        }
+        e.preventDefault()
+        return
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && st.selectedIds.length > 1) {
         st.removeShapes(st.selectedIds) // group delete = one undo step
         e.preventDefault()
@@ -992,6 +1012,7 @@ export function EditorCanvas(): React.JSX.Element {
     let bd = Infinity
     for (let i = chart.shapes.length - 1; i >= 0; i--) {
       const sh = chart.shapes[i]
+      if (sh.locked) continue // locked backdrops: clicks pass straight through
       const b = shapeArrayBounds(sh)
       const half = (sh.strokeWidth || 1) / 2
       const pad = tol + half
@@ -1694,7 +1715,7 @@ export function EditorCanvas(): React.JSX.Element {
         // real geometry test — a hollow L-chain must not be grabbed through the empty
         // interior of its bounding box
         const inIds = chart.shapes
-          .filter((s) => shapeIntersectsRect(s, x0, y0, x1, y1))
+          .filter((s) => !s.locked && shapeIntersectsRect(s, x0, y0, x1, y1))
           .map((s) => s.id)
         st.selectMany(m.add ? Array.from(new Set([...st.selectedIds, ...inIds])) : inIds)
         st.setPasteMark(null)
@@ -1957,6 +1978,16 @@ export function EditorCanvas(): React.JSX.Element {
               </button>
             )
           })()}
+          <button
+            style={menuBtn}
+            onClick={() => {
+              const st = useStore.getState()
+              st.setLocked(st.selectedIds, true)
+              setCtxMenu(null)
+            }}
+          >
+            ロック（キャンバスから掴めなくする・⌘L）
+          </button>
           <button
             style={{ ...menuBtn, color: '#e0726a' }}
             onClick={() => {

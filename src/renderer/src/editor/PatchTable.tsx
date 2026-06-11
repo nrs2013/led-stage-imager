@@ -141,6 +141,7 @@ export function PatchTable(): React.JSX.Element {
                 }}
               >
                 <span style={{ color: isSel ? C.accent : C.hint, fontWeight: 700 }}>#{i + 1}</span>
+                {sh?.locked && <span title="ロック中（解除はこのチップ→右パネル）">🔒</span>}
                 <span>{formatDmx(f.universe, f.start)}</span>
                 {cnt > 1 && <span style={{ color: C.hint }}>×{cnt}</span>}
                 <span

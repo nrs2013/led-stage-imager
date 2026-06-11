@@ -165,3 +165,33 @@ describe('bulkPatch: 複数選択の一括変更', () => {
     expect(fxs.find((f) => f.shapeId === 'bar2')).toBeUndefined()
   })
 })
+
+describe('setLocked: ロック（背景化）', () => {
+  beforeEach(() => {
+    useStore.setState({
+      chart: seed(),
+      selectedId: 'bar1',
+      selectedIds: ['bar1'],
+      clipboard: null,
+      pasteArmed: false,
+      history: [],
+      future: [],
+      histTag: null,
+      histAt: 0
+    })
+  })
+  it('locking flags the shape AND drops it from the selection', () => {
+    useStore.getState().setLocked(['bar1'], true)
+    const st = useStore.getState()
+    expect(st.chart.shapes.find((s) => s.id === 'bar1')!.locked).toBe(true)
+    expect(st.selectedIds).toEqual([])
+    expect(st.selectedId).toBeNull()
+  })
+  it('unlocking clears the flag and is one undo step away', () => {
+    useStore.getState().setLocked(['bar1'], true)
+    useStore.getState().setLocked(['bar1'], false)
+    expect(useStore.getState().chart.shapes.find((s) => s.id === 'bar1')!.locked).toBe(false)
+    useStore.getState().undo()
+    expect(useStore.getState().chart.shapes.find((s) => s.id === 'bar1')!.locked).toBe(true)
+  })
+})

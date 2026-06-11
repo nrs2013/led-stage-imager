@@ -32,6 +32,10 @@ export interface Shape {
    *  marking the straight-segment corners (first and last included). Corners are
    *  grabbable; dragging one regenerates the adjacent dot runs. */
   verts?: number[]
+  /** Locked: invisible to canvas picking (click / rubber band) so big backdrops like
+   *  a star field stop hijacking every selection. Still draws, still lights, and the
+   *  patch chip below can still select it (= the unlock door). */
+  locked?: boolean
   fixtureId?: string
   /** Bulb only: glass diameter in canvas px (points[0] is the centre). */
   diameter?: number

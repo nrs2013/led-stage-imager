@@ -67,6 +67,7 @@ export function Inspector(): React.JSX.Element {
   const bulkPatch = useStore((s) => s.bulkPatch)
   const removeShape = useStore((s) => s.removeShape)
   const removeShapes = useStore((s) => s.removeShapes)
+  const setLocked = useStore((s) => s.setLocked)
 
   const shape = chart.shapes.find((s) => s.id === selectedId)
   const fixture = chart.fixtures.find((f) => f.shapeId === selectedId)
@@ -129,10 +130,17 @@ export function Inspector(): React.JSX.Element {
           </div>
           <div style={{ flex: 1 }} />
           <button
+            style={{ ...buttonStyle({}), width: '100%', marginTop: rowGap }}
+            onClick={() => setLocked(ids, true)}
+            title="まとめてロック（キャンバスから掴めなくする・⌘L）"
+          >
+            🔒 Lock {ids.length}
+          </button>
+          <button
             style={{
               ...buttonStyle({ accent: '#e0726a', accentRGB: '224,114,106' }),
               width: '100%',
-              marginTop: rowGap
+              marginTop: 8
             }}
             onClick={() => removeShapes(ids)}
           >
@@ -569,10 +577,17 @@ export function Inspector(): React.JSX.Element {
 
       <div style={{ flex: 1 }} />
       <button
+        style={{ ...buttonStyle({ active: !!shape.locked }), width: '100%', marginTop: rowGap }}
+        onClick={() => setLocked([shape.id], !shape.locked)}
+        title="ロック中はキャンバスから掴めません。このパネルは下のパッチチップから開けます（⌘Lでも切替）"
+      >
+        {shape.locked ? '🔒 ロック解除' : 'ロック（キャンバスから掴めなくする）'}
+      </button>
+      <button
         style={{
           ...buttonStyle({ accent: '#e0726a', accentRGB: '224,114,106' }),
           width: '100%',
-          marginTop: rowGap
+          marginTop: 8
         }}
         onClick={() => removeShape(shape.id)}
       >
