@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useStore } from '../state/store'
+import { useStore, activeLayerOf } from '../state/store'
 import { createChart, newId } from '../model/chart-model'
 import { saveChartToFile, openChartFromFile } from '../io/file-ops'
 import { pickImage, imageSize } from '../io/image-pick'
@@ -25,7 +25,7 @@ export function SubBar(): React.JSX.Element {
   const setStepPatch = useStore((s) => s.setStepPatch)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fillOpen, setFillOpen] = useState(false)
-  const u = chart.underlay
+  const u = activeLayerOf(chart).underlay
 
   const loadUnderlay = async (): Promise<void> => {
     const dataUrl = await pickImage()

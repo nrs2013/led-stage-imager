@@ -195,3 +195,66 @@ describe('setLocked: ロック（背景化）', () => {
     expect(useStore.getState().chart.shapes.find((s) => s.id === 'bar1')!.locked).toBe(true)
   })
 })
+
+describe('layers (song pages)', () => {
+  beforeEach(() => {
+    useStore.setState({
+      chart: seed(),
+      selectedId: null,
+      selectedIds: [],
+      clipboard: null,
+      pasteArmed: false,
+      history: [],
+      future: [],
+      histTag: null,
+      histAt: 0
+    })
+  })
+
+  it('addLayer appends, activates, and new shapes land on it', () => {
+    const id = useStore.getState().addLayer({ name: 'SONG 2' })
+    const st = useStore.getState()
+    expect(st.chart.layers).toHaveLength(2)
+    expect(st.chart.activeLayerId).toBe(id)
+    const sid = st.addShape({ type: 'bulb', points: [{ x: 5, y: 5 }] })
+    expect(useStore.getState().chart.shapes.find((s) => s.id === sid)!.layerId).toBe(id)
+  })
+
+  it('removeLayer deletes its shapes and fixtures, keeps the rest', () => {
+    const baseLayer = useStore.getState().chart.activeLayerId
+    const id = useStore.getState().addLayer({ name: 'SONG 2' })
+    const sid = useStore.getState().addShape({ type: 'bulb', points: [{ x: 5, y: 5 }] })
+    useStore.getState().upsertFixture(sid, { universe: 9, start: 1, mode: 'rgb' })
+    useStore.getState().removeLayer(id)
+    const st = useStore.getState()
+    expect(st.chart.layers).toHaveLength(1)
+    expect(st.chart.activeLayerId).toBe(baseLayer)
+    expect(st.chart.shapes.find((s) => s.id === sid)).toBeUndefined()
+    expect(st.chart.fixtures.some((f) => f.shapeId === sid)).toBe(false)
+    // the original layer's shape survives
+    expect(st.chart.shapes.find((s) => s.id === 'bar1')).toBeTruthy()
+  })
+
+  it('the last layer cannot be removed', () => {
+    const only = useStore.getState().chart.activeLayerId
+    useStore.getState().removeLayer(only)
+    expect(useStore.getState().chart.layers).toHaveLength(1)
+  })
+
+  it('removeLayer is one undo step (shapes come back)', () => {
+    const id = useStore.getState().addLayer({ name: 'SONG 2' })
+    useStore.getState().addShape({ type: 'bulb', points: [{ x: 5, y: 5 }] })
+    useStore.getState().removeLayer(id)
+    useStore.getState().undo()
+    const st = useStore.getState()
+    expect(st.chart.layers).toHaveLength(2)
+    expect(st.chart.shapes.some((s) => s.layerId === id)).toBe(true)
+  })
+
+  it('eraseCells leaves other layers strokes alone', () => {
+    // bar1 lives on the base layer; switch to a new layer and erase its cells
+    useStore.getState().addLayer({ name: 'SONG 2' })
+    useStore.getState().eraseCells(['10,10', '11,10', '12,10', '13,10'])
+    expect(useStore.getState().chart.shapes.find((s) => s.id === 'bar1')).toBeTruthy()
+  })
+})

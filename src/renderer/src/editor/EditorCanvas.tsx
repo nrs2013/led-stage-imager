@@ -6,8 +6,9 @@ import {
   useState,
   type PointerEvent as RPointerEvent
 } from 'react'
-import { useStore } from '../state/store'
+import { useStore, activeLayerOf } from '../state/store'
 import type { Point, Shape } from '../model/types'
+import { fileToDataUrl } from '../io/image-pick'
 import { C, F } from '../ui/tokens'
 import {
   cornerBounds,
@@ -485,7 +486,7 @@ export function EditorCanvas(): React.JSX.Element {
     ctx.clearRect(0, 0, w, h)
     ctx.fillStyle = '#000'
     ctx.fillRect(0, 0, w, h)
-    const u = chart.underlay
+    const u = activeLayerOf(chart).underlay
     // neutral grey under the drawable punch-outs (before the artwork, so the artwork
     // itself is never tinted) — makes transparent holes readable on dark charts
     if (holesImg.current) ctx.drawImage(holesImg.current, 0, 0, w, h)
@@ -496,10 +497,18 @@ export function EditorCanvas(): React.JSX.Element {
     }
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
+    // other songs' layers: hidden unless toggled visible, and then only as ghosts —
+    // the active layer is always full-strength and is the only editable one
+    const layerVisible = new Map(chart.layers.map((l) => [l.id, l.visible]))
+    const activeId = chart.activeLayerId
+    const homeId = chart.layers[0]?.id // layerless shapes = first layer (v1 rule)
     chart.shapes.forEach((shape, i) => {
-      if (shape.locked) ctx.globalAlpha = 0.4 // locked backdrops sit back quietly
+      const lid = shape.layerId ?? homeId
+      const ghost = lid !== activeId
+      if (ghost && !layerVisible.get(lid)) return
+      ctx.globalAlpha = ghost ? 0.22 : shape.locked ? 0.4 : 1
       drawShapeInto(ctx, shape, shapeColor(i), shapeFill(i), boostRef.current)
-      if (shape.locked) ctx.globalAlpha = 1
+      ctx.globalAlpha = 1
     })
   }
 
@@ -773,11 +782,11 @@ export function EditorCanvas(): React.JSX.Element {
     rafRef.current = requestAnimationFrame(() => drawRef.current())
   })
 
-  // mark content dirty when chart / underlay / mask change
+  // mark content dirty when chart / layers / mask change
   useEffect(() => {
     contentDirty.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chart.shapes, chart.canvas, chart.underlay, mask])
+  }, [chart.shapes, chart.canvas, chart.layers, chart.activeLayerId, mask])
 
   // neon webfonts arrive async: stale measurements (taken against the fallback
   // font) must be thrown away and the offscreen repainted once the real font lands
@@ -801,12 +810,14 @@ export function EditorCanvas(): React.JSX.Element {
     return () => window.removeEventListener('decor:image-loaded', onImg)
   }, [])
 
-  // cache underlay + mask images
+  // cache underlay + mask images (the ACTIVE layer's chart image)
+  const activeUnderlayUrl = activeLayerOf(chart).underlay?.dataUrl
   useEffect(() => {
-    const url = chart.underlay?.dataUrl
+    const url = activeUnderlayUrl
     if (!url) {
       underlayImg.current = null
       contentDirty.current = true
+      drawRef.current()
       return
     }
     const img = new Image()
@@ -816,7 +827,7 @@ export function EditorCanvas(): React.JSX.Element {
       drawRef.current()
     }
     img.src = url
-  }, [chart.underlay?.dataUrl])
+  }, [activeUnderlayUrl])
   useEffect(() => {
     const url = mask?.holes
     if (!url) {
@@ -1085,6 +1096,8 @@ export function EditorCanvas(): React.JSX.Element {
     for (let i = chart.shapes.length - 1; i >= 0; i--) {
       const sh = chart.shapes[i]
       if (sh.locked) continue // locked backdrops: clicks pass straight through
+      // other songs' ghosts are untouchable — only the active layer is editable
+      if ((sh.layerId ?? chart.layers[0]?.id) !== chart.activeLayerId) continue
       const b = shapeArrayBounds(sh)
       const half = (sh.strokeWidth || 1) / 2
       const pad = tol + half
@@ -1787,7 +1800,12 @@ export function EditorCanvas(): React.JSX.Element {
         // real geometry test — a hollow L-chain must not be grabbed through the empty
         // interior of its bounding box
         const inIds = chart.shapes
-          .filter((s) => !s.locked && shapeIntersectsRect(s, x0, y0, x1, y1))
+          .filter(
+            (s) =>
+              !s.locked &&
+              (s.layerId ?? chart.layers[0]?.id) === chart.activeLayerId &&
+              shapeIntersectsRect(s, x0, y0, x1, y1)
+          )
           .map((s) => s.id)
         st.selectMany(m.add ? Array.from(new Set([...st.selectedIds, ...inIds])) : inIds)
         st.setPasteMark(null)
@@ -1829,12 +1847,28 @@ export function EditorCanvas(): React.JSX.Element {
   // parts palette drop target: dropping a part stamps it centred on the cell under
   // the cursor (bulb centre = the dropped dot), then hands over to Select for moving
   const onDragOver = (e: React.DragEvent<HTMLCanvasElement>): void => {
-    if (e.dataTransfer.types.includes('application/x-decor-part')) {
+    if (
+      e.dataTransfer.types.includes('application/x-decor-part') ||
+      e.dataTransfer.types.includes('Files')
+    ) {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'copy'
     }
   }
   const onDrop = (e: React.DragEvent<HTMLCanvasElement>): void => {
+    // a chart image dropped mid-edit = a new song page (layer), named after the file
+    const file = Array.from(e.dataTransfer.files ?? []).find((f) => f.type.startsWith('image/'))
+    if (file) {
+      e.preventDefault()
+      void fileToDataUrl(file).then((dataUrl) => {
+        if (!dataUrl) return
+        useStore.getState().addLayer({
+          name: file.name.replace(/\.[^.]+$/, ''),
+          underlay: { dataUrl, opacity: 0.5, visible: true, mask: { enabled: true, invert: false } }
+        })
+      })
+      return
+    }
     const part = e.dataTransfer.getData('application/x-decor-part')
     const PARTS = [
       'bulb',

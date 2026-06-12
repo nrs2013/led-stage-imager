@@ -13,14 +13,22 @@ export const cellKey = (p: Point): string => `${Math.floor(p.x)},${Math.floor(p.
  */
 export function eraseCellsFromChart(
   chart: Chart,
-  cells: Set<string>
+  cells: Set<string>,
+  /** When given, only this layer's strokes are erasable (ghost layers stay safe). */
+  layerId?: string
 ): { chart: Chart; changed: boolean } {
   let changed = false
   const shapes: Shape[] = []
   const fixtures: Fixture[] = [...chart.fixtures]
 
+  // a shape without layerId belongs to the first layer (same rule as the v1 migration)
+  const homeLayer = chart.layers[0]?.id
   for (const sh of chart.shapes) {
-    if (sh.type !== 'freehand' || sh.repeat) {
+    if (
+      sh.type !== 'freehand' ||
+      sh.repeat ||
+      (layerId !== undefined && (sh.layerId ?? homeLayer) !== layerId)
+    ) {
       shapes.push(sh)
       continue
     }

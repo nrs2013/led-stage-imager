@@ -4,6 +4,7 @@ import { SubBar } from './editor/SubBar'
 import { EditorCanvas } from './editor/EditorCanvas'
 import { Inspector } from './editor/Inspector'
 import { PartsPalette } from './editor/PartsPalette'
+import { LayersPanel } from './editor/LayersPanel'
 import { PatchTable } from './editor/PatchTable'
 import { LiveView } from './output/LiveView'
 import { StatusBar } from './ui/StatusBar'
@@ -156,6 +157,7 @@ function EditorApp(): React.JSX.Element {
                 borderLeft: `0.5px solid ${C.border}`
               }}
             >
+              <LayersPanel />
               <PartsPalette />
               <Inspector />
             </div>
