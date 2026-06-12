@@ -3,7 +3,9 @@ import { useStore } from '../state/store'
 import { createChart } from '../model/chart-model'
 import { openChartFromFile } from '../io/file-ops'
 import { parseChart } from '../io/chart-file'
+import { readBackup } from '../io/autosave'
 import { pickImage, fileToDataUrl, imageSize } from '../io/image-pick'
+import type { Chart } from '../model/types'
 import { C, F, buttonStyle } from './tokens'
 
 /**
@@ -18,6 +20,18 @@ export function StartScreen(): React.JSX.Element {
   const applyChartImage = useStore((s) => s.applyChartImage)
   const [over, setOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [backup, setBackup] = useState<Chart | null>(null)
+
+  // crash net: offer the autosaved chart from the last session
+  useEffect(() => {
+    void readBackup().then(setBackup)
+  }, [])
+
+  const resume = (): void => {
+    if (!backup) return
+    setChart(backup)
+    setStarted(true)
+  }
 
   const startWithImage = async (dataUrl: string): Promise<void> => {
     try {
@@ -128,6 +142,21 @@ export function StartScreen(): React.JSX.Element {
           透明にくり抜かれた所＝電飾を描く場所です（絵がある所は対象外・Invertで反転可）
         </div>
       </div>
+
+      {backup && (
+        <button
+          style={{
+            ...buttonStyle({ accent: C.green, accentRGB: '168,232,120' }),
+            padding: '10px 18px',
+            fontSize: 13
+          }}
+          onClick={resume}
+          title="自動バックアップ（5秒ごと）から復元します。落ちても消えません"
+        >
+          前回の続きから — {backup.name || 'Untitled'}（{backup.layers.length}枚・電飾
+          {backup.shapes.length}個）
+        </button>
+      )}
 
       <div style={row}>
         <button style={buttonStyle({})} onClick={openImage}>

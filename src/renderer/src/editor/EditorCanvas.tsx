@@ -9,6 +9,7 @@ import {
 import { useStore, activeLayerOf } from '../state/store'
 import type { Point, Shape } from '../model/types'
 import { fileToDataUrl } from '../io/image-pick'
+import { saveChartToFile } from '../io/file-ops'
 import { C, F } from '../ui/tokens'
 import {
   cornerBounds,
@@ -916,6 +917,27 @@ export function EditorCanvas(): React.JSX.Element {
           }
           e.preventDefault()
         }
+        return
+      }
+      // ⌘S = save to file (the Save button's keyboard twin; blocks the browser dialog)
+      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        void saveChartToFile(st.chart).then((label) => {
+          if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
+        })
+        return
+      }
+      // ⌘A = select the whole active layer (locked shapes stay out, ghosts untouched)
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
+        const c = st.chart
+        const ids = c.shapes
+          .filter((s) => !s.locked && (s.layerId ?? c.layers[0]?.id) === c.activeLayerId)
+          .map((s) => s.id)
+        if (ids.length) {
+          st.setTool('select')
+          st.selectMany(ids)
+        }
+        e.preventDefault()
         return
       }
       // quick tool keys (industry-standard letters) + F = fit + Z = one-key undo

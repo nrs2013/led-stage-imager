@@ -164,6 +164,8 @@ interface AppState {
   setGlow: (on: boolean) => void
   setGlowAmount: (px: number) => void
   setSyphonName: (name: string) => void
+  /** Show title — becomes the default save filename. */
+  setChartName: (name: string) => void
 }
 
 /** A small sample chart (shapes patched to U0/1 so the test sender lights them). */
@@ -651,6 +653,7 @@ export const useStore = create<AppState>()((set, get) => ({
   setGlowAmount: (px) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glowAmount: px } } })),
   setSyphonName: (name) => set((s) => ({ chart: { ...s.chart, syphon: { name } } })),
+  setChartName: (name) => set((s) => ({ chart: { ...s.chart, name } })),
   setSnap: (on) => set({ snapToPixel: on }),
   setStepPatch: (on) => set({ stepPatch: on }),
   setUnderlayMask: (patch) =>

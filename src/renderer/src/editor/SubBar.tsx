@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore, activeLayerOf } from '../state/store'
 import { createChart, newId } from '../model/chart-model'
 import { saveChartToFile, openChartFromFile } from '../io/file-ops'
@@ -25,7 +25,23 @@ export function SubBar(): React.JSX.Element {
   const setStepPatch = useStore((s) => s.setStepPatch)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fillOpen, setFillOpen] = useState(false)
+  const [savedFlash, setSavedFlash] = useState<string | null>(null)
   const u = activeLayerOf(chart).underlay
+
+  // "Saved: name" flash — fired by the Save button AND ⌘S (EditorCanvas)
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null
+    const onSaved = (e: Event): void => {
+      setSavedFlash(String((e as CustomEvent).detail))
+      if (t) clearTimeout(t)
+      t = setTimeout(() => setSavedFlash(null), 2500)
+    }
+    window.addEventListener('decor:saved', onSaved)
+    return () => {
+      if (t) clearTimeout(t)
+      window.removeEventListener('decor:saved', onSaved)
+    }
+  }, [])
 
   const loadUnderlay = async (): Promise<void> => {
     const dataUrl = await pickImage()
@@ -52,7 +68,10 @@ export function SubBar(): React.JSX.Element {
       alert('チャートを開けませんでした: ' + (err as Error).message)
     }
   }
-  const saveChart = (): Promise<string | null> => saveChartToFile(chart)
+  const saveChart = async (): Promise<void> => {
+    const label = await saveChartToFile(chart)
+    if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
+  }
   const duplicate = (): void =>
     setChart({ ...chart, id: newId('chart'), name: `${chart.name || 'Untitled'} copy` })
 
@@ -64,9 +83,14 @@ export function SubBar(): React.JSX.Element {
       <button style={fileBtn} onClick={openChart}>
         Load
       </button>
-      <button style={fileBtn} onClick={saveChart}>
+      <button style={fileBtn} onClick={saveChart} title="ファイルに保存（⌘S）">
         Save
       </button>
+      {savedFlash && (
+        <span style={{ fontSize: 11, color: C.green, fontFamily: F.mono, whiteSpace: 'nowrap' }}>
+          Saved: {savedFlash}
+        </span>
+      )}
       <button style={fileBtn} onClick={duplicate}>
         Copy
       </button>

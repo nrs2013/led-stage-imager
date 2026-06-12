@@ -25,6 +25,10 @@ export interface DecorApi {
   saveChart: (json: string, name: string) => Promise<string | null>
   /** Open a chart file via a native dialog; resolves to its JSON or null. */
   openChartFile: () => Promise<string | null>
+  /** Crash net: mirror the chart to userData/autosave.decor.json (no dialog). */
+  autosaveWrite: (json: string) => Promise<boolean>
+  /** Read the crash-net mirror back (null if none). */
+  autosaveRead: () => Promise<string | null>
   /** Rename (restart) the Syphon source. */
   renameSyphon: (name: string) => Promise<boolean>
 }

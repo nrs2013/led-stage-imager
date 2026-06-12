@@ -43,6 +43,9 @@ const api = {
   saveChart: (json: string, name: string): Promise<string | null> =>
     ipcRenderer.invoke('chart:save', json, name),
   openChartFile: (): Promise<string | null> => ipcRenderer.invoke('chart:open'),
+  autosaveWrite: (json: string): Promise<boolean> =>
+    ipcRenderer.invoke('chart:autosave-write', json),
+  autosaveRead: (): Promise<string | null> => ipcRenderer.invoke('chart:autosave-read'),
   saveMvr: (name: string, data: Uint8Array): Promise<string | null> =>
     ipcRenderer.invoke('mvr:save', name, data),
   renameSyphon: (name: string): Promise<boolean> => ipcRenderer.invoke('syphon:rename', name)
