@@ -962,6 +962,26 @@ export function EditorCanvas(): React.JSX.Element {
         e.preventDefault()
         return
       }
+      // arrow-key nudge — single or multi selection (1 dot, Shift = 10)
+      if (e.key.startsWith('Arrow')) {
+        const stp = e.shiftKey ? 10 : 1
+        let dx = 0
+        let dy = 0
+        if (e.key === 'ArrowLeft') dx = -stp
+        else if (e.key === 'ArrowRight') dx = stp
+        else if (e.key === 'ArrowUp') dy = -stp
+        else if (e.key === 'ArrowDown') dy = stp
+        const ids = st.selectedIds.length
+          ? st.selectedIds
+          : st.selectedId
+            ? [st.selectedId]
+            : []
+        if ((dx || dy) && ids.length) {
+          st.nudgeShapes(ids, dx, dy)
+          e.preventDefault()
+        }
+        return
+      }
       const sel = st.selectedId
       if (!sel) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -984,16 +1004,6 @@ export function EditorCanvas(): React.JSX.Element {
         e.preventDefault()
         return
       }
-      const stp = e.shiftKey ? 10 : 1
-      let dx = 0
-      let dy = 0
-      if (e.key === 'ArrowLeft') dx = -stp
-      else if (e.key === 'ArrowRight') dx = stp
-      else if (e.key === 'ArrowUp') dy = -stp
-      else if (e.key === 'ArrowDown') dy = stp
-      else return
-      st.nudgeShape(sel, dx, dy)
-      e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

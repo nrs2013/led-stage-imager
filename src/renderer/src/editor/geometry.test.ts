@@ -68,12 +68,12 @@ describe('bulb geometry', () => {
     ...over
   })
 
-  it('shapeBounds: glass box centred on the point, default Φ5.5', () => {
+  it('shapeBounds: glass box centred on the point, default Φ7', () => {
     const b = shapeBounds(bulb())
-    expect(b.w).toBeCloseTo(5.5)
-    expect(b.h).toBeCloseTo(5.5)
-    expect(b.x).toBeCloseTo(100.5 - 2.75)
-    expect(b.y).toBeCloseTo(50.5 - 2.75)
+    expect(b.w).toBeCloseTo(7)
+    expect(b.h).toBeCloseTo(7)
+    expect(b.x).toBeCloseTo(100.5 - 3.5)
+    expect(b.y).toBeCloseTo(50.5 - 3.5)
   })
 
   it('shapeBounds: honours a custom diameter', () => {

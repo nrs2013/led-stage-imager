@@ -91,6 +91,8 @@ interface AppState {
   addShape: (init: { type: Shape['type']; points: Shape['points'] } & Partial<Shape>) => string
   removeShape: (id: string) => void
   nudgeShape: (id: string, dx: number, dy: number) => void
+  /** Arrow-key nudge for a multi selection — all shapes move as one undo step. */
+  nudgeShapes: (ids: string[], dx: number, dy: number) => void
   setShapePoints: (id: string, points: Point[]) => void
   duplicateShape: (id: string) => void
   setUniverseData: (universe: number, data: Uint8Array) => void
@@ -639,6 +641,21 @@ export const useStore = create<AppState>()((set, get) => ({
         ...s.chart,
         shapes: s.chart.shapes.map((sh) =>
           sh.id === id ? { ...sh, points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : sh
+        )
+      }
+    }))
+  },
+  nudgeShapes: (ids, dx, dy) => {
+    if (!ids.length) return
+    get().beginHistory(`nudge-${ids.join('+')}`)
+    const idSet = new Set(ids)
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        shapes: s.chart.shapes.map((sh) =>
+          idSet.has(sh.id)
+            ? { ...sh, points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
+            : sh
         )
       }
     }))
