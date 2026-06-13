@@ -1,0 +1,1469 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>画像照明モード 試打台 — DECOR STUDIO</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#191715; --panel:#221f1c; --line:#3a3530; --inset:#15130f;
+    --txt:#e8e2da; --dim:#9a917f; --faint:#6b6457;
+    --amber:#fbbf24; --green:#a8e878; --cyan:#22d3ee; --red:#e0726a;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{background:var(--bg); color:var(--txt); font-family:'Noto Sans JP',sans-serif; display:flex; flex-direction:column; overflow:hidden;}
+  header{display:flex; align-items:baseline; gap:14px; padding:12px 18px 8px;}
+  header h1{font-family:'Bebas Neue',sans-serif; font-size:30px; letter-spacing:2px; font-weight:400;}
+  header small{font-size:12px; color:var(--dim);}
+  #main{flex:1; min-height:0; display:flex; gap:0;}
+  #stage{flex:1; min-width:0; position:relative; background:#000; border-top:1px solid var(--line);}
+  #cv{width:100%; height:100%; display:block; cursor:crosshair;}
+  #hint{position:absolute; top:10px; left:14px; font-size:11.5px; color:rgba(255,255,255,0.38); pointer-events:none; line-height:1.8; font-family:'Noto Sans JP',sans-serif;}
+  #hint b{color:rgba(255,255,255,0.6); font-weight:500;}
+
+  /* ===== シーン棚（背景セット・常に最下層・表示は1枚） ===== */
+  #scenes{position:absolute; left:0; right:0; bottom:0; display:flex; gap:8px; align-items:center;
+          padding:8px 12px; background:rgba(10,9,8,0.74); border-top:1px solid var(--line); overflow-x:auto;}
+  #scenes .sc{flex:0 0 auto; width:96px; cursor:pointer; border:2px solid var(--line); border-radius:6px;
+              background:#000; padding:0; position:relative;}
+  #scenes .sc.on{border-color:var(--amber);}
+  #scenes .sc canvas{display:block; width:92px; height:52px; border-radius:4px;}
+  #scenes .sc span{position:absolute; left:4px; bottom:3px; font-family:'JetBrains Mono',monospace; font-size:9px;
+                   color:var(--txt); text-shadow:0 1px 2px #000; letter-spacing:0.5px;}
+  #scenes .add{flex:0 0 auto; width:96px; height:56px; border:1.5px dashed var(--dim); border-radius:6px;
+               background:transparent; color:var(--dim); cursor:pointer; font-size:11px; font-family:'Noto Sans JP',sans-serif;}
+
+  /* ===== 画像照明モード パネル（痩身版: バー細く・行間圧縮・スクロール最小） ===== */
+  #desk{width:328px; background:var(--panel); border-top:1px solid var(--line); border-left:1px solid var(--line);
+        padding:9px 12px 7px; display:flex; flex-direction:column; gap:7px; overflow-y:auto;}
+  .deskhead{display:flex; align-items:baseline; gap:8px;}
+  .deskhead b{font-size:16.5px; font-weight:700; color:var(--txt); letter-spacing:1px;}
+  .deskhead span{font-size:10px; color:var(--dim);}
+  .seg{display:flex; gap:5px;}
+  .seg button{flex:1; background:var(--inset); border:1px solid var(--line); color:var(--dim);
+              padding:5px 0; border-radius:6px; cursor:pointer; font-size:12px; font-family:'Noto Sans JP',sans-serif;}
+  .seg button.on{border-color:var(--amber); color:var(--amber);}
+  .seg button.dis{opacity:0.45; cursor:not-allowed;}
+  .lbl{font-size:9.5px; letter-spacing:1.4px; color:var(--dim); font-family:'JetBrains Mono',monospace;}
+  .lbl em{font-style:normal; color:var(--faint); letter-spacing:0; margin-left:6px;}
+
+  #strip{display:grid; grid-template-columns:repeat(6,1fr); gap:4px;}
+  #strip button{background:var(--inset); border:1px solid var(--line); border-radius:6px; color:var(--txt);
+                padding:4px 2px 3px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px;
+                min-height:42px; justify-content:center;}
+  #strip button.on{border-color:var(--green); box-shadow:0 0 0 1px rgba(168,232,120,0.35) inset;}
+  #strip button.addfx{border-style:dashed; color:var(--dim);}
+  #strip .nm{font-family:'Bebas Neue',sans-serif; font-size:15px; letter-spacing:0.5px; line-height:1;}
+  #strip .fxall .nm{font-size:11px;}
+  #strip .dot{width:13px; height:3px; border-radius:2px;}
+  #strip button.muted .nm{opacity:0.35; text-decoration:line-through;}
+  #strip button.soloed{border-color:var(--cyan);}
+  #strip .ms{display:flex; gap:3px;}
+  #strip .ms b{font-size:9px; font-weight:700; width:14px; height:12px; line-height:12px; text-align:center;
+               border-radius:2px; color:var(--dim); background:rgba(255,255,255,0.07); cursor:pointer; font-family:'JetBrains Mono',monospace;}
+  #strip .ms b.m.on{background:var(--red); color:#fff;}
+  #strip .ms b.s.on{background:var(--cyan); color:#111;}
+
+  .frow{display:flex; align-items:center; gap:8px;}
+  input[type=range]{flex:1; -webkit-appearance:none; appearance:none; height:16px; background:transparent;}
+  input[type=range]::-webkit-slider-runnable-track{height:3px; border-radius:2px; background:#403a33;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+        background:var(--amber); border:none; margin-top:-5px;}
+  .val{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--amber); width:50px; text-align:right;}
+  .val.small{font-size:11px; color:var(--txt); width:46px;}
+  #gaugeVal{font-size:16px; width:56px;}
+
+  .swatches{display:flex; gap:6px; flex-wrap:wrap;}
+  .swatches button{width:22px; height:22px; border-radius:50%; border:2px solid transparent; cursor:pointer;}
+  .swatches button.on{border-color:#fff;}
+
+  .btnrow{display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px;}
+  .btnrow button{background:var(--inset); border:1px solid var(--line); color:var(--txt); padding:6px 0;
+                 border-radius:6px; cursor:pointer; font-family:'Bebas Neue',sans-serif; font-size:13.5px; letter-spacing:1.5px;}
+  .btnrow button.chase.on{border-color:var(--green); color:var(--green);}
+  .btnrow button.clear{color:var(--red);}
+  .fxgrid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px;}
+  .fxgrid button{position:relative; background:var(--inset); border:1px solid var(--line); color:var(--txt);
+                 padding:7px 0 6px; border-radius:6px; cursor:pointer; font-family:'Bebas Neue',sans-serif;
+                 font-size:12px; letter-spacing:1px;}
+  .fxgrid button.on{border-color:var(--green); color:var(--green); box-shadow:0 0 0 1px rgba(168,232,120,0.3) inset;}
+  .fxgrid button.learn{border-color:var(--cyan); color:var(--cyan);}
+  .fxgrid .mb{position:absolute; right:3px; top:2px; font-family:'JetBrains Mono',monospace; font-size:8px; color:var(--cyan);}
+  #fxparams{display:flex; flex-direction:column; gap:5px;}
+  #fxparams .fxh{font-size:8.5px; color:var(--green); font-family:'JetBrains Mono',monospace; letter-spacing:1.2px; margin-top:1px;}
+
+  /* ===== 本番 PLAY パネル（ツマミゼロ・シーンと写真とMASTERだけ） ===== */
+  #playpanel{width:328px; background:var(--panel); border-top:1px solid var(--line); border-left:1px solid var(--line);
+             padding:9px 12px 7px; display:flex; flex-direction:column; gap:8px; overflow-y:auto;}
+  #playpats{display:flex; flex-direction:column; gap:6px;}
+  .patbig{display:flex; align-items:center; gap:8px; background:var(--inset); border:1px solid var(--line);
+          border-radius:7px; padding:11px 10px; cursor:pointer; color:var(--txt); text-align:left;}
+  .patbig.on{border-color:var(--amber); box-shadow:0 0 0 1px rgba(251,191,36,.25) inset;}
+  .patbig.empty{opacity:0.3; cursor:default;}
+  .patbig .pn{font-family:'Bebas Neue',sans-serif; font-size:15px; color:var(--dim); width:14px;}
+  .patbig .pname{flex:1; font-size:13.5px; font-weight:700;}
+  .patbig .pkey{font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--cyan);}
+
+  /* BUILD側のシーン管理列 */
+  #buildpats{display:flex; flex-direction:column; gap:4px;}
+  .patrow{display:flex; align-items:center; gap:6px; background:var(--inset); border:1px solid var(--line);
+          border-radius:6px; padding:4px 8px;}
+  .patrow.armed{border-color:var(--amber); box-shadow:0 0 0 1px rgba(251,191,36,.3) inset;}
+  .patrow .pn{font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--dim); width:12px;}
+  .patrow .pname{flex:1; font-size:11.5px;}
+  .patrow .pname input{width:100%; background:#15130f; border:1px solid var(--line); color:var(--txt);
+                       font-size:11.5px; border-radius:4px; padding:2px 4px; font-family:'Noto Sans JP',sans-serif;}
+  .patrow .ic{background:none; border:1px solid var(--line); color:var(--dim); border-radius:4px;
+              font-size:10px; padding:2px 6px; cursor:pointer; font-family:'Noto Sans JP',sans-serif;}
+  .patrow .ic.learnon{border-color:var(--cyan); color:var(--cyan);}
+  .mini.learnon{border-color:var(--cyan); color:var(--cyan);}
+  .patrow .pkey{font-family:'JetBrains Mono',monospace; font-size:9px; color:var(--cyan); min-width:26px; text-align:right;}
+  .mini{background:var(--inset); border:1px solid var(--line); color:var(--dim); padding:3px 8px;
+        border-radius:5px; cursor:pointer; font-size:10.5px; font-family:'Noto Sans JP',sans-serif;}
+  hr{border:none; border-top:1px solid var(--line); margin:0;}
+  .note{font-size:10.5px; color:var(--faint); line-height:1.7;}
+  .note b{color:var(--dim); font-weight:500;}
+  details.note summary{cursor:pointer; color:var(--dim); font-size:10.5px; letter-spacing:0.5px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>IMAGE LIGHTING <span style="color:var(--amber)">画像照明モード</span> 試打台</h1>
+  <small>のむさんが本番で回す照明モード — 2026-06-13 <b style="color:var(--green)">v7.1 保存→呼出し修正版</b>（この緑文字が見えればリロード成功）</small>
+</header>
+<div id="main">
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="hint">
+      <b>写真はクリック。明かりはシーン。困ったらESC。</b><br>
+      <b>下の棚＝写真</b>（クリック＝セット転換・明かりは持たない）／<b>右＝シーン</b>（PLAY=叩く・BUILD=作る）<br>
+      <b>仕込み:</b> ⌘+クリック＝灯体を追加 ／ 灯体クリック＝選択 ／ ドラッグ＝移動（配置は全シーン共通）
+    </div>
+    <div id="scenes"></div>
+  </div>
+  <aside id="playpanel">
+    <div class="deskhead"><b>本番 PLAY</b><span>明かり＝下のボタン or ショートカット</span>
+      <div style="flex:1"></div>
+      <button class="mini" id="toBuild">明かり作りへ →</button>
+    </div>
+    <div id="playpats"></div>
+    <div class="lbl">MASTER<em>— 親フェーダー（LEARNでMIDI割当・↑↓キーでも）</em></div>
+    <div class="frow">
+      <input type="range" id="master2" min="0" max="100" value="100">
+      <div class="val" id="master2Val">100%</div>
+      <button class="mini" id="masterLearn">LEARN</button>
+    </div>
+    <div class="note">
+      <b>ESC</b>＝全部ふわっと消す（1.5秒）／<b>0</b>＝即暗転／<b>F</b>＝全灯フル／<b>↑↓</b>＝マスター／<b>← →</b>＝写真送り<br>
+      写真は下の棚をクリック。明かりはシーンを押すだけ（ショートカットの割当・名前付けは「明かり作り」側で）。
+    </div>
+  </aside>
+  <aside id="desk">
+    <div class="deskhead"><b>明かり作り BUILD</b><span>作って番号に詰める</span>
+      <div style="flex:1"></div>
+      <button class="mini" id="toPlay">← 本番へ</button>
+    </div>
+    <div class="seg">
+      <button id="modeDesk" class="on">画像照明（手で操作）</button>
+      <button id="modeLive" class="dis" title="Art-Netが届いている時だけ選べる">LIVE（卓優先）</button>
+    </div>
+
+    <div class="lbl">FIXTURES<em>— 番号=灯体（クリックで選択）／M=消す・S=これだけ・写真ごとに記憶</em></div>
+    <div id="strip"></div>
+
+    <div class="lbl">GAUGE<em>— 明るさ</em></div>
+    <div class="frow">
+      <input type="range" id="gauge" min="0" max="100" value="72">
+      <div class="val" id="gaugeVal">72%</div>
+    </div>
+
+    <div class="lbl">COLOR<em>— 固定色／ピッカーで微調整／★で保存</em></div>
+    <div class="swatches" id="swatches"></div>
+    <div class="frow" style="margin-top:3px;">
+      <input type="color" id="colorPick" value="#ffa848" style="width:42px;height:26px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;cursor:pointer;">
+      <span id="colorHex" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--dim);flex:1;">#FFA848</span>
+      <button class="mini" id="colorSave">★保存</button>
+    </div>
+    <div class="swatches" id="userSwatches"></div>
+
+    <div class="lbl">PAN / TILT / ZOOM<em>— ZOOM＝広さ（扇の開き）。長さは変えない</em></div>
+    <div class="frow"><span class="lbl" style="width:34px">PAN</span>
+      <input type="range" id="pan" min="-90" max="90" value="0">
+      <div class="val small" id="panVal">0°</div></div>
+    <div class="frow"><span class="lbl" style="width:34px">TILT</span>
+      <input type="range" id="tilt" min="-180" max="180" value="0">
+      <div class="val small" id="tiltVal">0°</div></div>
+    <div class="frow"><span class="lbl" style="width:34px">ZOOM</span>
+      <input type="range" id="zoom" min="15" max="400" value="100">
+      <div class="val small" id="zoomVal">×1.00</div></div>
+    <div style="display:flex; justify-content:flex-end;">
+      <button class="mini" id="homeBtn">HOME（置いた姿 = DMX128）</button>
+    </div>
+
+    <div class="lbl">FX — エフェクト<em>— クリック＝点/消・右クリック＝MIDI割当（学習）</em></div>
+    <div class="fxgrid" id="fxgrid">
+      <button data-fx="search">SEARCH</button>
+      <button data-fx="rndsearch">RND SEARCH</button>
+      <button data-fx="chase">CHASE</button>
+      <button data-fx="strobe">STROBE</button>
+      <button data-fx="rndstrobe">RND STROBE</button>
+      <button data-fx="colorchase">COLOR CHASE</button>
+      <button data-fx="breath">呼吸 BREATH</button>
+      <button data-fx="fire">炎 FIRE</button>
+      <button data-fx="wave">波 WAVE</button>
+      <button data-fx="bolt">雷 BOLT</button>
+      <button data-fx="rainbow">虹 RAINBOW</button>
+      <button data-fx="zoompulse">開閉 ZOOM</button>
+    </div>
+    <div id="fxparams"></div>
+
+    <hr>
+    <div class="lbl">SCENES — シーン<em>— 色＋エフェクトを番号に詰める → PLAYで呼ぶ</em></div>
+    <button class="mini" id="armSave" style="align-self:flex-start;">● いまの明かりをシーンへ保存（押してから下の番号を選ぶ）</button>
+    <div id="buildpats"></div>
+
+    <hr>
+    <div class="lbl">MASTER<em>— 全体の親フェーダー</em></div>
+    <div class="frow">
+      <input type="range" id="master" min="0" max="100" value="100">
+      <div class="val" id="masterVal">100%</div>
+    </div>
+    <div class="frow"><span class="lbl" style="width:46px">SMOKE</span>
+      <input type="range" id="smoke" min="0" max="30" value="12">
+      <div class="val small" id="smokeVal">12</div></div>
+
+    <hr>
+    <details class="note" open>
+      <summary>▸ 仕込み（灯体の素性 — 本実装ではInspectorの領分）</summary>
+      <div class="frow" style="margin-top:5px"><span class="lbl" style="width:52px">出口幅</span>
+        <input type="range" id="rw0" min="8" max="180" value="40">
+        <div class="val small" id="rw0Val">40</div></div>
+      <div class="frow"><span class="lbl" style="width:52px">広がり</span>
+        <input type="range" id="rw1" min="20" max="700" value="260">
+        <div class="val small" id="rw1Val">260</div></div>
+      <div class="frow"><span class="lbl" style="width:52px">届く高さ</span>
+        <input type="range" id="rlen" min="80" max="1000" value="600">
+        <div class="val small" id="rlenVal">600</div></div>
+      <div style="display:flex; justify-content:flex-end; margin-top:3px;">
+        <button class="mini" id="delBtn">選択灯体を削除</button>
+      </div>
+    </details>
+    <input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+    <details class="note">
+      <summary>▸ この画面の考え方（タップで開く）</summary>
+      <b>合言葉「セットは棚から、明かりは卓から」:</b>
+      下の<b>シーン棚</b>＝セット写真（背景）。クリックでセット転換・表示は常に1枚・<b>常に最下層</b>。
+      灯体と電飾は吊りっぱなしで残り、明かりはこのパネル（または本物の卓）が作ります。
+      本実装では棚はDMXでも呼べる予定（SCENEチャンネル1本・メディアサーバーの静止画選択と同じ流儀）。
+      クリックとDMXがぶつかったら「後から動かした方が勝ち」（卓の世界のLTP）。
+      光の計算は出荷済みUPLIGHTの式そのまま（screen混色・アルベド乗算・暗部トー・パン非対称・Smoke連動）。
+    </details>
+  </aside>
+</div>
+<script>
+'use strict';
+// ============ 論理座標系 ============
+const LW = 1600, LH = 900;
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let viewScale = 1, dpr = window.devicePixelRatio || 1;
+let q = 1;
+
+function mk(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+const lightCv = mk(LW, LH); const lc = lightCv.getContext('2d');
+const workCv = mk(LW, LH); const wc = workCv.getContext('2d');
+const airCv = mk(LW, LH); const ac = airCv.getContext('2d');
+const frameCv = mk(LW, LH); const fc = frameCv.getContext('2d');
+let bloomCv = null, smoothCv = null, noiseCv = null;
+
+function resize() {
+  const r = cv.parentElement.getBoundingClientRect();
+  cv.width = r.width * dpr;
+  cv.height = r.height * dpr;
+  viewScale = Math.min(cv.width / LW, cv.height / LH);
+  q = Math.min(2.5, Math.max(1, viewScale));
+  for (const oc of [lightCv, workCv, airCv, frameCv]) {
+    oc.width = Math.round(LW * q);
+    oc.height = Math.round(LH * q);
+  }
+  bloomCv = null; smoothCv = null; noiseCv = null;
+  draw();
+}
+window.addEventListener('resize', resize);
+
+// ============ ノイズタイル ============
+const noiseTile = (() => {
+  const n = mk(64, 64);
+  const nc = n.getContext('2d');
+  const id = nc.createImageData(64, 64);
+  let s = 12345;
+  for (let i = 0; i < id.data.length; i += 4) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    const v = (s >> 16) & 255;
+    id.data[i] = v; id.data[i+1] = v; id.data[i+2] = v; id.data[i+3] = 255;
+  }
+  nc.putImageData(id, 0, 0);
+  return n;
+})();
+
+// ============ 写真素材（アルベド正規化） ============
+function albedoOf(img) {
+  const a = mk(img.width, img.height);
+  const c = a.getContext('2d');
+  c.drawImage(img, 0, 0);
+  c.globalCompositeOperation = 'multiply';
+  c.fillStyle = 'rgb(217,217,217)';
+  c.fillRect(0, 0, a.width, a.height);
+  c.globalCompositeOperation = 'destination-in';
+  c.drawImage(img, 0, 0);
+  return a;
+}
+function makeDummy() {
+  const m = mk(1300, 620);
+  const c = m.getContext('2d');
+  function tube(x1, y1, x2, y2, w) {
+    c.strokeStyle = 'rgba(235,230,220,0.9)'; c.lineWidth = w; c.lineCap = 'round';
+    c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,1)'; c.lineWidth = w * 0.4;
+    c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+  }
+  function panel(x, y, w, h) {
+    c.strokeStyle = 'rgba(120,120,126,1)'; c.lineWidth = 10;
+    c.strokeRect(x, y, w, h);
+    c.fillStyle = 'rgba(70,70,75,1)';
+    for (const p of [[x,y],[x+w,y],[x,y+h],[x+w,y+h]]) { c.beginPath(); c.arc(p[0],p[1],10,0,7); c.fill(); }
+    tube(x+16, y+16, x+w-16, y+h-16, 14);
+    tube(x+w-16, y+16, x+16, y+h-16, 14);
+  }
+  function barUnit(x, y, w) {
+    c.strokeStyle = 'rgba(120,120,126,1)'; c.lineWidth = 8;
+    c.strokeRect(x, y, w, 70);
+    tube(x+20, y+24, x+w-20, y+24, 12);
+    tube(x+20, y+48, x+w-20, y+48, 12);
+  }
+  panel(90, 60, 200, 240);
+  panel(1010, 60, 200, 240);
+  panel(520, 40, 260, 280);
+  c.font = '900 72px sans-serif';
+  c.fillStyle = 'rgba(15,15,15,1)';
+  c.textAlign = 'center';
+  c.fillText('HINATA', 650, 200);
+  barUnit(90, 380, 460);
+  barUnit(750, 380, 460);
+  barUnit(350, 520, 600);
+  return m;
+}
+let rawMat = makeDummy();
+let mat = albedoOf(rawMat);
+let box = null;
+function fitImage() {
+  const sc = Math.min((LW - 80) / mat.width, (LH - 240) / mat.height);
+  const iw = mat.width * sc, ih = mat.height * sc;
+  box = { x: (LW - iw) / 2, y: 40, w: iw, h: ih };
+}
+fitImage();
+
+// ============ シーン棚 — 背景セット。表示は常に1枚・最下層。 ============
+// 灯体と電飾は吊りっぱなし（シーンが変わっても残る）。明かりは卓/DESKが作る。
+const scenes = [];
+let activeScene = -1;
+function addScene(img, name) {
+  const th = mk(184, 104); const tc = th.getContext('2d');
+  tc.fillStyle = '#000'; tc.fillRect(0, 0, 184, 104);
+  const s = Math.min(184 / img.width, 104 / img.height);
+  tc.drawImage(img, (184 - img.width * s) / 2, (104 - img.height * s) / 2, img.width * s, img.height * s);
+  // 写真棚＝セット写真だけ。明かりは持たない（明かりはシーン棚の担当・判定 2026-06-13）
+  scenes.push({ name: name || ('PHOTO ' + (scenes.length + 1)), img, mat: albedoOf(img), thumb: th });
+  selectScene(scenes.length - 1);
+}
+function selectScene(i) {
+  if (!scenes[i]) return;
+  if (activeScene >= 0 && activeScene !== i) saveFixState(activeScene);
+  activeScene = i;
+  rawMat = scenes[i].img;
+  mat = scenes[i].mat;
+  loadFixState(i);
+  fitImage(); renderScenes(); renderStrip();
+  draw();
+}
+// ミュート/ソロは「写真（セット）ごと」に保存（のむさん確定 2026-06-13）。配置は全シーン共通・使う灯体だけ写真ごとに絞る
+function saveFixState(si) { if (scenes[si]) scenes[si].fix = beams.map((b) => ({ m: !!b.mute, s: !!b.solo })); }
+function loadFixState(si) { const f = scenes[si] && scenes[si].fix; beams.forEach((b, i) => { b.mute = !!(f && f[i] && f[i].m); b.solo = !!(f && f[i] && f[i].s); }); }
+function isLit(b) { const anySolo = beams.some((x) => x.solo); return !b.mute && (!anySolo || b.solo); }
+// 「明かり」＝全灯のゲージ・色・PTZ＋FXの点き具合。灯体の配置(x,y)と仕込み値は全シーン共通（リグプリセット）
+function currentLook() {
+  return {
+    fxst: { chase: st.chase, search: st.search, searchRandom: st.searchRandom,
+            strobe: st.strobe, colorChase: st.colorChase,
+            breath: st.breath, fire: st.fire, wave: st.wave, bolt: st.bolt, rainbow: st.rainbow, zoompulse: st.zoompulse },
+    fxp: JSON.parse(JSON.stringify(st.fxp)), // FXごとのツマミもシーンに記憶
+    lights: beams.map((b) => ({ gauge: b.gauge, color: b.color.slice(), pan: b.pan, tilt: b.tilt, zoom: b.zoom }))
+  };
+}
+function applyLook(L) {
+  if (!L) return;
+  // 旧シーン互換: 記録に無いFXは確実にOFF（消し忘れ防止）
+  st.chase = st.search = st.searchRandom = st.colorChase = false; st.strobe = 'off';
+  st.breath = st.fire = st.wave = st.bolt = st.rainbow = st.zoompulse = false;
+  Object.assign(st, L.fxst);
+  if (L.fxp) st.fxp = Object.assign(JSON.parse(JSON.stringify(st.fxp)), JSON.parse(JSON.stringify(L.fxp)));
+  L.lights.forEach((f, i) => {
+    const b = beams[i];
+    if (!b) return;
+    b.gauge = f.gauge; b.color = f.color.slice(); b.pan = f.pan; b.tilt = f.tilt; b.zoom = f.zoom;
+  });
+  t0 = performance.now();
+  fxSig = null; // FXツマミ欄を記憶した値で作り直す
+  renderStrip(); syncDesk(); syncFx(); ensureAnim();
+}
+function renderScenes() {
+  const bar = document.getElementById('scenes');
+  bar.innerHTML = '';
+  scenes.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'sc' + (i === activeScene ? ' on' : '');
+    const c = document.createElement('canvas'); c.width = 184; c.height = 104;
+    c.getContext('2d').drawImage(s.thumb, 0, 0);
+    const lb = document.createElement('span'); lb.textContent = s.name;
+    b.appendChild(c); b.appendChild(lb);
+    b.onclick = () => selectScene(i);
+    bar.appendChild(b);
+  });
+  const add = document.createElement('button');
+  add.className = 'add';
+  add.textContent = '＋ 写真を追加';
+  add.onclick = () => document.getElementById('fileInput').click();
+  bar.appendChild(add);
+}
+
+// ============ 状態 ============
+// 卓チャンネル: gauge(=Dim相当)・color・pan・tilt・zoom。仕込み値: x,y,w0,w1,len
+// SEARCH = サーチライト首振り（tiltを基準に±widthの扇で揺れる・speed調整・randomで各灯バラバラ）
+const st = { master: 1, smoke: 12, chase: false,
+             search: false, searchRandom: false,
+             strobe: 'off' /* off|all|rnd */, colorChase: false,
+             breath: false, fire: false, wave: false, bolt: false, rainbow: false, zoompulse: false,
+             // エフェクトごとの個別設定（ボタンを点けると、そのFXのツマミだけが下に出る）
+             fxp: {
+               search:     { speed: 0.30, width: 12 },   // 速さ(Hz)・幅(±°)
+               rndsearch:  { vari: 60 },                  // ばらつき%（0=全灯揃う）
+               chase:      { speed: 1.0, soft: 70 },      // 速さ(倍)・やわらかさ%
+               strobe:     { speed: 6, duty: 30 },        // 速さ(Hz)・点灯率%
+               rndstrobe:  { speed: 10, dens: 28 },       // 速さ(切替/秒)・密度%
+               colorchase: { speed: 1.5, blend: 0 },      // 速さ(色/秒)・なじみ%
+               breath:     { speed: 0.22, depth: 80 },    // 呼吸: 速さ(Hz)・深さ%
+               fire:       { speed: 1.0, amount: 60 },    // 炎: 速さ・揺れ%
+               wave:       { speed: 0.35, length: 50 },   // 波: 速さ・波の長さ%
+               bolt:       { rate: 0.5, strength: 90 },   // 雷: 頻度・強さ%
+               rainbow:    { speed: 0.15, spread: 50 },   // 虹: 速さ(周/秒)・ばらし%(同色↔虹)
+               zoompulse:  { speed: 0.25, amount: 60 }    // 開閉: 速さ・開き幅%
+             } };
+const anyFx = () => st.chase || st.search || st.strobe !== 'off' || st.colorChase ||
+                    st.breath || st.fire || st.wave || st.bolt || st.rainbow || st.zoompulse;
+// 色が動くFX（点灯中は色ボタンを握れない＝グレーアウト）
+const colorOwnedByFx = () => st.rainbow || st.colorChase;
+function hsl2rgb(h, s, l) {
+  h = ((h % 360) + 360) % 360 / 360;
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = (t) => { t = (t + 1) % 1; return t < 1/6 ? p + (q-p)*6*t : t < 1/2 ? q : t < 2/3 ? p + (q-p)*(2/3-t)*6 : p; };
+  return [Math.round(f(h+1/3)*255), Math.round(f(h)*255), Math.round(f(h-1/3)*255)];
+}
+const AMBER = [255, 168, 72];
+// 各灯のランダム個性（位相・速さ・幅）— 固定シードで毎回同じ「ランダム」
+let seed = 7;
+function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+function searchParams() { return { phase: rnd() * Math.PI * 2, speedK: 0.6 + 0.8 * rnd(), widthK: 0.7 + 0.6 * rnd() }; }
+let beams = [];
+(function initBeams(){
+  const xs = [320, 540, 760, 980, 1200, 1420];
+  for (let i = 0; i < 6; i++) {
+    beams.push({ x: xs[i], y: 840, w0: 40, w1: 260, len: 600,
+                 pan: 0, tilt: 0, zoom: 1, gauge: 0.72, color: AMBER.slice(), sp: searchParams() });
+  }
+})();
+let sel = 0; // -1 = ALL
+
+const rgs = (c, a) => 'rgba(' + (c[0]|0) + ',' + (c[1]|0) + ',' + (c[2]|0) + ',' + Math.max(0, Math.min(1, a)).toFixed(3) + ')';
+
+// チェイス: 1灯ずつ山が流れる。やわらかさ＝山のなだらかさ（カチッ↔ふわっ）
+let t0 = performance.now();
+function chaseK(i, now) {
+  const P = st.fxp.chase;
+  const e = 4 - 3.2 * (P.soft / 100); // 0%=ピシッと尖る ↔ 100%=ふわっと重なる
+  const ph = ((now - t0) / 700) * P.speed - i * 0.55;
+  return Math.max(0, Math.sin(ph)) ** e;
+}
+// ストロボ: all=全灯一斉（速さHz・点灯率%）/ rnd=各灯バラバラ明滅（速さ・密度=雰囲気）
+const frac = (x) => x - Math.floor(x);
+function strobeK(i, now) {
+  if (st.strobe === 'off') return 1;
+  const tsec = (now - t0) / 1000;
+  if (st.strobe === 'all') {
+    const P = st.fxp.strobe;
+    return frac(tsec * P.speed) < P.duty / 100 ? 1 : 0;
+  }
+  const P = st.fxp.rndstrobe;
+  const slot = Math.floor(tsec * P.speed);
+  return frac(Math.sin(slot * 12.9898 + i * 78.233) * 43758.5453) < P.dens / 100 ? 1 : 0;
+}
+// カラフルチェイス: 8色が灯体を順送り。なじみ%＝切替の混色（0=パッ／100=じわっ）
+const mixc = (a, b2, t) => [a[0] + (b2[0] - a[0]) * t, a[1] + (b2[1] - a[1]) * t, a[2] + (b2[2] - a[2]) * t];
+function colorNow(b, i, now) {
+  if (st.rainbow) { // 虹: 色相がぐるぐる回る。ばらし%で全灯同色↔灯ごとにずれて虹
+    const P = st.fxp.rainbow;
+    const hue = ((now - t0) / 1000) * P.speed * 360 + i * (P.spread / 100) * 55;
+    return hsl2rgb(hue, 0.95, 0.6);
+  }
+  if (!st.colorChase) return b.color;
+  const P = st.fxp.colorchase;
+  const pos = ((now - t0) / 1000) * P.speed;
+  const step = Math.floor(pos);
+  const c1 = COLORS[(i + step) % COLORS.length][1];
+  const cf = P.blend / 100;
+  if (cf <= 0.01) return c1;
+  const f = pos - step;
+  if (f < 1 - cf) return c1;
+  const c2 = COLORS[(i + step + 1) % COLORS.length][1];
+  return mixc(c1, c2, (f - (1 - cf)) / cf);
+}
+function effI(b, i, now) {
+  if (!isLit(b)) return 0; // ミュート or（誰かソロ中で）非ソロ → 消える
+  let v = b.gauge * st.master * panicGain; // panicGain: ESC=1.5秒で1→0 / 0キー=即0 / シーンで1に復帰
+  if (st.chase) v *= chaseK(i, now);
+  if (st.breath) v *= breathK(now);
+  if (st.fire) v *= fireK(i, now);
+  if (st.wave) v *= waveK(i, now);
+  if (st.bolt) v *= boltK(now);
+  v *= strobeK(i, now);
+  return v;
+}
+// 呼吸: 全灯ゆっくり膨らみ沈む（深さ%まで沈む）。ストロボの正反対
+function breathK(now) {
+  const P = st.fxp.breath, d = P.depth / 100;
+  return (1 - d) + d * (0.5 + 0.5 * Math.sin(2 * Math.PI * P.speed * ((now - t0) / 1000)));
+}
+// 炎: 各灯が焚き火のように不規則ゆらゆら（ランダムストロボの滑らか版）
+function fireK(i, now) {
+  const P = st.fxp.fire, s = ((now - t0) / 1000) * 5 * P.speed, a = P.amount / 100;
+  const v = 0.72 + a * 0.42 * (0.55 * Math.sin(s + i * 7.1) + 0.30 * Math.sin(s * 2.7 + i * 13.3) + 0.15 * Math.sin(s * 5.1 + i * 3.7));
+  return Math.max(0.05, Math.min(1, v));
+}
+// 波: 明るさのうねりが端から端へ流れ続ける（チェイスの大人版）
+function waveK(i, now) {
+  const P = st.fxp.wave, len = P.length / 100;
+  return 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(2 * Math.PI * P.speed * ((now - t0) / 1000) - i * (0.4 + 2.5 * len)));
+}
+// 雷: 不規則な間隔でバシャッと光って残光で消える（全灯一斉）
+function boltK(now) {
+  const P = st.fxp.bolt, r = ((now - t0) / 1000) * 2 * Math.max(0.1, P.rate), s = Math.floor(r);
+  const h = frac(Math.sin(s * 127.1) * 43758.5453);
+  return h < 0.22 ? 1 + (P.strength / 100) * Math.exp(-(r - s) * 5) : 1;
+}
+// 開閉: 扇がゆっくり開いたり絞ったり呼吸する（ズームに乗る）
+function zoomPulseK(now) {
+  if (!st.zoompulse) return 1;
+  const P = st.fxp.zoompulse;
+  return Math.max(0.3, 1 + (P.amount / 100) * 0.9 * Math.sin(2 * Math.PI * P.speed * ((now - t0) / 1000)));
+}
+// SEARCH中の実効TILT: 基準tiltを中心に±widthの扇で正弦の揺れ。
+// RANDOM ONなら各灯の個性（位相・速さ・幅）でバラバラにゆっくり揺れる
+function tiltNow(b, now) {
+  if (!st.search) return b.tilt;
+  const P = st.fxp.search;
+  let w = P.width, spd = P.speed, ph = 0;
+  if (st.searchRandom) {
+    const v = st.fxp.rndsearch.vari / 100; // ばらつき0%=全灯揃って揺れる
+    w *= 1 + (b.sp.widthK - 1) * v;
+    spd *= 1 + (b.sp.speedK - 1) * v;
+    ph = b.sp.phase * v;
+  }
+  return b.tilt + w * Math.sin(2 * Math.PI * spd * ((now - t0) / 1000) + ph);
+}
+
+function trap(g, b, wf, y0, y1) {
+  const t0v = (b.y - y0) / b.len, t1v = (b.y - y1) / b.len;
+  const wAt = (t) => (b.w0 + (b.w1 - b.w0) * t) * wf / 2;
+  g.beginPath();
+  g.moveTo(b.x - wAt(t0v), y0);
+  g.lineTo(b.x + wAt(t0v), y0);
+  g.lineTo(b.x + wAt(t1v), y1);
+  g.lineTo(b.x - wAt(t1v), y1);
+  g.closePath();
+}
+
+// 光は「色のまま」強くなる（白くしない — 家訓）。カラフルチェイス中は流れてきた色で。
+function beamColOf(b, I) {
+  const c = b._cn || b.color;
+  const low = Math.max(0, (0.5 - I) / 0.5);
+  return [
+    c[0] * I,
+    c[1] * (1 - 0.3 * low) * I,
+    c[2] * (1 - 0.6 * low) * I
+  ];
+}
+
+// 終わり際の丸み（のむさん指摘 2026-06-13）: 層ごとに「届く長さ」を変える。
+// 外側の層ほど早く尽き、中心の層だけ最後まで届く → 先端は横棒でなく丸い舌、
+// 両脇から先に暗くなる。各層は自分の長さの中で完全に減衰するので段差は出ない。
+function drawBeamCore(g, geo, col, ampl) {
+  g.save();
+  g.globalCompositeOperation = 'screen';
+  const NL = 12;
+  for (let k2 = 0; k2 < NL; k2++) {
+    const u = k2 / (NL - 1);
+    const wf = 1 - u * 0.62;                    // 横: 1.0(外)→0.38(中心)
+    const lf = 0.70 + 0.30 * Math.pow(u, 1.4);  // 縦: 外側0.70 → 中心1.00
+    const L = geo.len * lf;
+    const gr = g.createLinearGradient(0, geo.y, 0, geo.y - L);
+    for (let s = 0; s <= 28; s++) {
+      const t = s / 28;
+      const v = Math.pow(Math.pow(1 - t, 2), 1 / 2.2);
+      gr.addColorStop(t, rgs(col, v));
+    }
+    g.fillStyle = gr;
+    g.globalAlpha = ampl / NL;
+    trap(g, geo, wf, geo.y, geo.y - L);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+  g.restore();
+}
+
+// TILT: 灯体位置を軸に面内回転（卓のTiltエンコーダ・SEARCH中は揺れた角度が渡ってくる）
+function withTilt(g, b, deg, fn) {
+  if (!deg) { fn(); return; }
+  g.save();
+  g.translate(b.x, b.y);
+  g.rotate((deg * Math.PI) / 180);
+  g.translate(-b.x, -b.y);
+  fn();
+  g.restore();
+}
+
+// 看板に当たる光: パン非対称（奥=cos^3.2急減 / 手前=cos^1.8緩減）
+function drawWallBeam(g, b, I, T) {
+  const phi = ((b.pan || 0) * Math.PI) / 180;
+  const wallK = Math.pow(Math.max(0, Math.cos(phi)), (b.pan || 0) < 0 ? 3.2 : 1.8);
+  if (I <= 0.004 || wallK <= 0.004) return;
+  const col = beamColOf(b, I).map(v => v * wallK);
+  const drive = I > 0.55 ? (I - 0.55) / 0.45 : 0;
+  const z = (b.zoom || 1) * (b._zp || 1);
+  // ZOOM=広がり(w1)だけ。届く長さは仕込み値のまま（出荷uplight.ts:146と同じ）
+  const geo = { x: b.x, y: b.y, w0: b.w0, w1: b.w1 * z, len: b.len };
+  withTilt(g, b, T, () => {
+    drawBeamCore(g, geo, col, 2.0 * (1 + 0.55 * drive));
+    if (drive > 0) {
+      g.save();
+      g.globalCompositeOperation = 'screen';
+      const hL = geo.len * 0.2;
+      const gr2 = g.createLinearGradient(0, geo.y, 0, geo.y - hL);
+      gr2.addColorStop(0, rgs(col, 0.6 * drive));
+      gr2.addColorStop(1, rgs(col, 0));
+      g.fillStyle = gr2;
+      trap(g, geo, 0.9, geo.y, geo.y - hL);
+      g.fill();
+      g.restore();
+    }
+  });
+}
+
+// 空中の光の水: 手前で投影が縮む・奥は裏に隠れて急減・Smoke連動
+function drawAirBeam(g, b, I, T) {
+  const phi = ((b.pan || 0) * Math.PI) / 180;
+  const c = Math.cos(phi);
+  const airK = (b.pan || 0) < 0 ? Math.pow(Math.max(0, c), 2.5) : 0.8 + 0.2 * c;
+  if (I <= 0.004 || airK <= 0.004) return;
+  const col = beamColOf(b, I).map(v => v * airK);
+  const z = (b.zoom || 1) * (b._zp || 1);
+  const geo = {
+    x: b.x, y: b.y,
+    w0: b.w0,
+    w1: b.w1 * z * (1 + 0.4 * (1 - Math.abs(c))),
+    len: Math.max(b.len * 0.1, b.len * Math.abs(c))
+  };
+  withTilt(g, b, T, () => drawBeamCore(g, geo, col, 2.0));
+}
+
+function draw(now) {
+  now = now || performance.now();
+  const QW = lightCv.width, QH = lightCv.height;
+  const Is = beams.map((b, i) => effI(b, i, now));
+  const maxI = Is.length ? Math.max(...Is) : 0;
+
+  // ---- 光マップ（全灯をscreenで1枚に合算 → blur書き戻し＋ノイズ）
+  lc.setTransform(1, 0, 0, 1, 0, 0);
+  lc.clearRect(0, 0, QW, QH);
+  lc.fillStyle = '#000';
+  lc.fillRect(0, 0, QW, QH);
+  if (maxI > 0.004) {
+    lc.setTransform(q, 0, 0, q, 0, 0);
+    beams.forEach((b, i) => { b._tn = tiltNow(b, now); b._cn = colorNow(b, i, now); b._zp = zoomPulseK(now); drawWallBeam(lc, b, Is[i], b._tn); });
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    if (!smoothCv || smoothCv.width !== QW) smoothCv = mk(QW, QH);
+    const sc2 = smoothCv.getContext('2d');
+    sc2.clearRect(0, 0, QW, QH);
+    sc2.filter = 'blur(' + (1.6 * q) + 'px)';
+    sc2.drawImage(lightCv, 0, 0);
+    sc2.filter = 'none';
+    lc.clearRect(0, 0, QW, QH);
+    lc.fillStyle = '#000';
+    lc.fillRect(0, 0, QW, QH);
+    lc.drawImage(smoothCv, 0, 0);
+    // ノイズは「光があるところだけ」に撒く（無灯部の底上げ禁止 — のむさん判定 2026-06-13）
+    if (!noiseCv || noiseCv.width !== QW || noiseCv.height !== QH) noiseCv = mk(QW, QH);
+    const nmc = noiseCv.getContext('2d');
+    nmc.globalCompositeOperation = 'source-over';
+    nmc.fillStyle = nmc.createPattern(noiseTile, 'repeat');
+    nmc.fillRect(0, 0, QW, QH);
+    nmc.globalCompositeOperation = 'multiply';
+    nmc.drawImage(lightCv, 0, 0); // ノイズ×光 → 光ゼロの場所は加算ゼロのまま
+    lc.save();
+    lc.globalCompositeOperation = 'lighter';
+    lc.globalAlpha = 0.07; // 乗算で振幅が下がるぶん持ち上げ（撹拌力は維持）
+    lc.drawImage(noiseCv, 0, 0);
+    lc.restore();
+  }
+
+  // ---- 写真 × 光（乗算）＋暗部トー（座組の最大ゲージで露出が決まる＝出荷仕様）
+  wc.setTransform(1, 0, 0, 1, 0, 0);
+  wc.clearRect(0, 0, QW, QH);
+  if (maxI > 0.004) {
+    wc.setTransform(q, 0, 0, q, 0, 0);
+    wc.globalCompositeOperation = 'source-over';
+    wc.drawImage(mat, box.x, box.y, box.w, box.h);
+    wc.setTransform(1, 0, 0, 1, 0, 0);
+    wc.globalCompositeOperation = 'multiply';
+    wc.drawImage(lightCv, 0, 0);
+    const tone = Math.max(0, (0.5 - maxI) / 0.5) * 0.85;
+    if (tone > 0.01) {
+      wc.globalAlpha = tone;
+      wc.drawImage(lightCv, 0, 0);
+      wc.globalAlpha = 1;
+    }
+    wc.setTransform(q, 0, 0, q, 0, 0);
+    wc.globalCompositeOperation = 'destination-in';
+    wc.drawImage(mat, box.x, box.y, box.w, box.h);
+    wc.setTransform(1, 0, 0, 1, 0, 0);
+    wc.globalCompositeOperation = 'source-over';
+  }
+
+  // ---- フレーム合成
+  fc.setTransform(1, 0, 0, 1, 0, 0);
+  fc.clearRect(0, 0, QW, QH);
+  fc.globalCompositeOperation = 'source-over';
+  fc.drawImage(workCv, 0, 0);
+  const airA = (st.smoke / 30) * 0.42;
+  if (maxI > 0.004 && airA > 0.01) {
+    ac.setTransform(1, 0, 0, 1, 0, 0);
+    ac.clearRect(0, 0, QW, QH);
+    ac.globalCompositeOperation = 'source-over';
+    ac.setTransform(q, 0, 0, q, 0, 0);
+    beams.forEach((b, i) => drawAirBeam(ac, b, Is[i], b._tn !== undefined ? b._tn : tiltNow(b, now)));
+    ac.globalCompositeOperation = 'destination-out';
+    ac.drawImage(mat, box.x, box.y, box.w, box.h);
+    ac.setTransform(1, 0, 0, 1, 0, 0);
+    ac.globalCompositeOperation = 'source-over';
+    fc.globalCompositeOperation = 'lighter';
+    fc.globalAlpha = airA;
+    fc.drawImage(airCv, 0, 0);
+    fc.globalAlpha = 1;
+    fc.globalCompositeOperation = 'source-over';
+  }
+  if (st.smoke > 0 && maxI > 0.004) {
+    if (!bloomCv || bloomCv.width !== QW) bloomCv = mk(QW, QH);
+    const bc = bloomCv.getContext('2d');
+    bc.clearRect(0, 0, QW, QH);
+    bc.filter = 'blur(' + (st.smoke * 0.9 * q) + 'px)';
+    bc.drawImage(frameCv, 0, 0);
+    bc.filter = 'none';
+    fc.globalCompositeOperation = 'lighter';
+    fc.drawImage(bloomCv, 0, 0);
+    fc.globalCompositeOperation = 'source-over';
+  }
+
+  // ---- 画面へ
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  const ox = (cv.width - LW * viewScale) / 2;
+  const oy = (cv.height - LH * viewScale) / 2;
+  const vq = viewScale / q;
+  ctx.setTransform(vq, 0, 0, vq, ox, oy);
+  ctx.drawImage(frameCv, 0, 0);
+  ctx.setTransform(viewScale, 0, 0, viewScale, ox, oy);
+  // 編集ハンドル＋灯体番号（本番出力には出ない・右のボタンと相番）
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let i = 0; i < beams.length; i++) {
+    const b = beams[i];
+    const isSel = (sel === -1) || i === sel;
+    ctx.strokeStyle = isSel ? 'rgba(120,255,160,0.95)' : 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = (isSel ? 2 : 1.2) / viewScale;
+    ctx.strokeRect(b.x - 18, b.y - 10, 36, 20);
+    ctx.font = '700 ' + (14 / viewScale) + 'px sans-serif';
+    const lit = isLit(b);
+    ctx.fillStyle = isSel ? 'rgba(120,255,160,1)' : (lit ? 'rgba(255,255,255,0.85)' : 'rgba(255,110,110,0.55)');
+    ctx.fillText(String(i + 1), b.x, b.y + 1);
+    // 番号の下にM/S（右ボタンと連動・クリックでトグル）
+    ctx.font = '700 ' + (11 / viewScale) + 'px sans-serif';
+    ctx.fillStyle = b.mute ? 'rgba(224,90,90,1)' : 'rgba(255,255,255,0.42)';
+    ctx.fillText('M', b.x - 11, b.y + 17);
+    ctx.fillStyle = b.solo ? 'rgba(34,211,238,1)' : 'rgba(255,255,255,0.42)';
+    ctx.fillText('S', b.x + 11, b.y + 17);
+  }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
+
+let animReq = 0;
+function animTick(now) {
+  animReq = 0;
+  draw(now);
+  if (anyFx()) animReq = requestAnimationFrame(animTick);
+}
+function ensureAnim() {
+  if (!animReq && anyFx()) animReq = requestAnimationFrame(animTick);
+}
+
+// ============ DESK UI ============
+const $ = (id) => document.getElementById(id);
+function targets() { return sel === -1 ? beams : (beams[sel] ? [beams[sel]] : []); }
+function refBeam() { return sel === -1 ? beams[0] : beams[sel]; }
+
+function renderStrip() {
+  const wrap = $('strip');
+  wrap.innerHTML = '';
+  const all = document.createElement('button');
+  all.className = 'fxall';
+  all.innerHTML = '<span class="nm">ALL</span>';
+  if (sel === -1) all.classList.add('on');
+  all.title = '全灯まとめて';
+  all.onclick = () => { sel = -1; renderStrip(); syncDesk(); draw(); };
+  wrap.appendChild(all);
+  beams.forEach((b, i) => {
+    const bt = document.createElement('button');
+    const dot = 'rgb(' + b.color[0] + ',' + b.color[1] + ',' + b.color[2] + ')';
+    bt.innerHTML = '<span class="nm">' + (i + 1) + '</span>' +
+                   '<span class="dot" style="background:' + dot + '"></span>' +
+                   '<span class="ms"><b class="m' + (b.mute ? ' on' : '') + '">M</b><b class="s' + (b.solo ? ' on' : '') + '">S</b></span>';
+    if (sel === i) bt.classList.add('on');
+    if (b.mute) bt.classList.add('muted');
+    if (b.solo) bt.classList.add('soloed');
+    bt.title = '灯体 ' + (i + 1) + ' — クリックで選択／M=消す・S=これだけ';
+    bt.onclick = () => { sel = i; renderStrip(); syncDesk(); draw(); };
+    bt.querySelector('.m').onclick = (e) => { e.stopPropagation(); b.mute = !b.mute; renderStrip(); draw(); };
+    bt.querySelector('.s').onclick = (e) => { e.stopPropagation(); b.solo = !b.solo; renderStrip(); draw(); };
+    wrap.appendChild(bt);
+  });
+  if (beams.length < 24) {
+    const add = document.createElement('button');
+    add.className = 'addfx';
+    add.innerHTML = '<span class="nm">＋</span>';
+    add.title = '灯体を追加';
+    add.onclick = addFixtureAuto;
+    wrap.appendChild(add);
+  }
+}
+
+// パネルから灯体を1台追加（置き場所は自動・あとはドラッグで微調整）
+function addFixtureAuto() {
+  if (beams.length >= 12) return;
+  const ref = refBeam() || { w0: 40, w1: 260, len: 600, color: AMBER, gauge: 0.72 };
+  let x = beams.length ? beams[beams.length - 1].x + 165 : 800;
+  if (x > 1480) x = 140 + (beams.length * 137) % 1200;
+  beams.push({ x, y: 840, w0: ref.w0, w1: ref.w1, len: ref.len,
+               pan: 0, tilt: 0, zoom: 1, gauge: ref.gauge ?? 0.72, color: ref.color.slice(),
+               sp: searchParams() });
+  sel = beams.length - 1;
+  renderStrip(); syncDesk(); draw();
+}
+
+function syncDesk() {
+  const b = refBeam();
+  if (!b) return;
+  $('gauge').value = Math.round(b.gauge * 100);
+  $('gaugeVal').textContent = Math.round(b.gauge * 100) + '%';
+  $('pan').value = b.pan; $('panVal').textContent = b.pan + '°';
+  $('tilt').value = b.tilt; $('tiltVal').textContent = b.tilt + '°';
+  $('zoom').value = Math.round(b.zoom * 100); $('zoomVal').textContent = '×' + b.zoom.toFixed(2);
+  $('rw0').value = b.w0; $('rw0Val').textContent = Math.round(b.w0);
+  $('rw1').value = b.w1; $('rw1Val').textContent = Math.round(b.w1);
+  $('rlen').value = b.len; $('rlenVal').textContent = Math.round(b.len);
+  document.querySelectorAll('.swatches button').forEach((el) => {
+    const c = JSON.parse(el.dataset.rgb);
+    el.classList.toggle('on', c[0] === b.color[0] && c[1] === b.color[1] && c[2] === b.color[2]);
+  });
+  const cp = $('colorPick');
+  if (cp) { const hx = rgbToHex(b.color); cp.value = hx; $('colorHex').textContent = hx.toUpperCase(); }
+}
+
+$('gauge').addEventListener('input', (e) => {
+  const v = +e.target.value;
+  $('gaugeVal').textContent = v + '%';
+  wake(); // ESC/0の後でもゲージを触れば点く
+  targets().forEach((b) => b.gauge = v / 100);
+  renderStrip(); draw();
+});
+$('pan').addEventListener('input', (e) => {
+  const v = +e.target.value;
+  $('panVal').textContent = v + '°';
+  targets().forEach((b) => b.pan = v);
+  draw();
+});
+$('tilt').addEventListener('input', (e) => {
+  const v = +e.target.value;
+  $('tiltVal').textContent = v + '°';
+  targets().forEach((b) => b.tilt = v);
+  draw();
+});
+$('zoom').addEventListener('input', (e) => {
+  const v = +e.target.value / 100;
+  $('zoomVal').textContent = '×' + v.toFixed(2);
+  targets().forEach((b) => b.zoom = v);
+  draw();
+});
+$('homeBtn').addEventListener('click', () => {
+  targets().forEach((b) => { b.pan = 0; b.tilt = 0; b.zoom = 1; });
+  syncDesk(); draw();
+});
+$('master').addEventListener('input', (e) => {
+  wake();
+  st.master = +e.target.value / 100;
+  $('masterVal').textContent = e.target.value + '%';
+  $('master2').value = e.target.value;
+  $('master2Val').textContent = e.target.value + '%';
+  draw();
+});
+// マスターフェーダー: MIDI CC（物理フェーダー）学習＋↑↓キー（FULL/CLEARは画像照明モードでは廃止）
+let masterMidi = null, masterLearn = false;
+function setMaster(v) {
+  st.master = Math.max(0, Math.min(1, v));
+  const pc = Math.round(st.master * 100);
+  ['master', 'master2'].forEach((id) => { const e = $(id); if (e) e.value = pc; });
+  ['masterVal', 'master2Val'].forEach((id) => { const e = $(id); if (e) e.textContent = pc + '%'; });
+  wake(); draw();
+}
+function syncMasterLearn() {
+  const b = $('masterLearn'); if (!b) return;
+  b.textContent = masterLearn ? 'CC待ち…' : (masterMidi != null ? 'CC' + masterMidi : 'LEARN');
+  b.classList.toggle('learnon', masterLearn);
+}
+$('masterLearn').addEventListener('click', () => { masterLearn = !masterLearn; initMidi(); syncMasterLearn(); });
+// ミュート/ソロは各灯体ボタン内のM/Sで操作（renderStrip内・1クリック完結）
+// ===== FXラック（クリック＝点/消。ショートカット割当はシーン側で） =====
+function fxState(key) {
+  switch (key) {
+    case 'search': return st.search && !st.searchRandom;
+    case 'rndsearch': return st.search && st.searchRandom;
+    case 'chase': return st.chase;
+    case 'strobe': return st.strobe === 'all';
+    case 'rndstrobe': return st.strobe === 'rnd';
+    case 'colorchase': return st.colorChase;
+    case 'breath': return st.breath;
+    case 'fire': return st.fire;
+    case 'wave': return st.wave;
+    case 'bolt': return st.bolt;
+    case 'rainbow': return st.rainbow;
+    case 'zoompulse': return st.zoompulse;
+  }
+  return false;
+}
+function fxToggle(key) {
+  const on = !fxState(key);
+  switch (key) {
+    case 'search': st.search = on; st.searchRandom = false; break;
+    case 'rndsearch': st.search = on; st.searchRandom = on; break;
+    case 'chase': st.chase = on; break;
+    case 'strobe': st.strobe = on ? 'all' : 'off'; break;
+    case 'rndstrobe': st.strobe = on ? 'rnd' : 'off'; break;
+    case 'colorchase': st.colorChase = on; if (on) st.rainbow = false; break;
+    case 'breath': st.breath = on; break;
+    case 'fire': st.fire = on; break;
+    case 'wave': st.wave = on; break;
+    case 'bolt': st.bolt = on; break;
+    case 'rainbow': st.rainbow = on; if (on) st.colorChase = false; break;
+    case 'zoompulse': st.zoompulse = on; break;
+  }
+  if (on) { t0 = performance.now(); wake(); }
+  syncFx(); ensureAnim(); if (!anyFx()) draw();
+}
+function syncFx() {
+  document.querySelectorAll('#fxgrid button').forEach((b) => {
+    b.classList.toggle('on', fxState(b.dataset.fx));
+  });
+  renderFxParams(); // 点いているFXのツマミだけを出す
+}
+let midiTried = false;
+function initMidi() {
+  if (midiTried || !navigator.requestMIDIAccess) return;
+  midiTried = true;
+  navigator.requestMIDIAccess().then((acc) => {
+    const hook = (inp) => { inp.onmidimessage = (m) => {
+      const [stt, note, vel] = m.data;
+      if ((stt & 0xf0) === 0x90 && vel > 0) {
+        if (learnPattern != null) assignShortcut(learnPattern, null, note);
+        else {
+          const pi = PATTERNS.findIndex((p) => p && p.midi === note);
+          if (pi >= 0) applyPattern(pi);
+        }
+      } else if ((stt & 0xf0) === 0xb0) { // CC = 物理フェーダー/ノブ
+        if (masterLearn) { masterMidi = note; masterLearn = false; syncMasterLearn(); }
+        else if (masterMidi === note) setMaster(vel / 127);
+      }
+    }; };
+    acc.inputs.forEach(hook);
+    acc.onstatechange = (e) => { if (e.port.type === 'input' && e.port.state === 'connected') hook(e.port); };
+  }).catch(() => {});
+}
+document.querySelectorAll('#fxgrid button').forEach((b) => {
+  b.addEventListener('click', () => fxToggle(b.dataset.fx));
+});
+// ===== FXごとのツマミ定義（点いているFXのものだけ #fxparams に出る） =====
+const FX_KEYS = ['search', 'rndsearch', 'chase', 'strobe', 'rndstrobe', 'colorchase',
+                 'breath', 'fire', 'wave', 'bolt', 'rainbow', 'zoompulse'];
+const FX_LABEL = { search: 'SEARCH', rndsearch: 'RND SEARCH', chase: 'CHASE',
+                   strobe: 'STROBE', rndstrobe: 'RND STROBE', colorchase: 'COLOR CHASE',
+                   breath: '呼吸', fire: '炎', wave: '波', bolt: '雷', rainbow: '虹', zoompulse: '開閉' };
+const FX_PARAMS = {
+  search: [
+    { lbl: '速さ', min: 5, max: 120, get: () => Math.round(st.fxp.search.speed * 100),
+      set: (v) => st.fxp.search.speed = v / 100, fmt: (v) => (100 / v).toFixed(1) + 's' },
+    { lbl: '幅', min: 4, max: 60, get: () => st.fxp.search.width,
+      set: (v) => st.fxp.search.width = v, fmt: (v) => '±' + v + '°' }
+  ],
+  chase: [
+    { lbl: '速さ', min: 20, max: 300, get: () => Math.round(st.fxp.chase.speed * 100),
+      set: (v) => st.fxp.chase.speed = v / 100, fmt: (v) => '×' + (v / 100).toFixed(1) },
+    { lbl: 'やわらか', min: 0, max: 100, get: () => st.fxp.chase.soft,
+      set: (v) => st.fxp.chase.soft = v, fmt: (v) => v + '%' }
+  ],
+  strobe: [
+    { lbl: '速さ', min: 1, max: 15, get: () => st.fxp.strobe.speed,
+      set: (v) => st.fxp.strobe.speed = v, fmt: (v) => v + 'Hz' },
+    { lbl: '点灯率', min: 10, max: 70, get: () => st.fxp.strobe.duty,
+      set: (v) => st.fxp.strobe.duty = v, fmt: (v) => v + '%' }
+  ],
+  rndstrobe: [
+    { lbl: '速さ', min: 2, max: 25, get: () => st.fxp.rndstrobe.speed,
+      set: (v) => st.fxp.rndstrobe.speed = v, fmt: (v) => v + '/秒' },
+    { lbl: '密度', min: 5, max: 60, get: () => st.fxp.rndstrobe.dens,
+      set: (v) => st.fxp.rndstrobe.dens = v, fmt: (v) => v + '%' }
+  ],
+  colorchase: [
+    { lbl: '速さ', min: 20, max: 600, get: () => Math.round(st.fxp.colorchase.speed * 100),
+      set: (v) => st.fxp.colorchase.speed = v / 100, fmt: (v) => (v / 100).toFixed(1) + '色/秒' },
+    { lbl: 'なじみ', min: 0, max: 100, get: () => st.fxp.colorchase.blend,
+      set: (v) => st.fxp.colorchase.blend = v, fmt: (v) => v === 0 ? 'パッ' : v + '%' }
+  ]
+};
+FX_PARAMS.rndsearch = [
+  ...FX_PARAMS.search,
+  { lbl: 'ばらつき', min: 0, max: 100, get: () => st.fxp.rndsearch.vari,
+    set: (v) => st.fxp.rndsearch.vari = v, fmt: (v) => v + '%' }
+];
+FX_PARAMS.breath = [
+  { lbl: '速さ', min: 5, max: 80, get: () => Math.round(st.fxp.breath.speed * 100),
+    set: (v) => st.fxp.breath.speed = v / 100, fmt: (v) => (100 / v).toFixed(1) + 's' },
+  { lbl: '深さ', min: 20, max: 100, get: () => st.fxp.breath.depth,
+    set: (v) => st.fxp.breath.depth = v, fmt: (v) => v + '%' }
+];
+FX_PARAMS.fire = [
+  { lbl: '速さ', min: 30, max: 250, get: () => Math.round(st.fxp.fire.speed * 100),
+    set: (v) => st.fxp.fire.speed = v / 100, fmt: (v) => '×' + (v / 100).toFixed(1) },
+  { lbl: '揺れ', min: 10, max: 100, get: () => st.fxp.fire.amount,
+    set: (v) => st.fxp.fire.amount = v, fmt: (v) => v + '%' }
+];
+FX_PARAMS.wave = [
+  { lbl: '速さ', min: 5, max: 100, get: () => Math.round(st.fxp.wave.speed * 100),
+    set: (v) => st.fxp.wave.speed = v / 100, fmt: (v) => (100 / v).toFixed(1) + 's' },
+  { lbl: '波の長さ', min: 10, max: 100, get: () => st.fxp.wave.length,
+    set: (v) => st.fxp.wave.length = v, fmt: (v) => v + '%' }
+];
+FX_PARAMS.bolt = [
+  { lbl: '頻度', min: 10, max: 200, get: () => Math.round(st.fxp.bolt.rate * 100),
+    set: (v) => st.fxp.bolt.rate = v / 100, fmt: (v) => '×' + (v / 100).toFixed(1) },
+  { lbl: '強さ', min: 30, max: 150, get: () => st.fxp.bolt.strength,
+    set: (v) => st.fxp.bolt.strength = v, fmt: (v) => v + '%' }
+];
+FX_PARAMS.rainbow = [
+  { lbl: '速さ', min: 3, max: 80, get: () => Math.round(st.fxp.rainbow.speed * 100),
+    set: (v) => st.fxp.rainbow.speed = v / 100, fmt: (v) => (1 / (v / 100)).toFixed(1) + 's/周' },
+  { lbl: 'ばらし', min: 0, max: 100, get: () => st.fxp.rainbow.spread,
+    set: (v) => st.fxp.rainbow.spread = v, fmt: (v) => v === 0 ? '全灯同色' : v + '%' }
+];
+FX_PARAMS.zoompulse = [
+  { lbl: '速さ', min: 5, max: 100, get: () => Math.round(st.fxp.zoompulse.speed * 100),
+    set: (v) => st.fxp.zoompulse.speed = v / 100, fmt: (v) => (100 / v).toFixed(1) + 's' },
+  { lbl: '開き幅', min: 10, max: 100, get: () => st.fxp.zoompulse.amount,
+    set: (v) => st.fxp.zoompulse.amount = v, fmt: (v) => v + '%' }
+];
+let fxSig = null;
+function renderFxParams(force) {
+  const active = FX_KEYS.filter(fxState);
+  const sig = active.join(',');
+  if (!force && sig === fxSig) return; // ドラッグ中の作り直し禁止（点き具合が変わった時だけ）
+  fxSig = sig;
+  const box = $('fxparams');
+  box.innerHTML = '';
+  active.forEach((k) => {
+    const defs = FX_PARAMS[k] || [];
+    if (defs.length) {
+      const h = document.createElement('div');
+      h.className = 'fxh';
+      h.textContent = '— ' + FX_LABEL[k];
+      box.appendChild(h);
+    }
+    defs.forEach((p) => {
+      const row = document.createElement('div'); row.className = 'frow';
+      const lb = document.createElement('span'); lb.className = 'lbl'; lb.style.width = '52px'; lb.textContent = p.lbl;
+      const rg = document.createElement('input'); rg.type = 'range'; rg.min = p.min; rg.max = p.max; rg.value = p.get();
+      const vl = document.createElement('div'); vl.className = 'val small'; vl.textContent = p.fmt(p.get());
+      rg.addEventListener('input', () => { p.set(+rg.value); vl.textContent = p.fmt(+rg.value); if (!anyFx()) draw(); });
+      row.appendChild(lb); row.appendChild(rg); row.appendChild(vl);
+      box.appendChild(row);
+    });
+  });
+}
+// 仕込み3値（選択灯体へ・ALLなら全灯へ）
+$('rw0').addEventListener('input', (e) => {
+  const v = +e.target.value; $('rw0Val').textContent = v;
+  targets().forEach((b) => b.w0 = v); draw();
+});
+$('rw1').addEventListener('input', (e) => {
+  const v = +e.target.value; $('rw1Val').textContent = v;
+  targets().forEach((b) => b.w1 = v); draw();
+});
+$('rlen').addEventListener('input', (e) => {
+  const v = +e.target.value; $('rlenVal').textContent = v;
+  targets().forEach((b) => b.len = v); draw();
+});
+$('smoke').addEventListener('input', (e) => {
+  st.smoke = +e.target.value;
+  $('smokeVal').textContent = e.target.value;
+  draw();
+});
+
+const COLORS = [
+  ['#ffa848', [255, 168, 72]], ['#ffffff', [255, 255, 255]], ['#ff3224', [255, 50, 36]],
+  ['#ffe028', [255, 224, 40]], ['#30ff48', [48, 255, 72]], ['#22dcff', [34, 220, 255]],
+  ['#4060ff', [64, 96, 255]], ['#ff32c8', [255, 50, 200]]
+];
+const swWrap = $('swatches');
+COLORS.forEach((cc) => {
+  const b = document.createElement('button');
+  b.style.background = cc[0];
+  b.dataset.rgb = JSON.stringify(cc[1]);
+  b.addEventListener('click', () => {
+    wake();
+    targets().forEach((bm) => bm.color = cc[1].slice());
+    renderStrip(); syncDesk(); draw();
+  });
+  swWrap.appendChild(b);
+});
+
+// ===== カラーピッカー＋色プリセット（現場の照明とビタッと合わせる用） =====
+function hexToRgb(h) { h = h.replace('#', ''); return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)]; }
+function rgbToHex(c) { return '#' + c.map((v) => ('0' + Math.round(v).toString(16)).slice(-2)).join(''); }
+const userColors = [];
+$('colorPick').addEventListener('input', () => {
+  const rgb = hexToRgb($('colorPick').value);
+  $('colorHex').textContent = $('colorPick').value.toUpperCase();
+  wake();
+  targets().forEach((b) => b.color = rgb.slice());
+  document.querySelectorAll('#swatches button').forEach((el) => el.classList.remove('on'));
+  renderStrip(); draw();
+});
+$('colorSave').addEventListener('click', () => {
+  const rgb = hexToRgb($('colorPick').value);
+  if (!userColors.some((c) => c[0]===rgb[0] && c[1]===rgb[1] && c[2]===rgb[2])) { userColors.push(rgb); renderUserSwatches(); }
+  const btn = $('colorSave'); btn.textContent = '✓保存した'; setTimeout(() => { btn.textContent = '★保存'; }, 900);
+});
+function renderUserSwatches() {
+  const w = $('userSwatches'); w.innerHTML = '';
+  userColors.forEach((rgb, i) => {
+    const b = document.createElement('button');
+    b.style.background = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
+    b.dataset.rgb = JSON.stringify(rgb);
+    b.title = rgbToHex(rgb).toUpperCase() + '（クリックで適用／右クリックで削除）';
+    b.onclick = () => { wake(); targets().forEach((bm) => bm.color = rgb.slice()); renderStrip(); syncDesk(); draw(); };
+    b.oncontextmenu = (e) => { e.preventDefault(); userColors.splice(i, 1); renderUserSwatches(); };
+    w.appendChild(b);
+  });
+}
+
+$('delBtn').addEventListener('click', () => {
+  if (sel >= 0 && beams[sel]) {
+    beams.splice(sel, 1);
+    sel = Math.min(sel, beams.length - 1);
+    renderStrip(); syncDesk(); draw();
+  }
+});
+$('fileInput').addEventListener('change', (e) => { [...e.target.files].forEach(loadFile); e.target.value = ''; });
+
+// ============ 仕込み操作（キャンバス） ============
+function evPos(e) {
+  const r = cv.getBoundingClientRect();
+  const ox = (cv.width - LW * viewScale) / 2;
+  const oy = (cv.height - LH * viewScale) / 2;
+  return {
+    x: ((e.clientX - r.left) * dpr - ox) / viewScale,
+    y: ((e.clientY - r.top) * dpr - oy) / viewScale
+  };
+}
+let dragging = false;
+cv.addEventListener('mousedown', (e) => {
+  const p = evPos(e);
+  // ステージの番号下のM/Sを先に判定（右ボタンと連動・選択/ドラッグより優先）
+  for (let i = 0; i < beams.length; i++) {
+    const b = beams[i];
+    if (Math.abs(p.y - (b.y + 17)) < 11) {
+      if (Math.abs(p.x - (b.x - 11)) < 10) { b.mute = !b.mute; sel = i; renderStrip(); syncDesk(); draw(); return; }
+      if (Math.abs(p.x - (b.x + 11)) < 10) { b.solo = !b.solo; sel = i; renderStrip(); syncDesk(); draw(); return; }
+    }
+  }
+  let hit = -1;
+  for (let i = 0; i < beams.length; i++) {
+    if (Math.abs(p.x - beams[i].x) < 30 && Math.abs(p.y - beams[i].y) < 24) { hit = i; break; }
+  }
+  if (hit >= 0) { sel = hit; dragging = true; }
+  else if ((e.metaKey || e.ctrlKey) && beams.length < 24) { // ⌘+クリックでだけ灯体追加（誤爆防止）
+    const ref = refBeam() || { w0: 40, w1: 260, len: 600, color: AMBER };
+    beams.push({ x: p.x, y: p.y, w0: ref.w0, w1: ref.w1, len: ref.len,
+                 pan: 0, tilt: 0, zoom: 1, gauge: ref.gauge ?? 0.72, color: ref.color.slice(),
+                 sp: searchParams() });
+    sel = beams.length - 1; dragging = true;
+  } else { dragging = false; } // 素のクリックは何もしない（選択は維持）
+  renderStrip(); syncDesk(); draw();
+});
+cv.addEventListener('mousemove', (e) => {
+  if (!dragging || sel < 0 || !beams[sel]) return;
+  const p = evPos(e);
+  beams[sel].x = p.x; beams[sel].y = p.y;
+  draw();
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => addScene(im); // 読み込んだ写真は「差し替え」でなく「棚に追加→即そのシーンへ」
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(file);
+}
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files) [...e.dataTransfer.files].forEach(loadFile);
+});
+
+// ===== シーン棚（明かりの完成形×9）＋ LEARNショートカット ＋ 本番キー =====
+const PATTERNS = Array(9).fill(null);
+let activePattern = -1, learnPattern = null, armedSave = false, uiMode = 'play';
+let panicGain = 1, panicSeq = 0;
+// 目を覚ます: ゲージ・色・MASTER・FX・シーン — 明かりを触る操作は全部パニックを解除する
+function wake() { panicSeq++; panicGain = 1; }
+const escHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const keyDisp = (k) => !k ? '' : (k.length === 1 ? k.toUpperCase() : k);
+
+function stopAllFx() {
+  st.chase = false; st.search = false; st.searchRandom = false;
+  st.strobe = 'off'; st.colorChase = false;
+  st.breath = st.fire = st.wave = st.bolt = st.rainbow = st.zoompulse = false;
+  syncFx();
+}
+function applyPattern(i) {
+  const p = PATTERNS[i];
+  if (!p) return;
+  wake(); // シーンを叩けばパニックから復帰
+  activePattern = i;
+  applyLook(p.look);
+  renderPatterns(); draw();
+}
+function panicFade() { // ESC: 1.5秒で全部ふわっと闇へ（バツンと切らない）
+  const my = ++panicSeq;
+  const t1 = performance.now();
+  const from = panicGain;
+  const step = (now) => {
+    if (panicSeq !== my) return; // フェード中に誰かが明かりを触った → フェード中止
+    const k = Math.min(1, (now - t1) / 1500);
+    panicGain = from * (1 - k);
+    draw(now);
+    if (k < 1) requestAnimationFrame(step);
+    else { stopAllFx(); activePattern = -1; renderPatterns(); }
+  };
+  requestAnimationFrame(step);
+}
+function blackout() { panicSeq++; panicGain = 0; stopAllFx(); activePattern = -1; renderPatterns(); draw(); }
+function fullOn() { wake(); beams.forEach((b) => b.gauge = 1); renderStrip(); syncDesk(); draw(); }
+
+function assignShortcut(i, key, midi) { // LEARN: 次に押されたキー/MIDIがそのままショートカットに
+  PATTERNS.forEach((p) => {
+    if (!p) return;
+    if (key != null && p.key === key) p.key = null;   // 取り合いは新しい方が勝つ
+    if (midi != null && p.midi === midi) p.midi = null;
+  });
+  if (key != null) PATTERNS[i].key = key;
+  if (midi != null) PATTERNS[i].midi = midi;
+  learnPattern = null;
+  renderPatterns();
+}
+function renderPatterns() {
+  const pp = $('playpats');
+  pp.innerHTML = '';
+  PATTERNS.forEach((p, i) => {
+    const b = document.createElement('button');
+    b.className = 'patbig' + (p ? '' : ' empty') + (activePattern === i ? ' on' : '');
+    const badge = p ? [keyDisp(p.key), p.midi != null ? 'N' + p.midi : ''].filter(Boolean).join(' ') : '';
+    b.innerHTML = '<span class="pn">' + (i + 1) + '</span><span class="pname">' +
+                  (p ? escHtml(p.name) : '（空き）') + '</span><span class="pkey">' + badge + '</span>';
+    if (p) b.onclick = () => applyPattern(i);
+    pp.appendChild(b);
+  });
+  const bp = $('buildpats');
+  bp.innerHTML = '';
+  PATTERNS.forEach((p, i) => {
+    const row = document.createElement('div');
+    row.className = 'patrow' + (armedSave ? ' armed' : '');
+    row.innerHTML = '<span class="pn">' + (i + 1) + '</span>';
+    const nm = document.createElement('span'); nm.className = 'pname';
+    nm.textContent = p ? p.name : '（空き）';
+    nm.style.cursor = p ? 'text' : 'default';
+    if (p) nm.title = 'ダブルクリックで名前変更';
+    nm.onclick = (e) => e.stopPropagation(); // 名前部分のクリックは保存/呼出を邪魔しない
+    nm.ondblclick = (e) => { e.stopPropagation(); if (PATTERNS[i]) startRename(nm, i); };
+    row.appendChild(nm);
+    const key = document.createElement('span'); key.className = 'pkey';
+    key.textContent = p ? [keyDisp(p.key), p.midi != null ? 'N' + p.midi : ''].filter(Boolean).join(' ') : '';
+    row.appendChild(key);
+    const lb = document.createElement('button');
+    lb.className = 'ic' + (learnPattern === i ? ' learnon' : '');
+    lb.textContent = learnPattern === i ? 'キー待ち…' : 'LEARN';
+    lb.title = '押した後、次に叩いたキー（またはMIDIパッド）がこのシーンのショートカットになる';
+    lb.onclick = (e) => {
+      e.stopPropagation();
+      if (!p) return;
+      learnPattern = learnPattern === i ? null : i;
+      initMidi(); renderPatterns();
+    };
+    row.appendChild(lb);
+    const rn = document.createElement('button');
+    rn.className = 'ic'; rn.textContent = '✎'; rn.title = '名前を変える';
+    rn.onclick = (e) => { e.stopPropagation(); if (p) startRename(nm, i); };
+    row.appendChild(rn);
+    row.onclick = () => {
+      if (armedSave) { // 保存モード中＝この番号に詰める
+        PATTERNS[i] = { name: p ? p.name : 'シーン' + (i + 1), key: p ? p.key : null,
+                        midi: p ? p.midi : null, look: currentLook() };
+        armedSave = false;
+        activePattern = i; // 保存したシーンに「居る」状態にする
+        renderPatterns();
+        flashSaved(i); // 保存できた手応え
+      } else if (p) applyPattern(i);
+    };
+    bp.appendChild(row);
+  });
+  // 保存ボタンの文言を状態で出し分け（armed中は「番号を選んで」と明示）
+  const sb = document.getElementById('armSave');
+  if (sb) {
+    sb.textContent = armedSave ? '↓ 保存する番号をクリック（取消はもう一度ここ）'
+                              : '● いまの明かりをシーンへ保存';
+    sb.style.borderColor = armedSave ? 'var(--amber)' : '';
+    sb.style.color = armedSave ? 'var(--amber)' : '';
+  }
+}
+function flashSaved(i) {
+  const sb = document.getElementById('armSave');
+  if (sb) {
+    sb.textContent = '✓ シーン' + (i + 1) + ' に保存しました';
+    sb.style.borderColor = 'var(--green)';
+    sb.style.color = 'var(--green)';
+    setTimeout(() => renderPatterns(), 1400);
+  }
+  const rows = document.querySelectorAll('#buildpats .patrow');
+  if (rows[i]) {
+    rows[i].style.transition = 'background 0.15s';
+    rows[i].style.background = 'rgba(168,232,120,0.25)';
+    setTimeout(() => { if (rows[i]) rows[i].style.background = ''; }, 700);
+  }
+}
+function startRename(nmEl, i) {
+  const inp = document.createElement('input');
+  inp.value = PATTERNS[i].name;
+  nmEl.innerHTML = '';
+  nmEl.appendChild(inp);
+  inp.focus(); inp.select();
+  const commit = () => { PATTERNS[i].name = inp.value.trim() || ('シーン' + (i + 1)); renderPatterns(); };
+  inp.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') commit();
+    if (e.key === 'Escape') renderPatterns();
+  });
+  inp.addEventListener('blur', commit);
+}
+
+// 本番キーボード: シーンのショートカット最優先 → ESC/0/F/矢印
+window.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  if (learnPattern != null) {
+    if (e.key === 'Escape') { learnPattern = null; renderPatterns(); }
+    else assignShortcut(learnPattern, e.key.length === 1 ? e.key.toLowerCase() : e.key, null);
+    e.preventDefault(); return;
+  }
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const pi = PATTERNS.findIndex((p) => p && p.key === k);
+  if (pi >= 0) { applyPattern(pi); e.preventDefault(); return; }
+  if (e.key === 'Escape') panicFade();
+  else if (k === '0') blackout();
+  else if (k === 'f') fullOn();
+  else if (e.key === 'ArrowUp') { setMaster(st.master + 0.05); e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { setMaster(st.master - 0.05); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') selectScene(Math.min(scenes.length - 1, activeScene + 1));
+  else if (e.key === 'ArrowLeft') selectScene(Math.max(0, activeScene - 1));
+});
+
+$('armSave').addEventListener('click', () => { armedSave = !armedSave; renderPatterns(); });
+function setMode(m) {
+  uiMode = m;
+  $('playpanel').style.display = m === 'play' ? 'flex' : 'none';
+  $('desk').style.display = m === 'build' ? 'flex' : 'none';
+  if (m === 'play') {
+    $('master2').value = Math.round(st.master * 100);
+    $('master2Val').textContent = Math.round(st.master * 100) + '%';
+  }
+}
+$('toBuild').addEventListener('click', () => setMode('build'));
+$('toPlay').addEventListener('click', () => setMode('play'));
+$('master2').addEventListener('input', (e) => {
+  wake();
+  st.master = +e.target.value / 100;
+  $('master2Val').textContent = e.target.value + '%';
+  $('master').value = e.target.value;
+  $('masterVal').textContent = e.target.value + '%';
+  draw();
+});
+
+// ===== 初期化 =====
+addScene(rawMat, 'PHOTO 1');
+// シーン1〜3はデモで詰めてある（BUILDで自由に上書き・LEARN・改名OK）
+PATTERNS[0] = { name: '全灯アンバー', key: '1', midi: null, look: currentLook() };
+PATTERNS[1] = { name: '青ベース', key: '2', midi: null,
+  look: { fxst: { chase: false, search: false, searchRandom: false, strobe: 'off', colorChase: false },
+          fxp: JSON.parse(JSON.stringify(st.fxp)),
+          lights: beams.map(() => ({ gauge: 0.6, color: [64, 96, 255], pan: 0, tilt: 0, zoom: 1 })) } };
+PATTERNS[2] = { name: 'ランダムストロボ', key: '3', midi: null,
+  look: { fxst: { chase: false, search: false, searchRandom: false, strobe: 'rnd', colorChase: false },
+          fxp: JSON.parse(JSON.stringify(st.fxp)),
+          lights: beams.map(() => ({ gauge: 1, color: [255, 255, 255], pan: 0, tilt: 0, zoom: 1 })) } };
+renderPatterns();
+setMode('play');
+resize();
+renderStrip();
+syncDesk();
+</script>
+</body>
+</html>
