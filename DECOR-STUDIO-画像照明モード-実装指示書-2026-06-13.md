@@ -1,5 +1,12 @@
 # DECOR STUDIO 画像照明モード 実装指示書（2026-06-13）
 
+> ## ✅ 実装完了（2026-06-13・本指示書どおり）
+> モック（試打台v7）を本物のアプリへ全移植済み。**新規 `src/renderer/src/imagelight/`**（engine.ts＝描画/状態の全移植・自前30fpsで `api.publishFrame`→既存Syphon経路／effects.ts＋テスト／colors.ts／fxdefs.ts／ImageLightingMode.tsx＝PLAY/BUILD二画面）。入口＝StartScreenの琥珀ボタン、出口＝「←フル機能照明へ」。状態はzustandでなく**専用エンジンクラス**、storeは`imageLight`フラグ1個。リグはlocalStorage自動保存（写真は非保存）。フェーズ1〜3すべて実装（シーン9・FX9・ミュート/ソロ写真ごと・カラーピッカー＋プリセット・MASTER MIDI LEARN＋↑↓・ESCパニック・シーン改名/LEARN）。
+> 共通描画も改良：`uplight.ts`＝終わり際の丸み・ZOOM×4.0・TILT±180°、`OutputRenderer`＝ノイズ床退治。
+> **色比保持トーンは判断でデフォルトOFF**：実機検証で白茶けは手前の光マップscreen加算が主因と判明しこの段では消えず中間調が明るく寄り「モックが正」から離れたため。`render/compose.ts`に実装＋テスト済、`engine.ts`の`PHOTO_TONE='ratio'`で有効化可（本番後の詰め用）。
+> 検証：型/Lint/**テスト153本green**(135+18)/electron-vite build/web preview実機OK。`.app`ビルド済(`dist/mac-arm64`)。**残＝本番MacでのSyphon→Resolume目視のみ**。
+> 以下は当時の指示書（記録として保存）。
+
 > **新スレッドのClaudeへ。** これは「画像照明モード」を本物のアプリに実装するための完全な指示書です。
 > **読む順：** ①本書を最後まで → ②設計図＝動くモック `~/Desktop/画像照明モード-試打台.html`（**全機能・全式がここにある。これが正典**）→ ③背景 `~/dev/decor-studio/DECOR-STUDIO-引き継ぎ-2026-06-13.md`。
 > **のむさん：** コンサート演出家・コード未経験・GitHub `nrs2013`。**舞台用語で噛み砕く／ターミナルはコピペ完成形／PATを貼られたら git push まで実行（director-workflow 準拠）。**

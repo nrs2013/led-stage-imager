@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { cellsBetween, shapeIntersectsRect, shapeBounds, pasteDelta } from './geometry'
+import { BULB_DEFAULT_DIAMETER } from '../render/bulb'
 
 describe('cellsBetween (paint path)', () => {
   it('horizontal / vertical runs hit every cell', () => {
@@ -36,7 +37,9 @@ describe('shapeIntersectsRect (囲み選択の実体判定)', () => {
     id: 'g',
     type: 'freehand' as const,
     points: [
-      { x: 0.5, y: 0.5 }, { x: 10.5, y: 0.5 }, { x: 10.5, y: 10.5 }
+      { x: 0.5, y: 0.5 },
+      { x: 10.5, y: 0.5 },
+      { x: 10.5, y: 10.5 }
     ],
     display: 'stroke' as const,
     strokeWidth: 1
@@ -50,9 +53,14 @@ describe('shapeIntersectsRect (囲み選択の実体判定)', () => {
   })
   it('両端が枠の外でも、横切るLineは選ばれる', () => {
     const line = {
-      id: 'l', type: 'line' as const,
-      points: [ { x: -5, y: 5 }, { x: 20, y: 5 } ],
-      display: 'stroke' as const, strokeWidth: 1
+      id: 'l',
+      type: 'line' as const,
+      points: [
+        { x: -5, y: 5 },
+        { x: 20, y: 5 }
+      ],
+      display: 'stroke' as const,
+      strokeWidth: 1
     }
     expect(shapeIntersectsRect(line, 0, 0, 10, 10)).toBe(true)
   })
@@ -68,12 +76,13 @@ describe('bulb geometry', () => {
     ...over
   })
 
-  it('shapeBounds: glass box centred on the point, default Φ5.5', () => {
+  it('shapeBounds: glass box centred on the point, default diameter', () => {
     const b = shapeBounds(bulb())
-    expect(b.w).toBeCloseTo(5.5)
-    expect(b.h).toBeCloseTo(5.5)
-    expect(b.x).toBeCloseTo(100.5 - 2.75)
-    expect(b.y).toBeCloseTo(50.5 - 2.75)
+    const D = BULB_DEFAULT_DIAMETER
+    expect(b.w).toBeCloseTo(D)
+    expect(b.h).toBeCloseTo(D)
+    expect(b.x).toBeCloseTo(100.5 - D / 2)
+    expect(b.y).toBeCloseTo(50.5 - D / 2)
   })
 
   it('shapeBounds: honours a custom diameter', () => {

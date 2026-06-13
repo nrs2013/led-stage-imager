@@ -71,12 +71,15 @@ export function airGeometry(
  *  乗算をこの量だけ二度掛けする（カメラのS字の近似）。 */
 export const darkTone = (I: number): number => Math.max(0, (0.5 - I) / 0.5) * 0.85
 
-// 卓モードの可動域は広く（のむさん 2026-06-11「配置は仕込み・卓では自由に動けた方がいい」）
-const TILT_MAX = (Math.PI * 3) / 4 // チルト振り幅 ±135°（面内・真横を越えて斜め下まで）
+// 卓モードの可動域は広く（のむさん 2026-06-11「配置は仕込み・卓では自由に動けた方がいい」）。
+// ±180°まで開放（のむさん確定 2026-06-13）: 灯体を上に置きTILTを振ればトップライト＝上から
+// 当たる。新パラメータは作らず、チルトだけで「下から/横から/上から」を全部まかなう。
+const TILT_MAX = Math.PI // チルト振り幅 ±180°（面内・真上から真下まで一周）
 export const beamTiltRad = (tilt: number): number => tilt * TILT_MAX
-/** 卓のZoom: -1..1 → 置いた広がりの 0.15〜2.5 倍（128=置いた姿のまま）。 */
+/** 卓のZoom: -1..1 → 置いた広がりの 0.15〜4.0 倍（128=置いた姿のまま）。上げ側を×4.0へ拡張
+ *  （のむさん確定 2026-06-13・DMX255で扇が4倍開く・ホーム128は不変）。 */
 export const beamZoomScale = (zoom: number): number =>
-  zoom < 0 ? 1 + zoom * 0.85 : 1 + zoom * 1.5
+  zoom < 0 ? 1 + zoom * 0.85 : 1 + zoom * 3.0
 
 function trapLocal(
   ctx: CanvasRenderingContext2D,
@@ -95,9 +98,11 @@ function trapLocal(
   ctx.closePath()
 }
 
-/** ビーム本体（ローカル座標: 出口=(0,0)・-Y向き）。縦=逆二乗＋ガンマの48点グラデ
- *  （折れ線なし）、横=12枚の台形の連続的な重なり（中心軸ほど厚く・縁へ滑らかに）。
- *  カクカク退治の確定版（試打台 v5）。 */
+/** ビーム本体（ローカル座標: 出口=(0,0)・-Y向き）。横=12枚の台形の連続的な重なり
+ *  （中心軸ほど厚く・縁へ滑らかに）。各層は「届く長さ」を変える: 外側の層ほど早く尽き、
+ *  中心の層だけ最後まで届く → 先端が横棒でなく丸い舌になり、両脇から先に暗くなる
+ *  （終わり際の丸み・のむさん指摘 2026-06-13）。各層は自分の長さ内で逆二乗ガンマ減衰
+ *  （28点グラデ・折れ線なし）するので段差は出ない。 */
 function drawBeamCoreLocal(
   ctx: CanvasRenderingContext2D,
   w0: number,
@@ -110,18 +115,22 @@ function drawBeamCoreLocal(
   // ceiling smoothly instead of slamming into clip — red+green meets as a clean
   // yellow and same-colour overlaps brighten naturally (照明屋さん判定 2026-06-11)
   ctx.globalCompositeOperation = 'screen'
-  const gr = ctx.createLinearGradient(0, 0, 0, -len)
-  for (let s = 0; s <= 48; s++) {
-    const t = s / 48
-    const v = Math.pow(Math.pow(1 - t, 2), 1 / 2.2)
-    gr.addColorStop(t, rgba(col, v))
-  }
-  ctx.fillStyle = gr
   const NL = 12
   for (let k = 0; k < NL; k++) {
-    const wf = 1 - (k / (NL - 1)) * 0.62
+    const u = k / (NL - 1)
+    const wf = 1 - u * 0.62 // 横: 外1.0 → 中心0.38
+    const lf = 0.7 + 0.3 * Math.pow(u, 1.4) // 縦: 外側0.70 → 中心1.00
+    const L = len * lf // この層の届く長さ
+    const tipW = w0 + (w1 - w0) * lf // 同じ円錐の距離Lでの太さ（先細りを保つ）
+    const gr = ctx.createLinearGradient(0, 0, 0, -L)
+    for (let s = 0; s <= 28; s++) {
+      const t = s / 28
+      const v = Math.pow(Math.pow(1 - t, 2), 1 / 2.2)
+      gr.addColorStop(t, rgba(col, v))
+    }
+    ctx.fillStyle = gr
     ctx.globalAlpha = ampl / NL
-    trapLocal(ctx, w0, w1, len, wf)
+    trapLocal(ctx, w0, tipW, L, wf)
     ctx.fill()
   }
   ctx.globalAlpha = 1

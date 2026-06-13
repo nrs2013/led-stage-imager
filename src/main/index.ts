@@ -9,7 +9,7 @@ import type { ArtDmxPacket } from './artnet/artdmx-parser'
 import { OutputPublisher } from './output/syphon-publisher'
 
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
-// sends frames back to be published on the "DECOR STUDIO" Syphon source.
+// sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
 const receiver = new ArtNetReceiver()
 const publisher = new OutputPublisher()
 let mainWindow: BrowserWindow | null = null
@@ -17,14 +17,14 @@ let previewWindow: BrowserWindow | null = null
 let lastChart: unknown = null
 
 function startEngine(): void {
-  publisher.start('DECOR STUDIO')
+  publisher.start('LED STAGE IMAGER')
   receiver.on('dmx', (pkt: ArtDmxPacket) => {
     const msg = { universe: pkt.universe, sequence: pkt.sequence, data: pkt.data }
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('artnet:dmx', msg)
   })
   receiver.on('error', (err) => console.error('[artnet] receiver error:', err))
   receiver.start('0.0.0.0')
-  console.log('[engine] Art-Net receiver (UDP 6454) + Syphon "DECOR STUDIO" started')
+  console.log('[engine] Art-Net receiver (UDP 6454) + Syphon "LED STAGE IMAGER" started')
 }
 
 function stopEngine(): void {
@@ -192,7 +192,9 @@ app.whenReady().then(() => {
 
   // Network interface list + receiver re-bind + engine status (for the status lamps).
   ipcMain.handle('net:interfaces', () => {
-    const out: { name: string; address: string }[] = [{ name: 'すべて (0.0.0.0)', address: '0.0.0.0' }]
+    const out: { name: string; address: string }[] = [
+      { name: 'すべて (0.0.0.0)', address: '0.0.0.0' }
+    ]
     for (const [name, addrs] of Object.entries(networkInterfaces())) {
       for (const a of addrs ?? []) {
         if (a.family === 'IPv4' && !a.internal) {
@@ -238,7 +240,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('syphon:rename', (_e, name: string) => {
-    publisher.start(name || 'DECOR STUDIO')
+    publisher.start(name || 'LED STAGE IMAGER')
     return true
   })
 

@@ -9,6 +9,7 @@ import { LiveView } from './output/LiveView'
 import { StatusBar } from './ui/StatusBar'
 import { StartScreen } from './ui/StartScreen'
 import { ManualFaders } from './test/ManualFaders'
+import { ImageLightingMode } from './imagelight/ImageLightingMode'
 import { useStore } from './state/store'
 import { useDmxBridge } from './state/dmx-bridge'
 import { useMask } from './state/use-mask'
@@ -78,21 +79,43 @@ function useMenuUndo(): void {
       return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
     }
     a?.onEditUndo?.(() => {
-      if (inText()) document.execCommand('undo')
-      else useStore.getState().undo()
+      if (inText()) {
+        document.execCommand('undo')
+        return
+      }
+      const st = useStore.getState()
+      if (st.imageLight && st.imageLightUndo) st.imageLightUndo()
+      else st.undo()
     })
     a?.onEditRedo?.(() => {
-      if (inText()) document.execCommand('redo')
-      else useStore.getState().redo()
+      if (inText()) {
+        document.execCommand('redo')
+        return
+      }
+      const st = useStore.getState()
+      if (st.imageLight && st.imageLightRedo) st.imageLightRedo()
+      else st.redo()
     })
     a?.onEditCopy?.(() => {
-      if (inText()) a?.nativeCopy?.()
-      else useStore.getState().copySelection()
+      if (inText()) {
+        a?.nativeCopy?.()
+        return
+      }
+      const st = useStore.getState()
+      if (st.imageLight && st.imageLightCopy) st.imageLightCopy()
+      else st.copySelection()
     })
     a?.onEditPaste?.(() => {
       if (inText()) {
         a?.nativePaste?.()
-      } else {
+        return
+      }
+      const st0 = useStore.getState()
+      if (st0.imageLight && st0.imageLightPaste) {
+        st0.imageLightPaste()
+        return
+      }
+      {
         const st = useStore.getState()
         if (!st.clipboard) return
         if (st.pasteMark) {
@@ -123,15 +146,21 @@ function useDropGuard(): void {
 function EditorApp(): React.JSX.Element {
   const mode = useStore((s) => s.mode)
   const started = useStore((s) => s.started)
+  const imageLight = useStore((s) => s.imageLight)
+  const setImageLight = useStore((s) => s.setImageLight)
   const [testOpen, setTestOpen] = useState(false)
   useDmxBridge()
   useMask()
   usePreviewMirror()
   useDropGuard()
   useMenuUndo()
+  // 画像照明モード: エディタ/Liveに代えて全画面表示（自前でSyphonへpublish）
+  if (imageLight) return <ImageLightingMode onExit={() => setImageLight(false)} />
   if (mode === 'edit' && !started) {
     return (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.canvas }}>
+      <div
+        style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.canvas }}
+      >
         <StartScreen />
         <StatusBar />
       </div>
@@ -163,7 +192,15 @@ function EditorApp(): React.JSX.Element {
           <PatchTable />
         </>
       ) : (
-        <main style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', minHeight: 0 }}>
+        <main
+          style={{
+            flex: 1,
+            position: 'relative',
+            overflow: 'hidden',
+            display: 'flex',
+            minHeight: 0
+          }}
+        >
           <LiveView />
         </main>
       )}

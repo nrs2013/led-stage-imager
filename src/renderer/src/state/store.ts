@@ -50,6 +50,9 @@ interface AppState {
   maskEmpty: boolean
   /** False until the user picks a doorway (chart image / blank / load); shows the start screen. */
   started: boolean
+  /** 画像照明モード（のむさんが本番で回す・卓なし）。true の間はエディタ/Liveに代えて
+   *  ImageLightingMode を全画面表示し、自前で Syphon へ publish する。 */
+  imageLight: boolean
   /** Undo/redo: snapshots of `chart` (immutable, so stacking references is cheap). */
   history: Chart[]
   future: Chart[]
@@ -62,6 +65,15 @@ interface AppState {
   undo: () => void
   redo: () => void
   setStarted: (on: boolean) => void
+  setImageLight: (on: boolean) => void
+  /** 画像照明モードが提供する Undo/Redo/Copy/Paste（⌘Z/⌘C/⌘V をエンジンへ橋渡し）。モード外は null。 */
+  imageLightUndo: (() => void) | null
+  imageLightRedo: (() => void) | null
+  imageLightCopy: (() => void) | null
+  imageLightPaste: (() => void) | null
+  setImageLightHandlers: (
+    h: { undo: () => void; redo: () => void; copy: () => void; paste: () => void } | null
+  ) => void
   /** Loads a chart image: canvas snaps to the image's pixel size, the image becomes the
    *  underlay, and the mask defaults to "transparent hole = where decorations go" —
    *  the chart is show artwork with the decoration areas punched out (invert OFF). */
@@ -212,6 +224,11 @@ export const useStore = create<AppState>()((set, get) => ({
   pasteArmed: false,
   pasteMark: null,
   started: initialStarted(),
+  imageLight: false,
+  imageLightUndo: null,
+  imageLightRedo: null,
+  imageLightCopy: null,
+  imageLightPaste: null,
   history: [],
   future: [],
   histTag: null,
@@ -255,6 +272,23 @@ export const useStore = create<AppState>()((set, get) => ({
       }
     }),
   setStarted: (started) => set({ started }),
+  setImageLight: (imageLight) => set({ imageLight }),
+  setImageLightHandlers: (h) =>
+    set(
+      h
+        ? {
+            imageLightUndo: h.undo,
+            imageLightRedo: h.redo,
+            imageLightCopy: h.copy,
+            imageLightPaste: h.paste
+          }
+        : {
+            imageLightUndo: null,
+            imageLightRedo: null,
+            imageLightCopy: null,
+            imageLightPaste: null
+          }
+    ),
   applyChartImage: (dataUrl, w, h) => {
     get().beginHistory()
     set((s) => ({
@@ -273,10 +307,8 @@ export const useStore = create<AppState>()((set, get) => ({
   setChart: (chart) => set({ chart, selectedId: null, selectedIds: [] }),
   setMode: (mode) => set({ mode }),
   setTool: (tool) => set({ tool }),
-  select: (selectedId) =>
-    set({ selectedId, selectedIds: selectedId ? [selectedId] : [] }),
-  selectMany: (ids) =>
-    set({ selectedIds: ids, selectedId: ids.length === 1 ? ids[0] : null }),
+  select: (selectedId) => set({ selectedId, selectedIds: selectedId ? [selectedId] : [] }),
+  selectMany: (ids) => set({ selectedIds: ids, selectedId: ids.length === 1 ? ids[0] : null }),
   toggleSelect: (id) =>
     set((s) => {
       const ids = s.selectedIds.includes(id)
@@ -316,9 +348,7 @@ export const useStore = create<AppState>()((set, get) => ({
     const shapes = s.chart.shapes
       .filter((sh) => ids.has(sh.id))
       .map((sh) => ({ ...sh, points: sh.points.map((p) => ({ ...p })) }))
-    const fixtures = s.chart.fixtures
-      .filter((f) => ids.has(f.shapeId))
-      .map((f) => ({ ...f }))
+    const fixtures = s.chart.fixtures.filter((f) => ids.has(f.shapeId)).map((f) => ({ ...f }))
     set({ clipboard: { shapes, fixtures } })
   },
   setPasteArmed: (pasteArmed) => set({ pasteArmed }),
@@ -513,9 +543,7 @@ export const useStore = create<AppState>()((set, get) => ({
       const have = new Set(
         s.chart.fixtures.filter((f) => idSet.has(f.shapeId)).map((f) => f.shapeId)
       )
-      const updated = s.chart.fixtures.map((f) =>
-        idSet.has(f.shapeId) ? { ...f, ...patch } : f
-      )
+      const updated = s.chart.fixtures.map((f) => (idSet.has(f.shapeId) ? { ...f, ...patch } : f))
       const created: Fixture[] = shapeIds
         .filter((id) => !have.has(id))
         .map((id) => ({
@@ -559,7 +587,8 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, gamma: on } } })),
   setHoldOnTimeout: (on) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, holdOnTimeout: on } } })),
-  setGlow: (on) => set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glow: on } } })),
+  setGlow: (on) =>
+    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glow: on } } })),
   setGlowAmount: (px) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glowAmount: px } } })),
   setSyphonName: (name) => set((s) => ({ chart: { ...s.chart, syphon: { name } } })),
@@ -619,7 +648,13 @@ export const useStore = create<AppState>()((set, get) => ({
           strokeWidth: 1,
           fixtureId: fid
         })
-        newFixtures.push({ id: fid, shapeId: id, universe: a.universe, start: a.start, mode: opts.mode })
+        newFixtures.push({
+          id: fid,
+          shapeId: id,
+          universe: a.universe,
+          start: a.start,
+          mode: opts.mode
+        })
         i++
       }
     }
@@ -638,14 +673,19 @@ export const useStore = create<AppState>()((set, get) => ({
       chart: {
         ...s.chart,
         shapes: s.chart.shapes.map((sh) =>
-          sh.id === id ? { ...sh, points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : sh
+          sh.id === id
+            ? { ...sh, points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
+            : sh
         )
       }
     }))
   },
   setShapePoints: (id, points) =>
     set((s) => ({
-      chart: { ...s.chart, shapes: s.chart.shapes.map((sh) => (sh.id === id ? { ...sh, points } : sh)) }
+      chart: {
+        ...s.chart,
+        shapes: s.chart.shapes.map((sh) => (sh.id === id ? { ...sh, points } : sh))
+      }
     })),
   duplicateShape: (id) => {
     get().beginHistory()

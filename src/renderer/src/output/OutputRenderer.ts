@@ -52,6 +52,7 @@ export class OutputRenderer {
   private smoothMap?: HTMLCanvasElement
   private workMap?: HTMLCanvasElement
   private airMap?: HTMLCanvasElement
+  private noiseMap?: HTMLCanvasElement
   private noiseTile?: HTMLCanvasElement
   /** Frame timestamp (ms) — drives the star fields' subtle twinkle. */
   private frameTime = 0
@@ -177,7 +178,9 @@ export class OutputRenderer {
     if (lights.length === 0) return
     const w = this.canvas.width
     const h = this.canvas.height
-    const get = (key: 'lightMap' | 'smoothMap' | 'workMap' | 'airMap'): HTMLCanvasElement => {
+    const get = (
+      key: 'lightMap' | 'smoothMap' | 'workMap' | 'airMap' | 'noiseMap'
+    ): HTMLCanvasElement => {
       let cvs = this[key]
       if (!cvs) {
         cvs = document.createElement('canvas')
@@ -228,13 +231,22 @@ export class OutputRenderer {
       }
       this.noiseTile = n
     }
-    const pat = lmc.createPattern(this.noiseTile, 'repeat')
-    if (pat) {
+    // ノイズは「光があるところだけ」に撒く: タイルを別キャンバスに敷いて光マップと multiply
+    // してから lighter で加算する。光ゼロの場所は ノイズ×0=0 で底上げされない（無灯部は
+    // 完全な闇のまま・のむさん判定 2026-06-13 ノイズ床退治）。
+    const nm = get('noiseMap')
+    const nmc = nm.getContext('2d')
+    const pat = nmc?.createPattern(this.noiseTile, 'repeat')
+    if (nmc && pat) {
+      nmc.globalCompositeOperation = 'source-over'
+      nmc.fillStyle = pat
+      nmc.fillRect(0, 0, w, h)
+      nmc.globalCompositeOperation = 'multiply'
+      nmc.drawImage(lm, 0, 0)
       lmc.save()
       lmc.globalCompositeOperation = 'lighter'
-      lmc.globalAlpha = 0.035
-      lmc.fillStyle = pat
-      lmc.fillRect(0, 0, w, h)
+      lmc.globalAlpha = 0.07 // 乗算で振幅が下がるぶん持ち上げ（撹拌力は維持）
+      lmc.drawImage(nm, 0, 0)
       lmc.restore()
     }
     // ---- each photo: albedo × light (+ dark tone at low gauge), added to the frame

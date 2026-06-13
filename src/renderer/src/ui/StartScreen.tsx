@@ -15,6 +15,7 @@ export function StartScreen(): React.JSX.Element {
   const setStarted = useStore((s) => s.setStarted)
   const setChart = useStore((s) => s.setChart)
   const setTool = useStore((s) => s.setTool)
+  const setImageLight = useStore((s) => s.setImageLight)
   const applyChartImage = useStore((s) => s.applyChartImage)
   const [over, setOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -81,10 +82,12 @@ export function StartScreen(): React.JSX.Element {
   }
 
   const [ndiOpen, setNdiOpen] = useState(false)
-  const ext = (url: string) => (e: React.MouseEvent): void => {
-    e.preventDefault()
-    window.open(url) // Electron: 外部ブラウザで開く / Web版: 新規タブ
-  }
+  const ext =
+    (url: string) =>
+    (e: React.MouseEvent): void => {
+      e.preventDefault()
+      window.open(url) // Electron: 外部ブラウザで開く / Web版: 新規タブ
+    }
 
   // Esc clears a stale error message.
   useEffect(() => {
@@ -98,7 +101,7 @@ export function StartScreen(): React.JSX.Element {
   return (
     <main style={wrap}>
       <div style={{ textAlign: 'center' }}>
-        <h1 style={title}>DECOR STUDIO</h1>
+        <h1 style={title}>LED STAGE IMAGER</h1>
         <div style={subtitle}>CHART-BASED LED DECORATION</div>
       </div>
 
@@ -137,13 +140,36 @@ export function StartScreen(): React.JSX.Element {
           Load…
         </button>
         <div style={{ width: '0.5px', height: 22, background: C.border, margin: '0 6px' }} />
-        <button style={smallBtn} onClick={() => startBlank(1920, 1080)} title="チャート無しの素のキャンバス">
+        <button
+          style={smallBtn}
+          onClick={() => startBlank(1920, 1080)}
+          title="チャート無しの素のキャンバス"
+        >
           Blank 1920×1080
         </button>
-        <button style={smallBtn} onClick={() => startBlank(3840, 2160)} title="チャート無しの素のキャンバス">
+        <button
+          style={smallBtn}
+          onClick={() => startBlank(3840, 2160)}
+          title="チャート無しの素のキャンバス"
+        >
           Blank 3840×2160
         </button>
       </div>
+
+      <button
+        style={imageLightBtn}
+        onClick={() => setImageLight(true)}
+        title="セット写真を背景に、灯体で写真を照らす本番モード（卓・Art-Net不要）"
+      >
+        <span
+          style={{ fontFamily: F.display, fontSize: 17, letterSpacing: '0.08em', color: C.canvas }}
+        >
+          IMAGE LIGHTING
+        </span>
+        <span style={{ fontSize: 11.5, color: 'rgba(10,10,10,0.72)', fontFamily: F.ui }}>
+          画像照明モード — 写真を灯体で照らす本番モード（卓なしでOK）
+        </span>
+      </button>
 
       {error && (
         <div style={errBox} data-testid="start-error">
@@ -181,7 +207,7 @@ export function StartScreen(): React.JSX.Element {
             }}
           >
             <div style={{ color: C.text, marginBottom: 4 }}>
-              同じMacの Resolume へは何も不要です（Sources に「DECOR STUDIO」が Syphon
+              同じMacの Resolume へは何も不要です（Sources に「LED STAGE IMAGER」が Syphon
               として自動で出ます）。<b style={{ color: C.white }}>別のPCの Resolume</b>{' '}
               へアルファ付きで送るには、無料アプリ「NDISyphon」を使います：
             </div>
@@ -204,10 +230,14 @@ export function StartScreen(): React.JSX.Element {
                   説明ページ
                 </a>
               </li>
-              <li>DECOR STUDIO を起動したまま NDISyphon を開き、下段のリストで「DECOR STUDIO」を選ぶ</li>
+              <li>
+                LED STAGE IMAGER を起動したまま NDISyphon を開き、下段のリストで「LED STAGE
+                IMAGER」を選ぶ
+              </li>
               <li>「ローカルネットワーク」の許可を求められたら必ず許可する</li>
               <li>
-                受け側の Resolume Arena（Windows / Mac）→ Sources → <b style={{ color: C.white }}>NDI</b>{' '}
+                受け側の Resolume Arena（Windows / Mac）→ Sources →{' '}
+                <b style={{ color: C.white }}>NDI</b>{' '}
                 に自動で現れる（アルファ付き・追加インストール不要）
               </li>
             </ol>
@@ -263,6 +293,19 @@ const smallBtn: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 500,
   color: C.label
+}
+const imageLightBtn: React.CSSProperties = {
+  width: 'min(560px, 80vw)',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 2,
+  padding: '14px 20px',
+  border: 'none',
+  borderRadius: 6,
+  cursor: 'pointer',
+  background: C.amber,
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)'
 }
 const errBox: React.CSSProperties = {
   maxWidth: 560,

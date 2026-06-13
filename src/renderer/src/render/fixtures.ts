@@ -1,10 +1,12 @@
 import type { Point, Shape } from '../model/types'
 import { bulbHueIntensity, type RGB } from './bulb'
 
-export const PAR_DEFAULT_DIAMETER = 44
-export const BLINDER_DEFAULT_WIDTH = 40 // housing width; the unit is 2 cells wide × 4 tall
-export const PATT_DEFAULT_DIAMETER = 80 // のむさん: 8連の外形と同じくらいの大物
-export const PIXELPATT_DEFAULT_DIAMETER = 100 // 7-cell hex unit's overall width
+// 実寸基準（のむさん 2026-06-13）: 画面1px = 実物1mm。各部品は実寸の横幅(mm)＝px。
+// LEDドットは中心〜中心12mm(=12px・光る3mm＋すき間9mm)。背景チャートの実寸合わせは次段階。
+export const PAR_DEFAULT_DIAMETER = 300 // パー(PAR) 30cm
+export const BLINDER_DEFAULT_WIDTH = 300 // 8灯ミニブル 30cm（housing width＝横幅・高さは2倍）
+export const PATT_DEFAULT_DIAMETER = 500 // PAT「ただのパット」50cm
+export const PIXELPATT_DEFAULT_DIAMETER = 700 // Pixel PAT「パッド」70cm
 
 const mix = (a: RGB, b: RGB, t: number): RGB => [
   a[0] + (b[0] - a[0]) * t,

@@ -11,7 +11,7 @@ import { SyphonMetalServer } from 'node-syphon'
 export class OutputPublisher {
   private server: SyphonMetalServer | null = null
 
-  start(name = 'DECOR STUDIO'): void {
+  start(name = 'LED STAGE IMAGER'): void {
     this.stop()
     this.server = new SyphonMetalServer(name)
   }

@@ -60,7 +60,11 @@ export function LiveView({
     >
       <canvas
         ref={canvasRef}
-        style={{ maxWidth: '100%', maxHeight: '100%', border: bare ? 'none' : `0.5px solid ${C.border}` }}
+        style={{
+          maxWidth: '100%',
+          maxHeight: '100%',
+          border: bare ? 'none' : `0.5px solid ${C.border}`
+        }}
       />
       {!bare && (
         <div
@@ -81,7 +85,7 @@ export function LiveView({
           }}
         >
           <span style={{ color: C.amber }}>●</span>
-          LIVE — Syphon Out: DECOR STUDIO
+          LIVE — Syphon Out: LED STAGE IMAGER
         </div>
       )}
     </div>

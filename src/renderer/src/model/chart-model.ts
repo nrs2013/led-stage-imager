@@ -13,7 +13,7 @@ export function createChart(canvas: { w: number; h: number }): Chart {
     underlay: null,
     shapes: [],
     fixtures: [],
-    syphon: { name: 'DECOR STUDIO' },
+    syphon: { name: 'LED STAGE IMAGER' },
     settings: { holdOnTimeout: true, gamma: false, glow: false, glowAmount: 14 }
   }
 }
