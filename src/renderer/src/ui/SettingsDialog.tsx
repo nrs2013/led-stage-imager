@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { useStore } from '../state/store'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
-import { mmPerPx, stageWidthMeters } from '../model/scale'
+import { mmPerPx, stageWidthMeters, countFittableFixtures } from '../model/scale'
 
 const MAX_W = 4096
 const MAX_H = 2160
@@ -19,10 +20,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const setGlow = useStore((s) => s.setGlow)
   const setGlowAmount = useStore((s) => s.setGlowAmount)
   const setStageWidthMeters = useStore((s) => s.setStageWidthMeters)
+  const fitFixturesToScale = useStore((s) => s.fitFixturesToScale)
 
   const tooBig = chart.canvas.w > MAX_W || chart.canvas.h > MAX_H
   const mmpp = mmPerPx(chart) // 校正済みなら mm/px、未校正は null
   const widthM = stageWidthMeters(chart) ?? ''
+  const fitCount = countFittableFixtures(chart.shapes) // 実寸に直せる灯体の数
+  const [fitArmed, setFitArmed] = useState(false) // 2回押しで実行（誤爆防止）
 
   return (
     <div style={backdrop} onClick={onClose}>
@@ -56,6 +60,28 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
         ) : (
           <div style={{ color: C.amber, fontSize: 11, fontFamily: F.ui, marginTop: -6, marginBottom: 12 }}>
             未校正：背景の横幅(m)を入れると置く部品が実物大になります（パッド70cm/パット50cm/パー30cm/ミニブル30cm/ボール球15cm）
+          </div>
+        )}
+        {mmpp != null && fitCount > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <button
+              style={{ ...buttonStyle({ active: fitArmed }), width: '100%' }}
+              onClick={() => {
+                if (fitArmed) {
+                  fitFixturesToScale()
+                  setFitArmed(false)
+                } else {
+                  setFitArmed(true)
+                }
+              }}
+            >
+              {fitArmed
+                ? `もう一度押すと実行（${fitCount}個を実寸サイズに）`
+                : `既にある部品を実寸に合わせる（${fitCount}個）`}
+            </button>
+            <div style={{ color: C.amber, fontSize: 10, fontFamily: F.ui, marginTop: 4 }}>
+              校正前に置いた灯体の大きさを今の実寸スケールに直します。位置はそのまま・⌘Zで戻せます。
+            </div>
           </div>
         )}
 

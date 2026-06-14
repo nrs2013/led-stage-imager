@@ -1,6 +1,24 @@
 import { describe, it, expect } from 'vitest'
-import { mmPerPx, mmToCanvasPx, stageWidthMeters } from './scale'
-import type { Chart } from './types'
+import {
+  mmPerPx,
+  mmToCanvasPx,
+  stageWidthMeters,
+  rescaleFixturesToScale,
+  countFittableFixtures
+} from './scale'
+import type { Chart, Shape } from './types'
+
+// テスト用の最小 Shape
+function fx(type: Shape['type'], extra: Partial<Shape> = {}): Shape {
+  return {
+    id: type,
+    type,
+    points: [{ x: 100, y: 100 }],
+    display: 'fill',
+    strokeWidth: 1,
+    ...extra
+  } as Shape
+}
 
 // 校正なし／横◯m だけ変えたチャートを作るヘルパ
 function chart(stageWidthMm?: number, canvas = { w: 1500, h: 800 }): Chart {
@@ -61,5 +79,68 @@ describe('stageWidthMeters（表示用）', () => {
   })
   it('12000mm → 12m', () => {
     expect(stageWidthMeters(chart(12000))).toBe(12)
+  })
+})
+
+describe('rescaleFixturesToScale（既にある部品を実寸に合わせる）', () => {
+  const mmpp = 40000 / 3840 // 40m / 3840px ≈ 10.4167 mm/px
+
+  it('校正前の灯体(生700px)を実寸へ → 67.2px・位置は不変', () => {
+    const out = rescaleFixturesToScale([fx('pixelpatt', { diameter: 700 })], mmpp)
+    expect(out[0].diameter).toBeCloseTo(67.2, 1)
+    expect(out[0].points).toEqual([{ x: 100, y: 100 }]) // 位置はそのまま
+  })
+
+  it('PAR300/PAT500/8灯300/ボール球150 も換算', () => {
+    const out = rescaleFixturesToScale(
+      [
+        fx('parlight', { diameter: 300 }),
+        fx('patt', { diameter: 500 }),
+        fx('blinder', { diameter: 300 }),
+        fx('bulb', { diameter: 150 })
+      ],
+      mmpp
+    )
+    expect(out[0].diameter).toBeCloseTo(28.8, 1)
+    expect(out[1].diameter).toBeCloseTo(48, 1)
+    expect(out[2].diameter).toBeCloseTo(28.8, 1)
+    expect(out[3].diameter).toBeCloseTo(14.4, 1)
+  })
+
+  it('uplight はビーム幅/伸びを換算', () => {
+    const out = rescaleFixturesToScale(
+      [fx('uplight', { beamW0: 200, beamW1: 600, beamLen: 1000 })],
+      mmpp
+    )
+    expect(out[0].beamW0).toBeCloseTo(19.2, 1)
+    expect(out[0].beamW1).toBeCloseTo(57.6, 1)
+    expect(out[0].beamLen).toBeCloseTo(96, 1)
+  })
+
+  it('手描き系(neon/festoon)は触らない', () => {
+    const neon = fx('neon', { diameter: 700, fontSize: 80 })
+    const fest = fx('festoon', { diameter: 40 })
+    const out = rescaleFixturesToScale([neon, fest], mmpp)
+    expect(out[0]).toEqual(neon) // 不変
+    expect(out[1]).toEqual(fest)
+  })
+
+  it('mmPerPx が不正なら無変更', () => {
+    const arr = [fx('pixelpatt', { diameter: 700 })]
+    expect(rescaleFixturesToScale(arr, 0)).toEqual(arr)
+  })
+})
+
+describe('countFittableFixtures', () => {
+  it('灯体(diameter系)+uplight だけ数える', () => {
+    const shapes = [
+      fx('pixelpatt', { diameter: 700 }),
+      fx('parlight', { diameter: 300 }),
+      fx('uplight'),
+      fx('neon'),
+      fx('festoon'),
+      fx('line')
+    ]
+    expect(countFittableFixtures(shapes)).toBe(3)
   })
 })

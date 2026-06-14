@@ -210,12 +210,13 @@ cp build/icon.png resources/icon.png
 - ドロップ変換：`editor/EditorCanvas.tsx` の onDrop で **パー/8灯ミニブル/パット/パッド/ボール球** の `diameter` を `mmToCanvasPx()` 経由に（§5 の5部品のみ。neon/stars/festoon/uplight は実寸未定義なので非対象）。
 - UI：`ui/SettingsDialog.tsx` に「**ステージ実寸 横 (m)**」入力＋校正状態表示（`1px=◯mm ・ 1m≈◯px ・ 縦≈◯m`、未校正は黄色警告）。store アクション `setStageWidthMeters(m)`（0/空で校正解除）。
 - グリッド単位表示（`EditorCanvas` の unit）も校正時は px ではなく **mm** 表示＝縮尺が効いてるか目視できる。
+- **「既にある部品を実寸に合わせる」ボタン**（2026-06-14 追加・実機テストで「置いてから気づく」のが普通と判明したため）：校正済み＆対象灯体ありのとき Setup に表示。`ui/SettingsDialog.tsx` ボタン（**2回押しで実行＝誤爆防止**）→ store `fitFixturesToScale()` → `scale.ts rescaleFixturesToScale(shapes, mmPerPx)`。校正前に置いた灯体(parlight/blinder/patt/pixelpatt/bulb)＋uplight の現在 px を「実寸mm」とみなし `/mmPerPx` で縮める（**位置は不変**・手描き系neon/festoon/stars/lineは対象外・`beginHistory`で**⌘Z可**）。※生pxと校正済みpxを区別しないので、生で置いた灯体に1回だけ使う想定（混在時は誤縮小→⌘Zで戻す）。
 
-**使い方**：背景を読む → Setup で「ステージ実寸 横」に m を入れる → 部品を置くと実物大。**置いてから校正しても既存部品の大きさは変わらない**（変換はドロップ時のみ＝意図的に非破壊）。校正値は背景を読み直しても保持（ステージ実寸は会場の値＝画像解像度と無関係）。
+**使い方**：背景を読む → Setup で「ステージ実寸 横」に m → 部品を置くと実物大。**先に置いてしまった場合**は Setup の「**既にある部品を実寸に合わせる（N個）**」（2回押し・⌘Zで戻せる）で既存をまとめて実寸へ。変換はドロップ時＋このボタンのみ＝意図的に非破壊。校正値は背景を読み直しても保持（ステージ実寸は会場の値＝画像解像度と無関係）。
 
-**要実機目視**：実際のチャートで「パッド=70cm」等が背景に対して妥当な大きさに見えるか。ズレるなら横(m)を微調整。次段階の §7-3 LEDドット（中心12mm）も、校正済みなら 12mm が `mmToCanvasPx(chart,12)` px で描ける土台が揃った。
+**実機確認済（2026-06-14）**：本物のチャート（3840×1080・**実寸40m**）で校正→新規 Pixel PAT をドロップ→**Φ67.2px**（=パッド70cm÷10.42mm/px。校正前の700pxから約1/10）を実機目視で確認。残り §7-3 LEDドット（中心12mm）も、校正済みなら 12mm が `mmToCanvasPx(chart,12)` px で描ける土台が揃った。
 
-**変更ファイル（§7-4）**：新規 `model/scale.ts`(+`scale.test.ts`)／改変 `model/types.ts`(settings に `stageWidthMm?`)・`state/store.ts`(`setStageWidthMeters`)・`editor/EditorCanvas.tsx`(import＋drop変換＋grid単位)・`ui/SettingsDialog.tsx`(入力＋表示)・`render/fixtures.ts`/`render/bulb.ts`(コメント)。型green・テスト170本green・`.app` ビルド反映済み(2026-06-14)。
+**変更ファイル（§7-4）**：新規 `model/scale.ts`(+`scale.test.ts`／`mmPerPx`・`mmToCanvasPx`・`stageWidthMeters`・`rescaleFixturesToScale`・`countFittableFixtures`)／改変 `model/types.ts`(settings に `stageWidthMm?`)・`state/store.ts`(`setStageWidthMeters`・`fitFixturesToScale`)・`editor/EditorCanvas.tsx`(import＋drop変換＋grid単位)・`ui/SettingsDialog.tsx`(入力＋表示＋実寸合わせボタン)・`render/fixtures.ts`/`render/bulb.ts`(コメント)。型green・テスト176本green・`.app` ビルド反映&実機目視済(2026-06-14)。
 
 ---
 

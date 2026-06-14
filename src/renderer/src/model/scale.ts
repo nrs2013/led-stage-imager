@@ -1,4 +1,4 @@
-import type { Chart } from './types'
+import type { Chart, Shape } from './types'
 
 // 実寸スケール（のむさん 2026-06-14, §7-4）。
 // canvas のピクセル数は出力解像度そのもの（mm にすると数千万画素＝OOM）。なので canvas は
@@ -25,4 +25,34 @@ export function mmToCanvasPx(chart: Chart, mm: number): number {
 export function stageWidthMeters(chart: Chart): number | null {
   const mm = chart.settings.stageWidthMm
   return mm && mm > 0 ? mm / 1000 : null
+}
+
+// 実寸サイズが定義された「照明モチーフ」＝§5でmm化した灯体（diameter基準）。
+// 手描き系（neon/festoon/stars/line/freehand/image）は実寸が未定義なので対象外。
+const SIZED_FIXTURES = new Set<Shape['type']>(['parlight', 'blinder', 'patt', 'pixelpatt', 'bulb'])
+
+/** 「既にある部品を実寸に合わせる」対象の数（校正済みのとき Setup のボタンに出す）。 */
+export function countFittableFixtures(shapes: Shape[]): number {
+  return shapes.filter((s) => SIZED_FIXTURES.has(s.type) || s.type === 'uplight').length
+}
+
+/** 校正前に置いた灯体（生px＝1px:1mm前提で置かれた）の大きさを、今の実寸スケールへ直す。
+ *  各灯体の現在の px を「実寸mm」とみなして newPx = px / mmPerPx に。位置(points)は不変＝
+ *  チャート上の置き場所は保ったままサイズだけ実物大に。手描き系は触らない。
+ *  ⌘Zで戻せる前提（store側でbeginHistory）。mmPerPxが不正なら無変更。 */
+export function rescaleFixturesToScale(shapes: Shape[], mmPerPxVal: number): Shape[] {
+  if (!(mmPerPxVal > 0)) return shapes
+  return shapes.map((s) => {
+    if (SIZED_FIXTURES.has(s.type) && s.diameter != null) {
+      return { ...s, diameter: s.diameter / mmPerPxVal }
+    }
+    if (s.type === 'uplight') {
+      const o = { ...s }
+      if (s.beamW0 != null) o.beamW0 = s.beamW0 / mmPerPxVal
+      if (s.beamW1 != null) o.beamW1 = s.beamW1 / mmPerPxVal
+      if (s.beamLen != null) o.beamLen = s.beamLen / mmPerPxVal
+      return o
+    }
+    return s
+  })
 }

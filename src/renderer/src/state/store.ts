@@ -5,6 +5,7 @@ import { eraseCellsFromChart } from '../model/erase'
 import { mergeRunCells, applyMerge } from '../model/merge-runs'
 import { regenChain } from '../editor/stroke-fit'
 import { pasteDelta } from '../editor/geometry'
+import { mmPerPx, rescaleFixturesToScale } from '../model/scale'
 import type { MaskData } from '../ui/mask'
 import { addressAt, nextAddressAfter, repeatCount } from '../dmx/address'
 
@@ -147,6 +148,10 @@ interface AppState {
   /** Declare the chart's real stage width in metres → calibrates scale so new parts
    *  drop at true physical size. 0 / empty clears calibration. */
   setStageWidthMeters: (m: number) => void
+  /** Resize fixtures placed before calibration to real size at the current scale
+   *  (interprets each fixture's current px as millimetres). Positions unchanged.
+   *  No-op when uncalibrated. Undoable. */
+  fitFixturesToScale: () => void
   setGamma: (on: boolean) => void
   setHoldOnTimeout: (on: boolean) => void
   setGlow: (on: boolean) => void
@@ -596,6 +601,12 @@ export const useStore = create<AppState>()((set, get) => ({
         }
       }
     })),
+  fitFixturesToScale: () => {
+    const k = mmPerPx(get().chart)
+    if (!k) return
+    get().beginHistory('fit-scale')
+    set((s) => ({ chart: { ...s.chart, shapes: rescaleFixturesToScale(s.chart.shapes, k) } }))
+  },
   setGamma: (on) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, gamma: on } } })),
   setHoldOnTimeout: (on) =>
