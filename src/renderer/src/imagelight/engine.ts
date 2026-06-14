@@ -128,6 +128,28 @@ export interface Scene {
   mat: HTMLCanvasElement // albedo（写真=固定／動画=毎コマ更新）
   thumb: HTMLCanvasElement
   fix?: { m: boolean; s: boolean }[]
+  /** このシーンを呼び出す MIDI Note 番号（LEARN で割当）。 */
+  midiNote?: number | null
+  /** 4 辺スケールワープの結果 box（LW×LH 座標系）。null＝デフォルト contain fit。 */
+  warpBox?: { x: number; y: number; w: number; h: number } | null
+  /** ピース（写真の一部を切り抜いて 4 隅コーナーピンで貼り付ける）の並び。
+   *  シーンに紐づき、後ろにあるピースほど上に描かれる。 */
+  pieces?: Piece[]
+}
+
+/** 写真の一部を切り抜いて、ステージ上に 4 隅コーナーピンで貼り付ける単位。 */
+export interface Piece {
+  /** 一意 ID（シーン内で被らない）。 */
+  id: string
+  /** 切り抜き元の矩形（mat 絶対座標、写真の元解像度）。 */
+  src: { x: number; y: number; w: number; h: number }
+  /** ステージ上の 4 隅の貼り付け位置（LW×LH 座標系・左上→右上→右下→左下）。 */
+  corners: [
+    { x: number; y: number },
+    { x: number; y: number },
+    { x: number; y: number },
+    { x: number; y: number }
+  ]
 }
 
 /** Undo/Redo 用スナップショット。写真/動画の中身(img/video/mat/thumb)は参照を共有し、軽い
@@ -164,6 +186,12 @@ export interface ShowSceneMeta {
   kind: 'photo' | 'video'
   fix: { m: boolean; s: boolean }[] | null
   media: string | null
+  /** このシーンを呼び出す MIDI Note 番号（未割当は省略可）。 */
+  midiNote?: number | null
+  /** 4 辺スケールワープの結果（LW×LH 座標系）。null/省略＝デフォルト contain fit。 */
+  warpBox?: { x: number; y: number; w: number; h: number } | null
+  /** ピース（4 隅コーナーピンで貼り付ける切り抜き）の並び。省略＝0 個。 */
+  pieces?: Piece[]
 }
 /** 公演ファイル（show.json）全体。 */
 export interface ShowFile {
@@ -172,6 +200,8 @@ export interface ShowFile {
   version: number
   rig: RigPayload
   scenes: ShowSceneMeta[]
+  /** マスク用アルファ画像（あれば media/ 配下のファイル名で参照）。 */
+  mask?: { file: string } | null
 }
 
 /** blob: URL（動画）→ dataURL（保存でファイルに書き出すため）。 */
@@ -278,6 +308,18 @@ export class ImageLightEngine {
   patterns: (Pattern | null)[] = Array(9).fill(null)
   activePattern = -1
   learnPattern: number | null = null
+  /** Scene MIDI Learn 待機中のシーン番号。null=非待機。 */
+  learnScene: number | null = null
+  /** ピース作成モード（true の間、写真上のドラッグでピースの矩形を切り出す）。 */
+  pieceCreating = false
+  /** 編集中の選択ピース ID（null=未選択）。シーン切替で null へ。 */
+  selectedPieceId: string | null = null
+  /** マスク用画像（アルファ付きチャート）。境界線描画の元データ。 */
+  maskImage: HTMLImageElement | null = null
+  /** マスク画像の元dataURL（公演ファイル保存で書き出すため保持）。 */
+  maskSrc: string | null = null
+  /** マスクのアルファ境界線だけ描いたキャンバス（シアン1px）。BUILD で重ねる。 */
+  maskEdgeCanvas: HTMLCanvasElement | null = null
   armedSave = false
   userColors: RGB3[] = []
   /** カラフルチェイスで流す色並び（空=固定8色ぜんぶ）。COLOR欄からD&Dで組む。 */
@@ -292,7 +334,8 @@ export class ImageLightEngine {
 
   // 描画対象の写真（=activeScene）
   private mat: HTMLCanvasElement | null = null
-  private box: { x: number; y: number; w: number; h: number } | null = null
+  /** 現在表示中の写真の枠（LW×LH 座標系）。UI 側はワープハンドル描画に読む。 */
+  box: { x: number; y: number; w: number; h: number } | null = null
   // ユーザーが灯体の配置を一度でもいじったか（写真下端への自動追従を止めるフラグ）
   private rigCustomized = false
   // 灯体コピペ用の内部クリップボード（選択した複数灯体を丸ごと複製）
@@ -698,6 +741,11 @@ export class ImageLightEngine {
     fc.globalCompositeOperation = 'source-over'
     // 光だけ出力モードは編集画面も写真なしで光マップを表示（プレビュー）
     fc.drawImage(this.lightOnly ? this.lightCv : this.workCv, 0, 0)
+    // ピース（写真の一部を切り抜いて 4 隅コーナーピンで貼る）を最終フレームに重ねる。
+    // Step 1：光合成からは外しているので、写真 box 外にも自由に置ける。
+    fc.setTransform(1, 0, 0, 1, 0, 0)
+    fc.globalCompositeOperation = 'source-over'
+    this.drawPiecesOnFrame(fc)
     const airA = (this.st.smoke / 30) * 0.42
     if (maxI > 0.004 && airA > 0.01 && this.mat && this.box) {
       const ac = this.ac
@@ -998,27 +1046,37 @@ export class ImageLightEngine {
     this.dragOrig = this.targets().map((b) => ({ x: b.x, y: b.y }))
   }
 
-  /** ドラッグ中: 開始位置から (rawDx,rawDy) 動かしつつ整列・等間隔へ吸着する。 */
-  dragTo(rawDx: number, rawDy: number): void {
+  /** ドラッグ中: 開始位置から (rawDx,rawDy) 動かしつつ整列・等間隔へ吸着する。
+   *  useSnap=false なら吸着もガイドも完全 OFF（Shift キーで一時的に外す用）。 */
+  dragTo(rawDx: number, rawDy: number, useSnap: boolean = true): void {
     const orig = this.dragOrig
     if (!orig || !this.selected.length) return
     const sel = this.selected
-    const selSet = new Set(sel)
-    const others: Pt[] = this.beams
-      .filter((_, i) => !selSet.has(i))
-      .map((b) => ({ x: b.x, y: b.y }))
-    const pts: Pt[] = orig.map((o) => ({ x: o.x + rawDx, y: o.y + rawDy }))
-    const a = alignSnap(pts, others, SNAP)
-    let sx = a.dx
-    const sy = a.dy
-    const guides = { vx: a.vx, hy: a.hy, equal: [] as { x0: number; x1: number; y: number }[] }
-    // 等間隔は単体ドラッグのときだけ（横方向）。決まったら整列の縦線より優先する。
-    if (sel.length === 1) {
-      const eq = equalSnapX(pts[0].x, others, SNAP)
-      if (eq) {
-        sx = eq.x - pts[0].x
-        guides.vx = []
-        guides.equal = eq.marks.map((m) => ({ x0: m[0], x1: m[1], y: pts[0].y + sy }))
+    let sx = 0
+    let sy = 0
+    let guides: { vx: number[]; hy: number[]; equal: { x0: number; x1: number; y: number }[] } = {
+      vx: [],
+      hy: [],
+      equal: []
+    }
+    if (useSnap) {
+      const selSet = new Set(sel)
+      const others: Pt[] = this.beams
+        .filter((_, i) => !selSet.has(i))
+        .map((b) => ({ x: b.x, y: b.y }))
+      const pts: Pt[] = orig.map((o) => ({ x: o.x + rawDx, y: o.y + rawDy }))
+      const a = alignSnap(pts, others, SNAP)
+      sx = a.dx
+      sy = a.dy
+      guides = { vx: a.vx, hy: a.hy, equal: [] as { x0: number; x1: number; y: number }[] }
+      // 等間隔は単体ドラッグのときだけ（横方向）。決まったら整列の縦線より優先する。
+      if (sel.length === 1) {
+        const eq = equalSnapX(pts[0].x, others, SNAP)
+        if (eq) {
+          sx = eq.x - pts[0].x
+          guides.vx = []
+          guides.equal = eq.marks.map((m) => ({ x0: m[0], x1: m[1], y: pts[0].y + sy }))
+        }
       }
     }
     this.pushHistory('move')
@@ -1028,7 +1086,8 @@ export class ImageLightEngine {
       b.x = orig[k].x + rawDx + sx
       b.y = orig[k].y + rawDy + sy
     }
-    this.snapGuides = guides.vx.length || guides.hy.length || guides.equal.length ? guides : null
+    this.snapGuides =
+      useSnap && (guides.vx.length || guides.hy.length || guides.equal.length) ? guides : null
     this.bump()
   }
 
@@ -1335,10 +1394,281 @@ export class ImageLightEngine {
       this.box = null
       return
     }
+    // 4辺スケールワープが効いていればそれを優先（active scene に紐づく）
+    const active = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (active && active.warpBox) {
+      this.box = { ...active.warpBox }
+      return
+    }
     const sc = Math.min((LW - 80) / this.mat.width, (LH - 240) / this.mat.height)
     const iw = this.mat.width * sc
     const ih = this.mat.height * sc
     this.box = { x: (LW - iw) / 2, y: 40, w: iw, h: ih }
+  }
+
+  /** デフォルト contain fit の box（warpBox 無視）。リセット時／ハンドル初期表示に使う。 */
+  defaultFitBox(): { x: number; y: number; w: number; h: number } | null {
+    if (!this.mat) return null
+    const sc = Math.min((LW - 80) / this.mat.width, (LH - 240) / this.mat.height)
+    const iw = this.mat.width * sc
+    const ih = this.mat.height * sc
+    return { x: (LW - iw) / 2, y: 40, w: iw, h: ih }
+  }
+
+  /** active scene の warpBox を更新（LW×LH 座標系）。null でリセット。 */
+  setActiveSceneWarpBox(box: { x: number; y: number; w: number; h: number } | null): void {
+    const i = this.activeScene
+    if (i < 0 || i >= this.scenes.length) return
+    if (box) {
+      // 最小サイズだけ守る（0 以下や負値の暴走防止）。座標自体はステージ外もOK。
+      const MIN = 20
+      const w = Math.max(MIN, box.w)
+      const h = Math.max(MIN, box.h)
+      this.scenes[i].warpBox = { x: box.x, y: box.y, w, h }
+    } else {
+      this.scenes[i].warpBox = null
+    }
+    this.fitImage()
+    this.bump()
+  }
+
+  /** 表示中シーンが warp 中か（リセットボタンの表示判定用）。 */
+  isActiveSceneWarped(): boolean {
+    const i = this.activeScene
+    if (i < 0 || i >= this.scenes.length) return false
+    return !!this.scenes[i].warpBox
+  }
+
+  // ---------- ピース（写真の一部を切り抜いて 4 隅コーナーピンで貼る） ----------
+
+  /** ピース作成モードのトグル。ON 中は写真上ドラッグで矩形を切り出してピース化。 */
+  setPieceCreating(on: boolean): void {
+    this.pieceCreating = on
+    if (!on) this.bump(false)
+    else this.bump(false)
+  }
+
+  /** ピース選択（id=null で解除）。ハンドル表示・Delete 対象の管理。 */
+  selectPiece(id: string | null): void {
+    this.selectedPieceId = id
+    this.bump(false)
+  }
+
+  /** 写真の元解像度座標（mat 絶対座標）の矩形でピースを追加。
+   *  dst の 4 隅は「写真の現在表示位置」に合わせて初期化＝ピンを刺した状態。
+   *  src が極小（誤クリック）なら null を返してスキップ。 */
+  addPieceFromSrcRect(src: { x: number; y: number; w: number; h: number }): Piece | null {
+    if (src.w < 4 || src.h < 4) return null
+    const i = this.activeScene
+    if (i < 0 || i >= this.scenes.length) return null
+    const scene = this.scenes[i]
+    if (!scene || !scene.mat || !this.box) return null
+    const mw = scene.mat.width
+    const mh = scene.mat.height
+    const box = this.box
+    const tx = (sx: number): number => box.x + (sx / mw) * box.w
+    const ty = (sy: number): number => box.y + (sy / mh) * box.h
+    const id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+    const piece: Piece = {
+      id,
+      src: { x: src.x, y: src.y, w: src.w, h: src.h },
+      corners: [
+        { x: tx(src.x), y: ty(src.y) },
+        { x: tx(src.x + src.w), y: ty(src.y) },
+        { x: tx(src.x + src.w), y: ty(src.y + src.h) },
+        { x: tx(src.x), y: ty(src.y + src.h) }
+      ]
+    }
+    if (!scene.pieces) scene.pieces = []
+    this.pushHistory()
+    scene.pieces.push(piece)
+    this.selectedPieceId = id
+    this.bump()
+    return piece
+  }
+
+  /** 選択中のピースを削除。Delete キー用。 */
+  removeSelectedPiece(): void {
+    const id = this.selectedPieceId
+    if (!id) return
+    const scene = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (!scene || !scene.pieces) return
+    const idx = scene.pieces.findIndex((p) => p.id === id)
+    if (idx < 0) return
+    this.pushHistory()
+    scene.pieces.splice(idx, 1)
+    this.selectedPieceId = null
+    this.bump()
+  }
+
+  /** 座標（LW×LH 座標系）でヒットするピースを手前から探す。 */
+  pickPieceAt(p: { x: number; y: number }): Piece | null {
+    const scene = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (!scene || !scene.pieces) return null
+    for (let i = scene.pieces.length - 1; i >= 0; i--) {
+      const piece = scene.pieces[i]
+      if (this.pointInQuad(p, piece.corners)) return piece
+    }
+    return null
+  }
+
+  private pointInQuad(
+    p: { x: number; y: number },
+    c: [
+      { x: number; y: number },
+      { x: number; y: number },
+      { x: number; y: number },
+      { x: number; y: number }
+    ]
+  ): boolean {
+    return (
+      this.pointInTriangle(p, c[0], c[1], c[2]) || this.pointInTriangle(p, c[0], c[2], c[3])
+    )
+  }
+
+  private pointInTriangle(
+    p: { x: number; y: number },
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    c: { x: number; y: number }
+  ): boolean {
+    const s = (
+      pp: { x: number; y: number },
+      aa: { x: number; y: number },
+      bb: { x: number; y: number }
+    ): number => (pp.x - bb.x) * (aa.y - bb.y) - (aa.x - bb.x) * (pp.y - bb.y)
+    const d1 = s(p, a, b)
+    const d2 = s(p, b, c)
+    const d3 = s(p, c, a)
+    const hasNeg = d1 < 0 || d2 < 0 || d3 < 0
+    const hasPos = d1 > 0 || d2 > 0 || d3 > 0
+    return !(hasNeg && hasPos)
+  }
+
+  /** ピースの 4 隅のうち 1 つを動かす（LW×LH 座標系・絶対位置）。 */
+  updatePieceCorner(id: string, cornerIdx: 0 | 1 | 2 | 3, dst: { x: number; y: number }): void {
+    const scene = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (!scene || !scene.pieces) return
+    const piece = scene.pieces.find((p) => p.id === id)
+    if (!piece) return
+    piece.corners[cornerIdx] = { x: dst.x, y: dst.y }
+    this.bump()
+  }
+
+  /** ピース全体を (dx, dy) だけ平行移動。 */
+  movePieceBy(id: string, dx: number, dy: number): void {
+    const scene = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (!scene || !scene.pieces) return
+    const piece = scene.pieces.find((p) => p.id === id)
+    if (!piece) return
+    for (let i = 0; i < 4; i++) {
+      piece.corners[i] = { x: piece.corners[i].x + dx, y: piece.corners[i].y + dy }
+    }
+    this.bump()
+  }
+
+  /** 最終フレームの上にアクティブシーンのピースを順に描く（renderFrame から呼ばれる）。
+   *  Step 1 ではピースに光は当てない＝最終フレームに直接重ねるだけ（box 外も自由に置ける）。 */
+  drawPiecesOnFrame(ctx: CanvasRenderingContext2D): void {
+    const scene = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (!scene || !scene.pieces || !scene.pieces.length || !scene.mat) return
+    ctx.save()
+    ctx.setTransform(Q, 0, 0, Q, 0, 0) // LW×LH 論理座標 → IW×IH 物理ピクセル
+    for (const piece of scene.pieces) {
+      this.drawPieceQuad(ctx, scene.mat, piece)
+    }
+    ctx.restore()
+  }
+
+  /** ピースを 2 三角形に分けてアフィン変換で描く（4 隅コーナーピン）。 */
+  private drawPieceQuad(
+    ctx: CanvasRenderingContext2D,
+    src: HTMLCanvasElement,
+    piece: Piece
+  ): void {
+    const s = piece.src
+    const c = piece.corners
+    // 三角形 1：src (TL, TR, BR) → dst c[0], c[1], c[2]
+    this.drawTextureTriangle(
+      ctx,
+      src,
+      s.x,
+      s.y,
+      c[0].x,
+      c[0].y,
+      s.x + s.w,
+      s.y,
+      c[1].x,
+      c[1].y,
+      s.x + s.w,
+      s.y + s.h,
+      c[2].x,
+      c[2].y
+    )
+    // 三角形 2：src (TL, BR, BL) → dst c[0], c[2], c[3]
+    this.drawTextureTriangle(
+      ctx,
+      src,
+      s.x,
+      s.y,
+      c[0].x,
+      c[0].y,
+      s.x + s.w,
+      s.y + s.h,
+      c[2].x,
+      c[2].y,
+      s.x,
+      s.y + s.h,
+      c[3].x,
+      c[3].y
+    )
+  }
+
+  /** src 3 点 → dst 3 点のアフィン変換を計算して三角形領域内だけ drawImage。
+   *  ctx は呼び出し時点の transform を保持し、その上にアフィンを乗算する。 */
+  private drawTextureTriangle(
+    ctx: CanvasRenderingContext2D,
+    src: HTMLCanvasElement,
+    sx0: number,
+    sy0: number,
+    dx0: number,
+    dy0: number,
+    sx1: number,
+    sy1: number,
+    dx1: number,
+    dy1: number,
+    sx2: number,
+    sy2: number,
+    dx2: number,
+    dy2: number
+  ): void {
+    const x0 = sx1 - sx0
+    const x1 = sx2 - sx0
+    const y0 = sy1 - sy0
+    const y1 = sy2 - sy0
+    const det = x0 * y1 - x1 * y0
+    if (Math.abs(det) < 1e-9) return // 退化三角形は描かない
+    const u0 = dx1 - dx0
+    const u1 = dx2 - dx0
+    const v0 = dy1 - dy0
+    const v1 = dy2 - dy0
+    const a = (u0 * y1 - u1 * y0) / det
+    const c = (u1 * x0 - u0 * x1) / det
+    const b = (v0 * y1 - v1 * y0) / det
+    const d = (v1 * x0 - v0 * x1) / det
+    const e = dx0 - a * sx0 - c * sy0
+    const f = dy0 - b * sx0 - d * sy0
+    ctx.save()
+    // dst 三角形だけにクリップ（隣の三角形にはみ出さない）
+    ctx.beginPath()
+    ctx.moveTo(dx0, dy0)
+    ctx.lineTo(dx1, dy1)
+    ctx.lineTo(dx2, dy2)
+    ctx.closePath()
+    ctx.clip()
+    ctx.transform(a, b, c, d, e, f)
+    ctx.drawImage(src, 0, 0)
+    ctx.restore()
   }
   /** 初期プリセット（まだ配置をいじっていない）の灯体を、貼られた写真のすぐ下へ寄せる。
    *  ユーザーが一度でも灯体を動かしたら（rigCustomized）追従しない＝その配置を維持。 */
@@ -1376,6 +1706,8 @@ export class ImageLightEngine {
     this.loadFixState(i)
     this.fitImage()
     this.placeRigAtPhotoBottom() // 初期プリセットは写真のすぐ下へ寄せる（未編集の間だけ）
+    this.selectedPieceId = null // シーン切替で別シーンのピース選択を残さない
+    this.pieceCreating = false // 作成モードもシーン切替で抜ける
     this.bump()
   }
   nextScene(dir: number): void {
@@ -1512,6 +1844,7 @@ export class ImageLightEngine {
   }
   setLearnPattern(i: number | null): void {
     this.learnPattern = i
+    if (i !== null) this.learnScene = null // 排他：シーン Learn を消す
     this.bump(false)
   }
   assignShortcut(i: number, key: string | null, midi: number | null): void {
@@ -1528,6 +1861,162 @@ export class ImageLightEngine {
     }
     this.learnPattern = null
     this.bump()
+  }
+  /** シーン名を変える（空なら 'PHOTO n' に戻す）。 */
+  renameScene(i: number, name: string): void {
+    if (i < 0 || i >= this.scenes.length) return
+    this.pushHistory()
+    this.scenes[i].name = name.trim() || 'PHOTO ' + (i + 1)
+    this.bump()
+  }
+  /** シーン MIDI Learn の待機を開始/解除。null で解除。 */
+  setLearnScene(i: number | null): void {
+    if (i !== null && (i < 0 || i >= this.scenes.length)) return
+    this.learnScene = i
+    if (i !== null) {
+      // 他の Learn 系を全部消す（同時に 2 つ待たない）。
+      this.learnPattern = null
+      this.masterLearn = false
+      this.learnParam = null
+    }
+    this.bump(false)
+  }
+  /** シーンに MIDI Note を割当（同じ Note を持つ他シーンからは外す）。null でクリア。 */
+  assignSceneMidi(i: number, note: number | null): void {
+    if (i < 0 || i >= this.scenes.length) return
+    this.pushHistory()
+    if (note !== null) {
+      this.scenes.forEach((s, k) => {
+        if (k !== i && s.midiNote === note) s.midiNote = null
+      })
+    }
+    this.scenes[i].midiNote = note
+    this.learnScene = null
+    this.bump()
+  }
+
+  /** マスク用画像を入れる（dataURL）。null/空文字で解除。
+   *  入れた時点でアルファ境界線キャンバスを作る（BUILDで重ねて表示）。 */
+  async setMaskFromDataUrl(dataUrl: string | null): Promise<void> {
+    if (!dataUrl) {
+      this.maskImage = null
+      this.maskSrc = null
+      this.maskEdgeCanvas = null
+      this.bump()
+      return
+    }
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const im = new Image()
+      im.onload = () => resolve(im)
+      im.onerror = (): void => reject(new Error('mask load failed'))
+      im.src = dataUrl
+    })
+    this.maskImage = img
+    this.maskSrc = dataUrl
+    this.maskEdgeCanvas = this.buildMaskEdgeCanvas(img)
+    this.bump()
+  }
+
+  /** アルファ境界線だけ描いた canvas を「マスク画像の元アスペクト比そのまま」で作る。
+   *  - 巨大画像（>= 4096×4096 相当の総ピクセル）は内部で 4096×... に縮小してから抽出（8K でも OOM しない安全装置）
+   *  - 戻り値の canvas サイズはマスク画像の縦横比そのまま（描画側で contain fit する）
+   *  - 取込み 1 回だけ呼ばれる重い処理。console.time で実時間ログを出す。
+   *  - サイズが 0 や読込み失敗時は null を返す（呼び元で握りつぶし）。 */
+  private buildMaskEdgeCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
+    const swSrc = img.naturalWidth || img.width
+    const shSrc = img.naturalHeight || img.height
+    if (swSrc <= 0 || shSrc <= 0) return null
+    // 8K fallback: 総ピクセルが約 16M を超えたら 4096 を長辺に揃えてダウンサンプル
+    const MAX_PX = 4096 * 4096
+    let sw = swSrc
+    let sh = shSrc
+    if (swSrc * shSrc > MAX_PX) {
+      const k = Math.sqrt(MAX_PX / (swSrc * shSrc))
+      sw = Math.max(1, Math.round(swSrc * k))
+      sh = Math.max(1, Math.round(shSrc * k))
+    }
+    const tag = `[mask] edge ${sw}×${sh} from ${swSrc}×${shSrc}`
+    console.time(tag)
+    let edge: HTMLCanvasElement | null = null
+    try {
+      // 1) 抽出元のアルファ取得（必要なら縮小してから）
+      const src = document.createElement('canvas')
+      src.width = sw
+      src.height = sh
+      const sctx = src.getContext('2d', { willReadFrequently: true })!
+      sctx.imageSmoothingEnabled = true
+      sctx.imageSmoothingQuality = 'high'
+      sctx.clearRect(0, 0, sw, sh)
+      sctx.drawImage(img, 0, 0, sw, sh)
+      const id = sctx.getImageData(0, 0, sw, sh)
+      const a = id.data
+      const TH = 128
+      // 2) 同サイズのエッジ canvas にシアンを打つ
+      edge = document.createElement('canvas')
+      edge.width = sw
+      edge.height = sh
+      const ectx = edge.getContext('2d')!
+      const oId = ectx.createImageData(sw, sh)
+      const od = oId.data
+      const R = 0x22
+      const G = 0xd3
+      const B = 0xee
+      const rowStride = sw * 4
+      for (let y = 0; y < sh; y++) {
+        for (let x = 0; x < sw; x++) {
+          const i = (y * sw + x) * 4
+          const cur = a[i + 3] >= TH ? 1 : 0
+          let isEdge = false
+          if (x > 0 && (a[i - 4 + 3] >= TH ? 1 : 0) !== cur) isEdge = true
+          if (!isEdge && x < sw - 1 && (a[i + 4 + 3] >= TH ? 1 : 0) !== cur) isEdge = true
+          if (!isEdge && y > 0 && (a[i - rowStride + 3] >= TH ? 1 : 0) !== cur) isEdge = true
+          if (!isEdge && y < sh - 1 && (a[i + rowStride + 3] >= TH ? 1 : 0) !== cur) isEdge = true
+          if (isEdge) {
+            od[i] = R
+            od[i + 1] = G
+            od[i + 2] = B
+            od[i + 3] = 255
+          }
+        }
+      }
+      ectx.putImageData(oId, 0, 0)
+      // GC ヒント：抽出元 canvas のバックストアは即解放（巨大画像時に効く）
+      src.width = 0
+      src.height = 0
+    } catch (e) {
+      console.error('[mask] buildMaskEdgeCanvas failed', e)
+      edge = null
+    }
+    console.timeEnd(tag)
+    return edge
+  }
+
+  /** マスクを画面に描くときの「写真と同じ枠」を返す。
+   *  - active scene の写真 box（this.box, LW×LH 座標系）→ Q 倍で IW×IH 座標系の枠に合わせる
+   *  - その枠の中で マスクの元アスペクト比を保ったまま contain fit
+   *  - 写真が無いときはステージ全体 IW×IH に対して contain fit（線だけ見える）
+   *  - 戻り値は IW×IH 座標系（display ctx の transform 下でそのまま使える）
+   *  - マスク未取込なら null */
+  getMaskDisplayBox(): { x: number; y: number; w: number; h: number } | null {
+    if (!this.maskImage) return null
+    const mw = this.maskImage.naturalWidth || this.maskImage.width
+    const mh = this.maskImage.naturalHeight || this.maskImage.height
+    if (mw <= 0 || mh <= 0) return null
+    const photoBox = this.box
+    if (photoBox) {
+      const px = photoBox.x * Q
+      const py = photoBox.y * Q
+      const pw = photoBox.w * Q
+      const ph = photoBox.h * Q
+      const sc = Math.min(pw / mw, ph / mh)
+      const iw = mw * sc
+      const ih = mh * sc
+      return { x: px + (pw - iw) / 2, y: py + (ph - ih) / 2, w: iw, h: ih }
+    }
+    const sc = Math.min(IW / mw, IH / mh)
+    const iw = mw * sc
+    const ih = mh * sc
+    return { x: (IW - iw) / 2, y: (IH - ih) / 2, w: iw, h: ih }
   }
 
   // ---------- パニック・全体 ----------
@@ -1644,9 +2133,14 @@ export class ImageLightEngine {
             const [stt, note, vel] = data
             if ((stt & 0xf0) === 0x90 && vel > 0) {
               if (this.learnPattern != null) this.assignShortcut(this.learnPattern, null, note)
+              else if (this.learnScene != null) this.assignSceneMidi(this.learnScene, note)
               else {
                 const pi = this.patterns.findIndex((p) => p && p.midi === note)
                 if (pi >= 0) this.applyPattern(pi)
+                else {
+                  const si = this.scenes.findIndex((s) => s.midiNote === note)
+                  if (si >= 0) this.selectScene(si)
+                }
               }
             } else if ((stt & 0xf0) === 0xb0) {
               // CC = 物理つまみ/フェーダー
@@ -1745,14 +2239,39 @@ export class ImageLightEngine {
       else if (sc.kind === 'video' && sc.objectUrl) dataUrl = await blobUrlToDataUrl(sc.objectUrl)
       const file = dataUrl ? `media/${String(i + 1).padStart(3, '0')}.${extFromDataUrl(dataUrl)}` : null
       if (dataUrl && file) media.push({ file, dataUrl })
-      scenesMeta.push({ name: sc.name, kind: sc.kind, fix: sc.fix ?? null, media: file })
+      scenesMeta.push({
+        name: sc.name,
+        kind: sc.kind,
+        fix: sc.fix ?? null,
+        media: file,
+        midiNote: sc.midiNote ?? null,
+        warpBox: sc.warpBox ?? null,
+        pieces: sc.pieces ? sc.pieces.map((p) => ({
+          id: p.id,
+          src: { ...p.src },
+          corners: [
+            { ...p.corners[0] },
+            { ...p.corners[1] },
+            { ...p.corners[2] },
+            { ...p.corners[3] }
+          ]
+        })) : undefined
+      })
+    }
+    // マスク画像（あれば）も media/ に書き出して show.json から参照
+    let maskMeta: { file: string } | null = null
+    if (this.maskSrc) {
+      const file = `media/mask.${extFromDataUrl(this.maskSrc)}`
+      maskMeta = { file }
+      media.push({ file, dataUrl: this.maskSrc })
     }
     const show: ShowFile = {
       app: 'LED STAGE IMAGER',
       kind: 'imagelight-show',
       version: 1,
       rig: this.rigData(),
-      scenes: scenesMeta
+      scenes: scenesMeta,
+      mask: maskMeta
     }
     return { json: JSON.stringify(show, null, 2), media }
   }
@@ -1780,7 +2299,16 @@ export class ImageLightEngine {
     }
     this.scenes = []
     this.activeScene = -1
+    // 既存マスクも一旦解除（無いショーを開いたら線が残らないように）
+    this.maskImage = null
+    this.maskSrc = null
+    this.maskEdgeCanvas = null
     this.applyRig(show.rig)
+    // マスク復元（show.mask があれば）
+    if (show.mask && show.mask.file) {
+      const maskUrl = mediaByFile[show.mask.file]
+      if (maskUrl) await this.setMaskFromDataUrl(maskUrl)
+    }
     for (const sm of show.scenes ?? []) {
       const dataUrl = sm.media ? mediaByFile[sm.media] : null
       if (!dataUrl) continue
@@ -1791,7 +2319,23 @@ export class ImageLightEngine {
         await this.addPhoto(dataUrl, sm.name)
       }
       const added = this.scenes[this.scenes.length - 1]
-      if (added && sm.fix) added.fix = sm.fix
+      if (added) {
+        if (sm.fix) added.fix = sm.fix
+        if (sm.midiNote != null) added.midiNote = sm.midiNote
+        if (sm.warpBox) added.warpBox = { ...sm.warpBox }
+        if (sm.pieces && sm.pieces.length) {
+          added.pieces = sm.pieces.map((p) => ({
+            id: p.id,
+            src: { ...p.src },
+            corners: [
+              { ...p.corners[0] },
+              { ...p.corners[1] },
+              { ...p.corners[2] },
+              { ...p.corners[3] }
+            ]
+          }))
+        }
+      }
     }
     this.selectScene(this.scenes.length ? 0 : -1)
     this.bump()

@@ -23,11 +23,12 @@ function fx(type: Shape['type'], extra: Partial<Shape> = {}): Shape {
 // 校正なし／横◯m だけ変えたチャートを作るヘルパ
 function chart(stageWidthMm?: number, canvas = { w: 1500, h: 800 }): Chart {
   return {
-    version: 1,
+    version: 2,
     id: 'c',
     name: 'n',
     canvas,
-    underlay: null,
+    layers: [{ id: 'L', name: 'L', underlay: null, visible: true }],
+    activeLayerId: 'L',
     shapes: [],
     fixtures: [],
     syphon: { name: 'X' },

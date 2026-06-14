@@ -64,6 +64,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // エンジン状態の変化で再描画
   useSyncExternalStore(engine.subscribe, engine.getVersion, engine.getVersion)
 
+  // シーン名のインライン編集（null=非編集中）
+  const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null)
+  const [editingNameValue, setEditingNameValue] = useState<string>('')
   const [uiMode, setUiMode] = useState<'play' | 'build'>('play')
   const uiModeRef = useRef(uiMode)
   useEffect(() => {
@@ -79,7 +82,42 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     null
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const maskInputRef = useRef<HTMLInputElement>(null)
   const colorPickRef = useRef<HTMLInputElement>(null)
+  // 写真の 4 辺スケールワープ — どの辺をつかんでいるか + 開始位置 + ドラッグ開始時の box
+  const warpDragRef = useRef<{
+    edge: 'top' | 'bottom' | 'left' | 'right'
+    start: { x: number; y: number }
+    initBox: { x: number; y: number; w: number; h: number }
+  } | null>(null)
+  // ピース作成中のドラッグ矩形（LW×LH 座標系）
+  const pieceCreateRef = useRef<{
+    start: { x: number; y: number }
+    end: { x: number; y: number }
+  } | null>(null)
+  // 既存ピースの編集ドラッグ — 隅(corner)を引っ張る or 中央(body)で平行移動
+  type CornerIdx = 0 | 1 | 2 | 3
+  const pieceDragRef = useRef<
+    | {
+        mode: 'corner'
+        pieceId: string
+        cornerIdx: CornerIdx
+        start: { x: number; y: number }
+        initCorner: { x: number; y: number }
+      }
+    | {
+        mode: 'body'
+        pieceId: string
+        start: { x: number; y: number }
+        initCorners: [
+          { x: number; y: number },
+          { x: number; y: number },
+          { x: number; y: number },
+          { x: number; y: number }
+        ]
+      }
+    | null
+  >(null)
   // 静止画は描き直さない（カクつき防止）ためのフラグ: 最後に描いたversion＋強制描画フラグ
   const lastVRef = useRef(-1)
   const forceRenderRef = useRef(true)
@@ -119,7 +157,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       // 静止画は描き直さない＝カクつき防止。FX/動画/フェード中、ラバーバンド中、状態変化、
       // または強制フラグ（初回・リサイズ・モード切替）の時だけ描く。
       const v = engine.getVersion()
-      const animating = engine.isAnimating() || rubberRef.current != null
+      const animating =
+        engine.isAnimating() ||
+        rubberRef.current != null ||
+        pieceCreateRef.current != null
       if (!animating && v === lastVRef.current && !forceRenderRef.current) return
       forceRenderRef.current = false
       lastVRef.current = v
@@ -135,7 +176,26 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       ctx.setTransform(scale / (IW / LW), 0, 0, scale / (IH / LH), ox, oy)
       ctx.drawImage(engine.frame, 0, 0)
       if (uiModeRef.current === 'build') {
+        // マスクのアルファ境界線を細い線で重ねる（BUILD のときだけ表示）。
+        // 写真の box に contain fit するので、写真とマスクが同じ位置・同じ大きさで重なる。
+        const mb = engine.getMaskDisplayBox()
+        if (engine.maskEdgeCanvas && mb) {
+          ctx.drawImage(
+            engine.maskEdgeCanvas,
+            0,
+            0,
+            engine.maskEdgeCanvas.width,
+            engine.maskEdgeCanvas.height,
+            mb.x,
+            mb.y,
+            mb.w,
+            mb.h
+          )
+        }
         drawMarkers(ctx, engine, scale) // この後 transform は (scale, ox, oy) のまま
+        drawWarpHandles(ctx, engine, scale, warpDragRef.current?.edge ?? null)
+        drawPieceOverlays(ctx, engine, scale)
+        drawPieceCreating(ctx, pieceCreateRef.current, scale)
         const rb = rubberRef.current
         if (rb) {
           const x = Math.min(rb.x0, rb.x1)
@@ -213,7 +273,31 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
+      // シーン LEARN 待機中：Esc で中止だけ受ける（割当は MIDI 入力のみ）
+      if (engine.learnScene != null) {
+        if (e.key === 'Escape') {
+          engine.setLearnScene(null)
+          e.preventDefault()
+        }
+        return
+      }
       const code = shortcutCode(e)
+      // BUILD: ピース選択中の Delete はピース削除（灯体より優先）
+      if (
+        (e.code === 'Delete' || e.code === 'Backspace') &&
+        uiModeRef.current === 'build' &&
+        engine.selectedPieceId
+      ) {
+        engine.removeSelectedPiece()
+        e.preventDefault()
+        return
+      }
+      // BUILD: ピース作成モード中は Escape で抜けられる
+      if (e.key === 'Escape' && engine.pieceCreating) {
+        engine.setPieceCreating(false)
+        e.preventDefault()
+        return
+      }
       // BUILD: Delete / Backspace で選択中の灯体を削除（PLAY中・全選択(ALL)時は無効＝誤爆防止）
       if (
         (e.code === 'Delete' || e.code === 'Backspace') &&
@@ -260,6 +344,80 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const onStageDown = (e: React.PointerEvent): void => {
     if (uiMode !== 'build') return // PLAYではステージは触らない（写真は下の棚をクリック）
     const p = evPos(e)
+    // 0a. ピース作成モード — 写真の box 内ドラッグで新規ピース矩形を切り出す
+    if (engine.pieceCreating) {
+      const wb0 = engine.box
+      if (wb0 && p.x >= wb0.x && p.x <= wb0.x + wb0.w && p.y >= wb0.y && p.y <= wb0.y + wb0.h) {
+        pieceCreateRef.current = { start: p, end: p }
+        ;(e.target as Element).setPointerCapture?.(e.pointerId)
+        return
+      }
+      // 写真外をクリック → 作成モードを解除して通常処理へ落とす
+      engine.setPieceCreating(false)
+    }
+    // 0b. 既存ピース：選択中のピースなら 4 隅ハンドルチェック → 隅ドラッグ
+    const sel = engine.selectedPieceId
+    const scene = engine.activeScene >= 0 ? engine.scenes[engine.activeScene] : null
+    const selPiece = sel && scene?.pieces ? scene.pieces.find((pp) => pp.id === sel) : null
+    if (selPiece) {
+      const HH = 14 // 隅ハンドルヒット半径（LW 単位）
+      for (let i = 0; i < 4; i++) {
+        const c = selPiece.corners[i]
+        if (Math.abs(p.x - c.x) < HH && Math.abs(p.y - c.y) < HH) {
+          pieceDragRef.current = {
+            mode: 'corner',
+            pieceId: selPiece.id,
+            cornerIdx: i as CornerIdx,
+            start: p,
+            initCorner: { x: c.x, y: c.y }
+          }
+          ;(e.target as Element).setPointerCapture?.(e.pointerId)
+          return
+        }
+      }
+    }
+    // 0c. 既存ピース：内側クリックで選択 + body ドラッグ
+    const picked = engine.pickPieceAt(p)
+    if (picked) {
+      engine.selectPiece(picked.id)
+      pieceDragRef.current = {
+        mode: 'body',
+        pieceId: picked.id,
+        start: p,
+        initCorners: [
+          { x: picked.corners[0].x, y: picked.corners[0].y },
+          { x: picked.corners[1].x, y: picked.corners[1].y },
+          { x: picked.corners[2].x, y: picked.corners[2].y },
+          { x: picked.corners[3].x, y: picked.corners[3].y }
+        ]
+      }
+      ;(e.target as Element).setPointerCapture?.(e.pointerId)
+      return
+    }
+    // 0d. ピース外をクリックしたら選択を解除（次のロジックには進む）
+    if (engine.selectedPieceId) engine.selectPiece(null)
+    // 写真の 4 辺ワープハンドル — 灯体より先に判定（ハンドル優先）
+    const wb = engine.box
+    if (wb) {
+      const HIT = 16 // LW 座標系で ±16px
+      const handles: {
+        edge: 'top' | 'bottom' | 'left' | 'right'
+        x: number
+        y: number
+      }[] = [
+        { edge: 'top', x: wb.x + wb.w / 2, y: wb.y },
+        { edge: 'bottom', x: wb.x + wb.w / 2, y: wb.y + wb.h },
+        { edge: 'left', x: wb.x, y: wb.y + wb.h / 2 },
+        { edge: 'right', x: wb.x + wb.w, y: wb.y + wb.h / 2 }
+      ]
+      for (const h of handles) {
+        if (Math.abs(p.x - h.x) < HIT && Math.abs(p.y - h.y) < HIT) {
+          warpDragRef.current = { edge: h.edge, start: p, initBox: { ...wb } }
+          ;(e.target as Element).setPointerCapture?.(e.pointerId)
+          return
+        }
+      }
+    }
     const beams = engine.beams
     // 番号下のM/S（クリックでトグル）
     for (let i = beams.length - 1; i >= 0; i--) {
@@ -320,16 +478,101 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   }
   const onStageMove = (e: React.PointerEvent): void => {
     const p = evPos(e)
+    // ピース作成中：矩形を拡大していくだけ（確定は onStageUp）
+    if (pieceCreateRef.current) {
+      pieceCreateRef.current.end = p
+      return
+    }
+    // ピース編集ドラッグ：隅 or 中央
+    if (pieceDragRef.current) {
+      const d = pieceDragRef.current
+      if (d.mode === 'corner') {
+        engine.updatePieceCorner(d.pieceId, d.cornerIdx, {
+          x: d.initCorner.x + (p.x - d.start.x),
+          y: d.initCorner.y + (p.y - d.start.y)
+        })
+      } else {
+        const dx = p.x - d.start.x
+        const dy = p.y - d.start.y
+        for (let i = 0; i < 4; i++) {
+          engine.updatePieceCorner(d.pieceId, i as CornerIdx, {
+            x: d.initCorners[i].x + dx,
+            y: d.initCorners[i].y + dy
+          })
+        }
+      }
+      return
+    }
+    // 写真の 4 辺ワープドラッグ — 灯体ドラッグより先に処理
+    if (warpDragRef.current) {
+      const { edge, start, initBox } = warpDragRef.current
+      const MIN = 20 // LW 座標系での最小サイズ
+      let nx = initBox.x
+      let ny = initBox.y
+      let nw = initBox.w
+      let nh = initBox.h
+      if (edge === 'top') {
+        const cap = Math.min(p.y - start.y, initBox.h - MIN)
+        ny = initBox.y + cap
+        nh = initBox.h - cap
+      } else if (edge === 'bottom') {
+        nh = Math.max(MIN, initBox.h + (p.y - start.y))
+      } else if (edge === 'left') {
+        const cap = Math.min(p.x - start.x, initBox.w - MIN)
+        nx = initBox.x + cap
+        nw = initBox.w - cap
+      } else if (edge === 'right') {
+        nw = Math.max(MIN, initBox.w + (p.x - start.x))
+      }
+      engine.setActiveSceneWarpBox({ x: nx, y: ny, w: nw, h: nh })
+      return
+    }
     if (rubberRef.current) {
       rubberRef.current.x1 = p.x
       rubberRef.current.y1 = p.y
       return
     }
     if (!draggingRef.current || !dragStartRef.current) return
-    // 開始位置からの総移動量を渡す＝engine 側で整列・等間隔へ吸着する
-    engine.dragTo(p.x - dragStartRef.current.x, p.y - dragStartRef.current.y)
+    // 開始位置からの総移動量を渡す＝engine 側で整列・等間隔へ吸着する。
+    // Shift を押している間は吸着もガイドも一時 OFF（Figma の ⌘ と同じ役回り）。
+    engine.dragTo(p.x - dragStartRef.current.x, p.y - dragStartRef.current.y, !e.shiftKey)
   }
   const onStageUp = (): void => {
+    // ピース作成の確定：写真 box 上の矩形を mat 絶対座標に逆変換して engine に渡す
+    if (pieceCreateRef.current) {
+      const { start, end } = pieceCreateRef.current
+      pieceCreateRef.current = null
+      const scene =
+        engine.activeScene >= 0 ? engine.scenes[engine.activeScene] : null
+      const box = engine.box
+      if (scene && scene.mat && box) {
+        const minX = Math.max(box.x, Math.min(start.x, end.x))
+        const maxX = Math.min(box.x + box.w, Math.max(start.x, end.x))
+        const minY = Math.max(box.y, Math.min(start.y, end.y))
+        const maxY = Math.min(box.y + box.h, Math.max(start.y, end.y))
+        const w = maxX - minX
+        const h = maxY - minY
+        if (w > 6 && h > 6) {
+          // LW×LH 上の矩形 → mat 絶対座標へ
+          const sx = ((minX - box.x) / box.w) * scene.mat.width
+          const sy = ((minY - box.y) / box.h) * scene.mat.height
+          const sw = (w / box.w) * scene.mat.width
+          const sh = (h / box.h) * scene.mat.height
+          engine.addPieceFromSrcRect({ x: sx, y: sy, w: sw, h: sh })
+        }
+      }
+      // 作成は 1 回で終わり — 連続作成するなら呼び出し側がトグル維持
+      engine.setPieceCreating(false)
+      return
+    }
+    if (pieceDragRef.current) {
+      pieceDragRef.current = null
+      return
+    }
+    if (warpDragRef.current) {
+      warpDragRef.current = null
+      return
+    }
     const rb = rubberRef.current
     if (rb) {
       const minX = Math.min(rb.x0, rb.x1)
@@ -462,30 +705,88 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           )}
           <div className="il-scenes">
             {engine.scenes.map((s, i) => (
-              <button
+              <div
                 key={i}
-                className={'il-sc' + (i === engine.activeScene ? ' on' : '')}
-                onClick={() => engine.selectScene(i)}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  engine.removeScene(i)
-                }}
-                title={s.name + '（× で削除・右クリックでも）'}
+                className={'il-sc-wrap' + (i === engine.activeScene ? ' on' : '')}
               >
-                <ThumbCanvas thumb={s.thumb} />
-                <span>{s.name}</span>
-                {s.kind === 'video' && <span className="il-sc-vid">▶</span>}
-                <span
-                  className="il-sc-del"
-                  title="この素材を棚から削除"
-                  onClick={(e) => {
-                    e.stopPropagation()
+                <button
+                  className={'il-sc' + (i === engine.activeScene ? ' on' : '')}
+                  onClick={() => engine.selectScene(i)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
                     engine.removeScene(i)
                   }}
+                  title={s.name + '（右クリックで削除）'}
                 >
-                  ×
-                </span>
-              </button>
+                  <ThumbCanvas thumb={s.thumb} />
+                  {s.kind === 'video' && <span className="il-sc-vid">▶</span>}
+                  <span
+                    className="il-sc-del"
+                    title="この素材を棚から削除"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      engine.removeScene(i)
+                    }}
+                  >
+                    ×
+                  </span>
+                  <span
+                    className={
+                      'il-sc-learn' + (engine.learnScene === i ? ' on' : '') +
+                      (s.midiNote != null && engine.learnScene !== i ? ' assigned' : '')
+                    }
+                    title={
+                      engine.learnScene === i
+                        ? 'MIDI 入力待ち中（クリックで中止）'
+                        : s.midiNote != null
+                        ? `MIDI Note ${s.midiNote} 割当済（クリックで再 LEARN）`
+                        : 'LEARN — このシーンを呼ぶ MIDI を覚えさせる'
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      engine.setLearnScene(engine.learnScene === i ? null : i)
+                    }}
+                  >
+                    {engine.learnScene === i
+                      ? '待機…'
+                      : s.midiNote != null
+                      ? `♪${s.midiNote}`
+                      : 'LEARN'}
+                  </span>
+                </button>
+                {editingNameIdx === i ? (
+                  <input
+                    className="il-sc-name-input"
+                    value={editingNameValue}
+                    autoFocus
+                    onChange={(e) => setEditingNameValue(e.target.value)}
+                    onBlur={() => {
+                      engine.renameScene(i, editingNameValue)
+                      setEditingNameIdx(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        engine.renameScene(i, editingNameValue)
+                        setEditingNameIdx(null)
+                      } else if (e.key === 'Escape') {
+                        setEditingNameIdx(null)
+                      }
+                      e.stopPropagation()
+                    }}
+                  />
+                ) : (
+                  <div
+                    className="il-sc-name"
+                    title="ダブルクリックで名前を変える"
+                    onDoubleClick={() => {
+                      setEditingNameValue(s.name)
+                      setEditingNameIdx(i)
+                    }}
+                  >
+                    {s.name}
+                  </div>
+                )}
+              </div>
             ))}
             <button className="il-sc-add" onClick={() => fileInputRef.current?.click()}>
               ＋ 写真／動画を追加
@@ -588,6 +889,93 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 ? '💡 光だけ出力：ON（Arena乗算用）'
                 : '光だけ出力：OFF（写真照らし）'}
             </button>
+            <div
+              style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 0, flexWrap: 'wrap' }}
+              title="アルファ付き画像を入れると、BUILD のときだけステージ上に境界線をシアンで表示します"
+            >
+              <button
+                className={'il-mini' + (engine.maskImage ? ' learnon' : '')}
+                onClick={() => maskInputRef.current?.click()}
+              >
+                {engine.maskImage ? '🎭 マスク：差し替え' : '🎭 マスク取り込み（境界線）'}
+              </button>
+              {engine.maskImage && (
+                <button
+                  className="il-mini"
+                  onClick={() => {
+                    engine.setMaskFromDataUrl(null)
+                  }}
+                  title="マスクを外す"
+                >
+                  ×解除
+                </button>
+              )}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: 'var(--il-dim)',
+                marginBottom: 4,
+                lineHeight: 1.3,
+                maxWidth: 280
+              }}
+            >
+              ※マスクは「公演ファイル（保存／開く）」にだけ残ります。再起動するとリセット。
+            </div>
+            <div
+              style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 2, flexWrap: 'wrap' }}
+              title="BUILD で写真の枠（4 辺中央のハンドル）を引っ張ると、マスクの線に合わせて伸ばせる"
+            >
+              <span style={{ fontSize: 10, color: 'var(--il-dim)' }}>
+                📐 写真の枠：4 辺ハンドルでマスクに合わせる
+              </span>
+              {engine.isActiveSceneWarped() && (
+                <button
+                  className="il-mini"
+                  onClick={() => engine.setActiveSceneWarpBox(null)}
+                  title="この写真のワープをリセット（contain fit へ）"
+                >
+                  ↺ リセット
+                </button>
+              )}
+            </div>
+            <div
+              style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 2, flexWrap: 'wrap' }}
+              title="写真の上で四角ドラッグして「ピース」を切り出し → 4 隅をマスクに合わせて引っ張る"
+            >
+              <button
+                className={'il-mini' + (engine.pieceCreating ? ' learnon' : '')}
+                onClick={() => engine.setPieceCreating(!engine.pieceCreating)}
+              >
+                {engine.pieceCreating ? '✂️ ピース：写真の上をドラッグ…（Esc 中止）' : '✂️ ピース作成'}
+              </button>
+              {engine.selectedPieceId && (
+                <button
+                  className="il-mini"
+                  onClick={() => engine.removeSelectedPiece()}
+                  title="選択中のピースを削除（Delete キーでも）"
+                >
+                  × 削除
+                </button>
+              )}
+            </div>
+            <input
+              ref={maskInputRef}
+              type="file"
+              accept="image/png,image/webp,image/*"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                e.target.value = '' // 同じファイル再選択でも発火させる
+                if (!file) return
+                try {
+                  const dataUrl = await fileToDataUrl(file)
+                  await engine.setMaskFromDataUrl(dataUrl)
+                } catch {
+                  /* 読込失敗は無視 */
+                }
+              }}
+            />
 
             <div className="il-lbl">MASTER</div>
             <div className="il-frow">
@@ -956,6 +1344,21 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           </aside>
         )}
       </div>
+      {engine.learnScene !== null && (
+        <div className="il-learn-overlay" onClick={() => engine.setLearnScene(null)}>
+          <div className="il-learn-card" onClick={(e) => e.stopPropagation()}>
+            <div className="il-learn-eyebrow">SCENE LEARN</div>
+            <div className="il-learn-big">何か MIDI を押してください</div>
+            <div className="il-learn-scene">
+              シーン：<b>{engine.scenes[engine.learnScene]?.name ?? ''}</b>
+            </div>
+            <div className="il-learn-hint">Esc キー／背景クリックで中止</div>
+            <button className="il-learn-cancel" onClick={() => engine.setLearnScene(null)}>
+              キャンセル
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1164,6 +1567,97 @@ function drawMarkers(ctx: CanvasRenderingContext2D, engine: ImageLightEngine, sc
   ctx.textBaseline = 'alphabetic'
 }
 
+/** ピースの枠 + 選択ピースの 4 隅ハンドルを描く（BUILD のみ、LW×LH 座標系）。
+ *  非選択ピースは破線、選択中は実線＋琥珀ハンドル。 */
+function drawPieceOverlays(
+  ctx: CanvasRenderingContext2D,
+  engine: ImageLightEngine,
+  scale: number
+): void {
+  const scene = engine.activeScene >= 0 ? engine.scenes[engine.activeScene] : null
+  if (!scene || !scene.pieces) return
+  for (const piece of scene.pieces) {
+    const isSel = piece.id === engine.selectedPieceId
+    ctx.beginPath()
+    ctx.moveTo(piece.corners[0].x, piece.corners[0].y)
+    ctx.lineTo(piece.corners[1].x, piece.corners[1].y)
+    ctx.lineTo(piece.corners[2].x, piece.corners[2].y)
+    ctx.lineTo(piece.corners[3].x, piece.corners[3].y)
+    ctx.closePath()
+    ctx.strokeStyle = isSel ? 'rgba(251,191,36,0.95)' : 'rgba(232,226,218,0.5)'
+    ctx.lineWidth = (isSel ? 2 : 1) / scale
+    ctx.setLineDash(isSel ? [] : [4 / scale, 3 / scale])
+    ctx.stroke()
+    ctx.setLineDash([])
+    if (isSel) {
+      const HS = 12 / scale
+      for (let i = 0; i < 4; i++) {
+        const c = piece.corners[i]
+        ctx.fillStyle = 'rgba(251,191,36,1)'
+        ctx.strokeStyle = '#000'
+        ctx.lineWidth = 1.5 / scale
+        ctx.fillRect(c.x - HS / 2, c.y - HS / 2, HS, HS)
+        ctx.strokeRect(c.x - HS / 2, c.y - HS / 2, HS, HS)
+      }
+    }
+  }
+}
+
+/** ピース作成中のドラッグ矩形（点線の琥珀枠＋薄塗り）。 */
+function drawPieceCreating(
+  ctx: CanvasRenderingContext2D,
+  rect: { start: { x: number; y: number }; end: { x: number; y: number } } | null,
+  scale: number
+): void {
+  if (!rect) return
+  const x = Math.min(rect.start.x, rect.end.x)
+  const y = Math.min(rect.start.y, rect.end.y)
+  const w = Math.abs(rect.end.x - rect.start.x)
+  const h = Math.abs(rect.end.y - rect.start.y)
+  if (w < 1 || h < 1) return
+  ctx.strokeStyle = 'rgba(251,191,36,1)'
+  ctx.lineWidth = 1.5 / scale
+  ctx.setLineDash([6 / scale, 4 / scale])
+  ctx.strokeRect(x, y, w, h)
+  ctx.setLineDash([])
+  ctx.fillStyle = 'rgba(251,191,36,0.12)'
+  ctx.fillRect(x, y, w, h)
+}
+
+/** 写真の 4 辺スケールワープ用ハンドル + 写真枠を描く（BUILD のみ）。
+ *  4 辺の中央に小さい四角ハンドル + 枠全体をうっすら細線で示す。
+ *  draggingEdge が来ているハンドルは琥珀でハイライト。 */
+function drawWarpHandles(
+  ctx: CanvasRenderingContext2D,
+  engine: ImageLightEngine,
+  scale: number,
+  draggingEdge: 'top' | 'bottom' | 'left' | 'right' | null
+): void {
+  const b = engine.box
+  if (!b) return
+  // 写真枠（うっすら白の細い線）
+  ctx.strokeStyle = 'rgba(232,226,218,0.35)'
+  ctx.lineWidth = 1 / scale
+  ctx.setLineDash([])
+  ctx.strokeRect(b.x, b.y, b.w, b.h)
+  // ハンドル位置（LW×LH 座標系）
+  const handles: { edge: 'top' | 'bottom' | 'left' | 'right'; x: number; y: number }[] = [
+    { edge: 'top', x: b.x + b.w / 2, y: b.y },
+    { edge: 'bottom', x: b.x + b.w / 2, y: b.y + b.h },
+    { edge: 'left', x: b.x, y: b.y + b.h / 2 },
+    { edge: 'right', x: b.x + b.w, y: b.y + b.h / 2 }
+  ]
+  const HS = 12 / scale // ハンドル正方形の一辺（画面ピクセル正規化）
+  for (const h of handles) {
+    const active = h.edge === draggingEdge
+    ctx.fillStyle = active ? 'rgba(251,191,36,1)' : 'rgba(232,226,218,0.95)'
+    ctx.strokeStyle = '#000'
+    ctx.lineWidth = 1.5 / scale
+    ctx.fillRect(h.x - HS / 2, h.y - HS / 2, HS, HS)
+    ctx.strokeRect(h.x - HS / 2, h.y - HS / 2, HS, HS)
+  }
+}
+
 /** ドラッグ中の吸着ガイド（整列の赤い破線／等間隔の赤いマーカー）を描く。 */
 function drawSnapGuides(
   ctx: CanvasRenderingContext2D,
@@ -1223,16 +1717,35 @@ const IL_CSS = `
 .il-empty-sub{font-size:12px;color:var(--il-faint);}
 .il-hint{position:absolute;top:10px;left:14px;font-size:11.5px;color:rgba(255,255,255,0.4);pointer-events:none;line-height:1.8;}
 .il-hint b{color:rgba(255,255,255,0.66);font-weight:500;}
-.il-scenes{position:absolute;left:0;right:0;bottom:0;display:flex;gap:8px;align-items:center;padding:8px 12px;background:rgba(10,9,8,0.74);border-top:1px solid var(--il-line);overflow-x:auto;}
+.il-scenes{position:absolute;left:0;right:0;bottom:0;display:flex;gap:8px;align-items:flex-end;padding:8px 12px;background:rgba(10,9,8,0.74);border-top:1px solid var(--il-line);overflow-x:auto;}
+.il-sc-wrap{flex:0 0 auto;display:flex;flex-direction:column;align-items:stretch;gap:4px;}
 .il-sc{flex:0 0 auto;width:96px;cursor:pointer;border:2px solid var(--il-line);border-radius:6px;background:#000;padding:0;position:relative;}
 .il-sc.on{border-color:var(--il-amber);}
 .il-sc canvas{display:block;width:92px;height:52px;border-radius:4px;}
-.il-sc span{position:absolute;left:4px;bottom:3px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--il-txt);text-shadow:0 1px 2px #000;}
+.il-sc-name{font-family:inherit;font-size:13px;font-weight:600;color:var(--il-txt);text-align:center;line-height:1.2;padding:3px 4px;border-radius:3px;cursor:text;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.il-sc-name:hover{background:rgba(255,255,255,0.07);}
+.il-sc-wrap.on .il-sc-name{color:var(--il-amber);font-weight:700;}
+.il-sc-name-input{font-family:inherit;font-size:13px;font-weight:600;color:var(--il-txt);background:rgba(0,0,0,0.9);border:1px solid var(--il-amber);border-radius:3px;padding:3px 4px;width:96px;text-align:center;outline:none;box-sizing:border-box;}
 .il-sc .il-sc-del{position:absolute;top:2px;right:2px;left:auto;bottom:auto;width:17px;height:17px;line-height:15px;text-align:center;border-radius:50%;background:rgba(20,16,14,0.78);color:var(--il-txt);font-size:13px;font-family:inherit;cursor:pointer;opacity:0;transition:opacity 90ms;text-shadow:none;}
 .il-sc:hover .il-sc-del{opacity:1;}
 .il-sc .il-sc-del:hover{background:var(--il-red);color:#fff;}
 .il-sc .il-sc-vid{position:absolute;top:2px;left:2px;bottom:auto;font-size:8px;line-height:14px;color:#111;background:var(--il-cyan);border-radius:3px;padding:0 4px;text-shadow:none;}
-.il-sc-add{flex:0 0 auto;width:96px;height:56px;border:1.5px dashed var(--il-dim);border-radius:6px;background:transparent;color:var(--il-dim);cursor:pointer;font-size:11px;font-family:inherit;}
+.il-sc .il-sc-learn{position:absolute;bottom:3px;right:3px;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;line-height:1;padding:3px 5px;border-radius:3px;background:rgba(20,16,14,0.85);color:var(--il-amber);border:1px solid var(--il-amber);cursor:pointer;text-shadow:none;letter-spacing:0.04em;user-select:none;}
+.il-sc .il-sc-learn:hover{background:var(--il-amber);color:#111;}
+.il-sc .il-sc-learn.assigned{color:var(--il-cyan);border-color:var(--il-cyan);}
+.il-sc .il-sc-learn.assigned:hover{background:var(--il-cyan);color:#111;}
+.il-sc .il-sc-learn.on{background:var(--il-amber);color:#111;border-color:var(--il-amber);animation:il-learn-blink 0.7s infinite;}
+@keyframes il-learn-blink{0%,100%{opacity:1;}50%{opacity:0.55;}}
+.il-sc-add{flex:0 0 auto;width:96px;height:80px;border:1.5px dashed var(--il-dim);border-radius:6px;background:transparent;color:var(--il-dim);cursor:pointer;font-size:11px;font-family:inherit;align-self:flex-end;}
+.il-learn-overlay{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);}
+.il-learn-card{background:#1a1611;border:2px solid var(--il-amber);border-radius:10px;padding:36px 56px;text-align:center;min-width:420px;box-shadow:0 24px 60px rgba(0,0,0,0.6);}
+.il-learn-eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--il-amber);letter-spacing:0.22em;margin-bottom:10px;}
+.il-learn-big{font-size:26px;font-weight:700;color:var(--il-txt);margin-bottom:14px;line-height:1.25;}
+.il-learn-scene{font-size:15px;color:var(--il-dim);margin-bottom:22px;}
+.il-learn-scene b{color:var(--il-txt);font-weight:700;}
+.il-learn-hint{font-size:11px;color:var(--il-dim);margin-bottom:16px;letter-spacing:0.04em;}
+.il-learn-cancel{background:transparent;border:1px solid var(--il-dim);color:var(--il-dim);padding:7px 22px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:13px;}
+.il-learn-cancel:hover{border-color:var(--il-amber);color:var(--il-amber);}
 .il-panel{width:330px;flex-shrink:0;background:var(--il-panel);border-top:1px solid var(--il-line);border-left:1px solid var(--il-line);padding:9px 12px 10px;display:flex;flex-direction:column;gap:7px;overflow-y:auto;}
 .il-deskhead{display:flex;align-items:baseline;gap:8px;}
 .il-deskhead b{font-size:16px;font-weight:700;letter-spacing:1px;}
