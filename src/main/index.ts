@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, screen, Menu } from 'electron'
 import { join, extname } from 'path'
-import { readFileSync, writeFileSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs'
 import { networkInterfaces } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -227,6 +227,65 @@ app.whenReady().then(() => {
     })
     if (res.canceled || res.filePaths.length === 0) return null
     return readFileSync(res.filePaths[0], 'utf8')
+  })
+
+  // 画像照明モード「公演まるごと保存/開く」: 1フォルダに show.json ＋ media/（写真・動画）。
+  const mimeFromExt = (file: string): string => {
+    const e = extname(file).toLowerCase()
+    const m: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      '.mov': 'video/quicktime'
+    }
+    return m[e] ?? 'application/octet-stream'
+  }
+  ipcMain.handle(
+    'imagelight:save-show',
+    async (_e, json: string, media: { file: string; dataUrl: string }[], name: string) => {
+      const res = await dialog.showSaveDialog({
+        title: '公演を保存（フォルダができます）',
+        defaultPath: name || 'show',
+        buttonLabel: '保存'
+      })
+      if (res.canceled || !res.filePath) return null
+      const dir = res.filePath
+      mkdirSync(join(dir, 'media'), { recursive: true })
+      writeFileSync(join(dir, 'show.json'), json, 'utf8')
+      for (const m of media) {
+        const b64 = m.dataUrl.slice(m.dataUrl.indexOf(',') + 1)
+        writeFileSync(join(dir, m.file), Buffer.from(b64, 'base64'))
+      }
+      return dir
+    }
+  )
+  ipcMain.handle('imagelight:open-show', async () => {
+    const res = await dialog.showOpenDialog({
+      title: '公演フォルダを開く',
+      properties: ['openDirectory']
+    })
+    if (res.canceled || res.filePaths.length === 0) return null
+    const dir = res.filePaths[0]
+    let json: string
+    try {
+      json = readFileSync(join(dir, 'show.json'), 'utf8')
+    } catch {
+      return { error: 'このフォルダに show.json が見つかりません' }
+    }
+    const media: Record<string, string> = {}
+    try {
+      for (const f of readdirSync(join(dir, 'media'))) {
+        const buf = readFileSync(join(dir, 'media', f))
+        media['media/' + f] = `data:${mimeFromExt(f)};base64,${buf.toString('base64')}`
+      }
+    } catch {
+      /* media フォルダが無くても json だけは返す */
+    }
+    return { json, media }
   })
   // Crash net: the editor mirrors its chart here (debounced) so a crash or an
   // accidental quit never loses the rig — the start screen offers it back as RESUME.

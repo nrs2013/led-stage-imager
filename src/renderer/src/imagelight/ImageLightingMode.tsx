@@ -7,6 +7,14 @@ import { useStore } from '../state/store'
 
 interface DecorApi {
   publishFrame?: (width: number, height: number, buffer: Uint8ClampedArray) => void
+  saveImageLightShow?: (
+    json: string,
+    media: { file: string; dataUrl: string }[],
+    name: string
+  ) => Promise<string | null>
+  openImageLightShow?: () => Promise<
+    { json: string; media: Record<string, string> } | { error: string } | null
+  >
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -357,6 +365,39 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     }
   }
 
+  // ---- 公演まるごと保存/開く（フォルダ＋写真/動画）。show.json＋media/ を1フォルダに。
+  const [showMsg, setShowMsg] = useState<string | null>(null)
+  const flash = (m: string): void => {
+    setShowMsg(m)
+    window.setTimeout(() => setShowMsg((cur) => (cur === m ? null : cur)), 2600)
+  }
+  const saveShow = async (): Promise<void> => {
+    const a = getApi()
+    if (!a?.saveImageLightShow) return
+    flash('保存中…')
+    try {
+      const { json, media } = await engine.serializeShow()
+      const path = await a.saveImageLightShow(json, media, 'show')
+      flash(path ? '✓ 保存しました' : 'キャンセル')
+    } catch {
+      flash('保存に失敗')
+    }
+  }
+  const openShow = async (): Promise<void> => {
+    const a = getApi()
+    if (!a?.openImageLightShow) return
+    flash('読込中…')
+    try {
+      const res = await a.openImageLightShow()
+      if (!res) return flash('キャンセル')
+      if ('error' in res) return flash(res.error)
+      const ok = await engine.restoreShow(res.json, res.media)
+      flash(ok ? '✓ 開きました' : '読込に失敗')
+    } catch {
+      flash('読込に失敗')
+    }
+  }
+
   const ref = engine.ref()
   const colorLocked = engine.colorOwnedByFx()
   const activeFx = FX_BUTTONS.filter((b) => engine.fxState(b.key))
@@ -378,6 +419,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         </h1>
         <small>写真はクリック・明かりはシーン・困ったらESC</small>
         <div style={{ flex: 1 }} />
+        {showMsg && (
+          <span style={{ fontSize: 11, color: 'var(--il-amber)', marginRight: 8 }}>{showMsg}</span>
+        )}
+        <button className="il-mini" onClick={saveShow} title="公演まるごとフォルダに保存（写真/動画も一緒）">
+          保存
+        </button>
+        <button className="il-mini" onClick={openShow} title="保存した公演フォルダを開く（写真も明かりも復元）">
+          開く
+        </button>
         <button className="il-mini" onClick={onExit}>
           ← フル機能照明へ
         </button>

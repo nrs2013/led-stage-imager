@@ -48,7 +48,16 @@ const api = {
   autosaveRead: (): Promise<string | null> => ipcRenderer.invoke('chart:autosave-read'),
   saveMvr: (name: string, data: Uint8Array): Promise<string | null> =>
     ipcRenderer.invoke('mvr:save', name, data),
-  renameSyphon: (name: string): Promise<boolean> => ipcRenderer.invoke('syphon:rename', name)
+  renameSyphon: (name: string): Promise<boolean> => ipcRenderer.invoke('syphon:rename', name),
+  // 画像照明モード「公演まるごと保存/開く」（フォルダ＋写真/動画）
+  saveImageLightShow: (
+    json: string,
+    media: { file: string; dataUrl: string }[],
+    name: string
+  ): Promise<string | null> => ipcRenderer.invoke('imagelight:save-show', json, media, name),
+  openImageLightShow: (): Promise<
+    { json: string; media: Record<string, string> } | { error: string } | null
+  > => ipcRenderer.invoke('imagelight:open-show')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

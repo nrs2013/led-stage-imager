@@ -123,6 +123,8 @@ export interface Scene {
   img?: HTMLImageElement
   video?: HTMLVideoElement
   objectUrl?: string // video: 解放(revoke)用
+  /** 写真の元データURL（公演保存でファイルに書き出すため保持。動画は objectUrl から取得）。 */
+  src?: string
   mat: HTMLCanvasElement // albedo（写真=固定／動画=毎コマ更新）
   thumb: HTMLCanvasElement
   fix?: { m: boolean; s: boolean }[]
@@ -145,6 +147,62 @@ interface Snap {
 // v3: リグ保存を「配置と仕込みだけ」に変更（向き/色/明るさを焼かない）＝旧保存に残った
 //     チルト等を捨てて、初期プリセットを常にまっさら（均等10台・tilt0・下向き）にする
 const RIG_KEY = 'decor.imagelight.rig.v3'
+
+/** localStorage / 公演ファイル 共通のリグ内容（灯体配置=beams は含めない）。 */
+export interface RigPayload {
+  st?: { master?: number; smoke?: number }
+  fxp?: FxParams
+  patterns?: (Pattern | null)[]
+  userColors?: RGB3[]
+  chasePalette?: RGB3[]
+  paramMidi?: Record<string, number>
+  masterMidi?: number | null
+}
+/** 公演ファイル（show.json）のシーン1件。メディアは media/ 配下のファイル名で参照。 */
+export interface ShowSceneMeta {
+  name: string
+  kind: 'photo' | 'video'
+  fix: { m: boolean; s: boolean }[] | null
+  media: string | null
+}
+/** 公演ファイル（show.json）全体。 */
+export interface ShowFile {
+  app: string
+  kind: 'imagelight-show'
+  version: number
+  rig: RigPayload
+  scenes: ShowSceneMeta[]
+}
+
+/** blob: URL（動画）→ dataURL（保存でファイルに書き出すため）。 */
+async function blobUrlToDataUrl(url: string): Promise<string> {
+  const blob = await (await fetch(url)).blob()
+  return await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onload = () => resolve(fr.result as string)
+    fr.onerror = () => reject(fr.error)
+    fr.readAsDataURL(blob)
+  })
+}
+/** dataURL → blob: URL（読込で動画を <video> に渡すため）。 */
+async function dataUrlToBlobUrl(dataUrl: string): Promise<string> {
+  const blob = await (await fetch(dataUrl)).blob()
+  return URL.createObjectURL(blob)
+}
+/** dataURL の MIME から保存ファイルの拡張子を決める。 */
+function extFromDataUrl(dataUrl: string): string {
+  const mime = /^data:([^;]+)/.exec(dataUrl)?.[1] ?? ''
+  const map: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'video/mp4': 'mp4',
+    'video/webm': 'webm',
+    'video/quicktime': 'mov'
+  }
+  return map[mime] ?? (mime.startsWith('video/') ? 'mp4' : 'png')
+}
 
 /** カラフルチェイスの既定色並び（ユーザーが色を組まなければ固定8色ぜんぶで流れる）。 */
 const DEFAULT_CHASE_PALETTE: RGB3[] = COLORS.map((c) => c.rgb)
@@ -1195,6 +1253,7 @@ export class ImageLightEngine {
           name: name || 'PHOTO ' + (this.scenes.length + 1),
           kind: 'photo',
           img: im,
+          src: dataUrl, // 公演保存でファイルに書き出すため元データを保持
           mat: this.albedoOf(im),
           thumb: this.makeThumbFrom(im, w, h)
         }
@@ -1630,21 +1689,37 @@ export class ImageLightEngine {
     }
     this.saveRig()
   }
+  // localStorage / 公演ファイル 共通のリグ内容（配置=beams は含めない＝起動時まっさら。
+  // のむさん確定 2026-06-13「前のセッティングを引きずらない」）。保存対象＝シーン明かり
+  // (patterns)・色プリセット・チェイス色・FXツマミ値・MASTER/SMOKE・MIDI割当。
+  private rigData(): RigPayload {
+    return {
+      st: { master: this.st.master, smoke: this.st.smoke },
+      fxp: this.fxp,
+      patterns: this.patterns,
+      userColors: this.userColors,
+      chasePalette: this.chasePalette,
+      paramMidi: this.paramMidi,
+      masterMidi: this.masterMidi
+    }
+  }
+  // rigData を取り込む（localStorage / 公演読込 共通）。灯体配置は読み込まない。
+  private applyRig(d: RigPayload | null | undefined): void {
+    if (!d) return
+    if (d.st) {
+      this.st.master = d.st.master ?? 1
+      this.st.smoke = d.st.smoke ?? 12
+    }
+    if (d.fxp) this.fxp = { ...this.fxp, ...d.fxp }
+    if (Array.isArray(d.patterns)) this.patterns = d.patterns
+    if (Array.isArray(d.userColors)) this.userColors = d.userColors
+    if (Array.isArray(d.chasePalette)) this.chasePalette = d.chasePalette
+    if (d.paramMidi && typeof d.paramMidi === 'object') this.paramMidi = d.paramMidi
+    if (typeof d.masterMidi === 'number') this.masterMidi = d.masterMidi
+  }
   private saveRig(): void {
     try {
-      // 灯体の配置は保存しない＝起動時は常にまっさら（均等10台・画像のすぐ下・白）。
-      // のむさん確定 2026-06-13「前のセッティングを引きずらない」。配置はそのセッション内のみ。
-      // 保存するのは: シーン・色プリセット・チェイス色・FXツマミ値・MASTER/SMOKE・MIDI割当。
-      const data = {
-        st: { master: this.st.master, smoke: this.st.smoke },
-        fxp: this.fxp,
-        patterns: this.patterns,
-        userColors: this.userColors,
-        chasePalette: this.chasePalette,
-        paramMidi: this.paramMidi,
-        masterMidi: this.masterMidi
-      }
-      localStorage.setItem(RIG_KEY, JSON.stringify(data))
+      localStorage.setItem(RIG_KEY, JSON.stringify(this.rigData()))
     } catch {
       /* localStorage 不可でも本番に支障なし */
     }
@@ -1652,21 +1727,74 @@ export class ImageLightEngine {
   private loadRig(): void {
     try {
       const raw = localStorage.getItem(RIG_KEY)
-      if (!raw) return
-      const d = JSON.parse(raw)
-      if (d.st) {
-        this.st.master = d.st.master ?? 1
-        this.st.smoke = d.st.smoke ?? 12
-      }
-      if (d.fxp) this.fxp = { ...this.fxp, ...d.fxp }
-      // 灯体（配置）は読み込まない＝毎回 initBeams のまっさら10台・白から始める
-      if (Array.isArray(d.patterns)) this.patterns = d.patterns
-      if (Array.isArray(d.userColors)) this.userColors = d.userColors
-      if (Array.isArray(d.chasePalette)) this.chasePalette = d.chasePalette
-      if (d.paramMidi && typeof d.paramMidi === 'object') this.paramMidi = d.paramMidi
-      if (typeof d.masterMidi === 'number') this.masterMidi = d.masterMidi
+      if (raw) this.applyRig(JSON.parse(raw) as RigPayload)
     } catch {
       /* 壊れていたら初期状態のまま */
     }
+  }
+
+  /** 公演まるごとの書き出し材料を作る（リグ＋シーン一覧＋メディアのファイル）。
+   *  写真=元dataURL／動画=blobをfetchしてdataURL化。重いので保存時だけ呼ぶ。 */
+  async serializeShow(): Promise<{ json: string; media: { file: string; dataUrl: string }[] }> {
+    const media: { file: string; dataUrl: string }[] = []
+    const scenesMeta: ShowSceneMeta[] = []
+    for (let i = 0; i < this.scenes.length; i++) {
+      const sc = this.scenes[i]
+      let dataUrl: string | null = null
+      if (sc.kind === 'photo') dataUrl = sc.src ?? sc.img?.src ?? null
+      else if (sc.kind === 'video' && sc.objectUrl) dataUrl = await blobUrlToDataUrl(sc.objectUrl)
+      const file = dataUrl ? `media/${String(i + 1).padStart(3, '0')}.${extFromDataUrl(dataUrl)}` : null
+      if (dataUrl && file) media.push({ file, dataUrl })
+      scenesMeta.push({ name: sc.name, kind: sc.kind, fix: sc.fix ?? null, media: file })
+    }
+    const show: ShowFile = {
+      app: 'LED STAGE IMAGER',
+      kind: 'imagelight-show',
+      version: 1,
+      rig: this.rigData(),
+      scenes: scenesMeta
+    }
+    return { json: JSON.stringify(show, null, 2), media }
+  }
+
+  /** 公演を読み込む。show.json の文字列と「media/ファイル名 → dataURL」の対応を渡す。
+   *  既存のシーン/明かりを置き換える（写真も動画も復元）。 */
+  async restoreShow(showJson: string, mediaByFile: Record<string, string>): Promise<boolean> {
+    let show: ShowFile
+    try {
+      show = JSON.parse(showJson) as ShowFile
+    } catch {
+      return false
+    }
+    if (!show || show.kind !== 'imagelight-show') return false
+    // 既存メディアを停止＋解放してから差し替え
+    for (const s of this.scenes) {
+      if (s.video) {
+        try {
+          s.video.pause()
+        } catch {
+          /* noop */
+        }
+      }
+      if (s.objectUrl) URL.revokeObjectURL(s.objectUrl)
+    }
+    this.scenes = []
+    this.activeScene = -1
+    this.applyRig(show.rig)
+    for (const sm of show.scenes ?? []) {
+      const dataUrl = sm.media ? mediaByFile[sm.media] : null
+      if (!dataUrl) continue
+      if (sm.kind === 'video') {
+        const blobUrl = await dataUrlToBlobUrl(dataUrl)
+        await this.addVideo(blobUrl, sm.name)
+      } else {
+        await this.addPhoto(dataUrl, sm.name)
+      }
+      const added = this.scenes[this.scenes.length - 1]
+      if (added && sm.fix) added.fix = sm.fix
+    }
+    this.selectScene(this.scenes.length ? 0 : -1)
+    this.bump()
+    return true
   }
 }
