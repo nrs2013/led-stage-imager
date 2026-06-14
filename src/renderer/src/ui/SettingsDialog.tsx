@@ -1,5 +1,6 @@
 import { useStore } from '../state/store'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
+import { mmPerPx, stageWidthMeters } from '../model/scale'
 
 const MAX_W = 4096
 const MAX_H = 2160
@@ -17,8 +18,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const setSyphonName = useStore((s) => s.setSyphonName)
   const setGlow = useStore((s) => s.setGlow)
   const setGlowAmount = useStore((s) => s.setGlowAmount)
+  const setStageWidthMeters = useStore((s) => s.setStageWidthMeters)
 
   const tooBig = chart.canvas.w > MAX_W || chart.canvas.h > MAX_H
+  const mmpp = mmPerPx(chart) // 校正済みなら mm/px、未校正は null
+  const widthM = stageWidthMeters(chart) ?? ''
 
   return (
     <div style={backdrop} onClick={onClose}>
@@ -32,6 +36,28 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             Close
           </button>
         </div>
+
+        <Field label="ステージ実寸 横 (m)">
+          <input
+            type="number"
+            min={0}
+            step={0.1}
+            value={widthM}
+            placeholder="未設定"
+            style={inputStyle}
+            onChange={(e) => setStageWidthMeters(Number(e.target.value))}
+          />
+        </Field>
+        {mmpp != null ? (
+          <div style={{ color: C.accent, fontSize: 11, fontFamily: F.ui, marginTop: -6, marginBottom: 12 }}>
+            実寸校正済み：1px = {mmpp.toFixed(mmpp < 10 ? 1 : 0)}mm ・ 1m ≈ {Math.round(1000 / mmpp)}px ・
+            縦 ≈ {((chart.canvas.h * mmpp) / 1000).toFixed(1)}m
+          </div>
+        ) : (
+          <div style={{ color: C.amber, fontSize: 11, fontFamily: F.ui, marginTop: -6, marginBottom: 12 }}>
+            未校正：背景の横幅(m)を入れると置く部品が実物大になります（パッド70cm/パット50cm/パー30cm/ミニブル30cm/ボール球15cm）
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 10 }}>
           <Field label="Canvas W">

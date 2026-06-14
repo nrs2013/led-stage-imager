@@ -145,7 +145,7 @@ export function Toolbar({
       }}
     >
       <div style={{ fontFamily: F.display, fontSize: 22, letterSpacing: '0.12em', color: C.white }}>
-        DECOR&nbsp;<span style={{ color: C.accent }}>STUDIO</span>
+        LED&nbsp;STAGE&nbsp;<span style={{ color: C.accent }}>IMAGER</span>
       </div>
 
       <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />

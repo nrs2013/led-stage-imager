@@ -1,7 +1,7 @@
 import type { BulbStyle } from '../model/types'
 import { reflectGain } from './fixtures'
 
-export const BULB_DEFAULT_DIAMETER = 150 // ボール球 15cm（画面1px=実物1mm）
+export const BULB_DEFAULT_DIAMETER = 150 // ボール球 15cm（実寸mm・校正時は mm→px 変換 §7-4）
 export const BULB_DEFAULT_STYLE: BulbStyle = 'clear'
 
 export type RGB = [number, number, number]

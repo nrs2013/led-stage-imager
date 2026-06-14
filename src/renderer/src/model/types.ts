@@ -110,5 +110,14 @@ export interface Chart {
   shapes: Shape[]
   fixtures: Fixture[]
   syphon: { name: string }
-  settings: { holdOnTimeout: boolean; gamma: boolean; glow: boolean; glowAmount: number }
+  settings: {
+    holdOnTimeout: boolean
+    gamma: boolean
+    glow: boolean
+    glowAmount: number
+    /** Real stage width in millimetres. When set, the chart is calibrated to real
+     *  scale (1px = stageWidthMm / canvas.w mm) and parts drop at true physical size
+     *  via model/scale.mmToCanvasPx. Absent = uncalibrated (parts use raw px). */
+    stageWidthMm?: number
+  }
 }

@@ -144,6 +144,9 @@ interface AppState {
     step: number
   }) => number
   setCanvasSize: (w: number, h: number) => void
+  /** Declare the chart's real stage width in metres → calibrates scale so new parts
+   *  drop at true physical size. 0 / empty clears calibration. */
+  setStageWidthMeters: (m: number) => void
   setGamma: (on: boolean) => void
   setHoldOnTimeout: (on: boolean) => void
   setGlow: (on: boolean) => void
@@ -583,6 +586,16 @@ export const useStore = create<AppState>()((set, get) => ({
     }),
 
   setCanvasSize: (w, h) => set((s) => ({ chart: { ...s.chart, canvas: { w, h } } })),
+  setStageWidthMeters: (m) =>
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        settings: {
+          ...s.chart.settings,
+          stageWidthMm: m > 0 && isFinite(m) ? Math.round(m * 1000) : undefined
+        }
+      }
+    })),
   setGamma: (on) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, gamma: on } } })),
   setHoldOnTimeout: (on) =>

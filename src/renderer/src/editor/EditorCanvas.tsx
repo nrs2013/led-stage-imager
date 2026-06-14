@@ -72,6 +72,8 @@ import {
   UPLIGHT_DEFAULT_W1,
   UPLIGHT_DEFAULT_LEN
 } from '../render/uplight'
+import { BULB_DEFAULT_DIAMETER } from '../render/bulb'
+import { mmToCanvasPx, mmPerPx } from '../model/scale'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 
@@ -1865,7 +1867,13 @@ export function EditorCanvas(): React.JSX.Element {
     }
     useStore.getState().setTool('select')
     if (part === 'bulb') {
-      addShape({ type: 'bulb', points: [center], display: 'fill', strokeWidth: 1 })
+      addShape({
+        type: 'bulb',
+        points: [center],
+        display: 'fill',
+        strokeWidth: 1,
+        diameter: mmToCanvasPx(useStore.getState().chart, BULB_DEFAULT_DIAMETER)
+      })
     } else if (part === 'neon') {
       addShape({
         type: 'neon',
@@ -1931,7 +1939,9 @@ export function EditorCanvas(): React.JSX.Element {
         beamLen: UPLIGHT_DEFAULT_LEN
       })
     } else {
-      // stage fixtures: one-point parts, size = diameter (blinder: housing width)
+      // stage fixtures: one-point parts, size = diameter (blinder: housing width).
+      // 既定サイズは実寸mm。チャート校正時(settings.stageWidthMm)は背景の縮尺に合わせて
+      // px へ変換し実物大で置く。未校正なら mm をそのまま px（従来動作）。§7-4。
       const dia =
         part === 'parlight'
           ? PAR_DEFAULT_DIAMETER
@@ -1945,13 +1955,21 @@ export function EditorCanvas(): React.JSX.Element {
         points: [center],
         display: 'fill',
         strokeWidth: 1,
-        diameter: dia
+        diameter: mmToCanvasPx(useStore.getState().chart, dia)
       })
     }
   }
 
-  // grid unit indicator: what one visible cell currently means (mirrors drawGrid)
-  const unit = view.scale >= 6 ? '1 cell = 1px' : view.scale >= 1.5 ? '1 cell = 10px' : 'grid off'
+  // grid unit indicator: what one visible cell currently means (mirrors drawGrid).
+  // 校正済みチャートは px ではなく実寸 mm で表示（縮尺が効いてるか目視できる）。§7-4。
+  const cellPx = view.scale >= 6 ? 1 : view.scale >= 1.5 ? 10 : 0
+  const mmpp = mmPerPx(chart)
+  const unit =
+    cellPx === 0
+      ? 'grid off'
+      : mmpp
+        ? `1 cell = ${(cellPx * mmpp).toFixed(cellPx * mmpp < 10 ? 1 : 0)}mm`
+        : `1 cell = ${cellPx}px`
   const [unitFlash, setUnitFlash] = useState<{ text: string; key: number } | null>(null)
   const prevUnit = useRef<string | null>(null)
   useEffect(() => {

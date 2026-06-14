@@ -1,8 +1,10 @@
 import type { Point, Shape } from '../model/types'
 import { bulbHueIntensity, type RGB } from './bulb'
 
-// 実寸基準（のむさん 2026-06-13）: 画面1px = 実物1mm。各部品は実寸の横幅(mm)＝px。
-// LEDドットは中心〜中心12mm(=12px・光る3mm＋すき間9mm)。背景チャートの実寸合わせは次段階。
+// 実寸基準（のむさん 2026-06-13 / 校正 2026-06-14 §7-4）: 各部品の既定サイズは実寸の横幅(mm)。
+// チャート校正時(settings.stageWidthMm)はドロップで mm→canvas px へ変換(model/scale.mmToCanvasPx)。
+// 未校正なら mm をそのまま px として置く（1px=1mm前提・従来動作）。
+// LEDドットは中心〜中心12mm(=12px・光る3mm＋すき間9mm)。
 export const PAR_DEFAULT_DIAMETER = 300 // パー(PAR) 30cm
 export const BLINDER_DEFAULT_WIDTH = 300 // 8灯ミニブル 30cm（housing width＝横幅・高さは2倍）
 export const PATT_DEFAULT_DIAMETER = 500 // PAT「ただのパット」50cm
