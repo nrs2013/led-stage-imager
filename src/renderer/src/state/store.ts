@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Chart, Shape, Fixture, ChannelMode, Point } from '../model/types'
+import type { Chart, Shape, Fixture, ChannelMode, Point, Layer, Underlay } from '../model/types'
 import { createChart, addShape as addShapeToChart, newId } from '../model/chart-model'
 import { eraseCellsFromChart } from '../model/erase'
 import { mergeRunCells, applyMerge } from '../model/merge-runs'
@@ -8,6 +8,22 @@ import { pasteDelta } from '../editor/geometry'
 import { mmPerPx, rescaleFixturesToScale } from '../model/scale'
 import type { MaskData } from '../ui/mask'
 import { addressAt, nextAddressAfter, repeatCount } from '../dmx/address'
+
+/** The layer the editor is working on — owns the visible underlay, the drawable-area
+ *  mask, and every newly drawn shape. The live output ignores layers entirely. */
+export const activeLayerOf = (c: Chart): Layer =>
+  c.layers.find((l) => l.id === c.activeLayerId) ?? c.layers[0]
+
+const patchActiveUnderlay = (
+  c: Chart,
+  fn: (u: Underlay | null) => Underlay | null
+): Chart => {
+  const active = activeLayerOf(c)
+  return {
+    ...c,
+    layers: c.layers.map((l) => (l.id === active.id ? { ...l, underlay: fn(l.underlay) } : l))
+  }
+}
 
 export type Mode = 'edit' | 'live'
 export type Tool =
@@ -104,13 +120,27 @@ interface AppState {
   addShape: (init: { type: Shape['type']; points: Shape['points'] } & Partial<Shape>) => string
   removeShape: (id: string) => void
   nudgeShape: (id: string, dx: number, dy: number) => void
+  /** Arrow-key nudge for a multi selection — all shapes move as one undo step. */
+  nudgeShapes: (ids: string[], dx: number, dy: number) => void
   setShapePoints: (id: string, points: Point[]) => void
   duplicateShape: (id: string) => void
+  /** The last ⌘D pair — duplicating the copy again repeats THEIR offset, so
+   *  duplicate → drag into place → ⌘D ⌘D ⌘D lays out an even run (PowerPoint style). */
+  lastDup: { srcId: string; newId: string } | null
   setUniverseData: (universe: number, data: Uint8Array) => void
 
-  setUnderlay: (u: Chart['underlay']) => void
+  setUnderlay: (u: Underlay | null) => void
   setUnderlayOpacity: (opacity: number) => void
   setUnderlayVisible: (visible: boolean) => void
+
+  /** Layers = one page per song. Adds a layer (optionally born with a chart image)
+   *  and makes it active; returns its id. */
+  addLayer: (init?: { name?: string; underlay?: Underlay | null }) => string
+  /** Deletes the layer AND its shapes/fixtures (one undo step). The last layer stays. */
+  removeLayer: (id: string) => void
+  setActiveLayer: (id: string) => void
+  setLayerVisible: (id: string, visible: boolean) => void
+  renameLayer: (id: string, name: string) => void
 
   upsertFixture: (shapeId: string, patch: Partial<Omit<Fixture, 'id' | 'shapeId'>>) => void
   /** Bulk-apply patch fields to every given shape's fixture (creating fixtures where
@@ -124,6 +154,9 @@ interface AppState {
   setManualMode: (on: boolean) => void
   setManualColor: (fixtureId: string, rgb: [number, number, number]) => void
   setManualAll: (rgb: [number, number, number] | null) => void
+  /** Quick Light: paint several fixtures one colour in a single update (and switch
+   *  to manual so it shows immediately) — the no-console "splash a colour" button. */
+  setManualMany: (fixtureIds: string[], rgb: [number, number, number]) => void
   setSnap: (on: boolean) => void
   setUnderlayMask: (patch: { enabled?: boolean; invert?: boolean }) => void
   setMaskData: (m: MaskData | null) => void
@@ -157,6 +190,11 @@ interface AppState {
   setGlow: (on: boolean) => void
   setGlowAmount: (px: number) => void
   setSyphonName: (name: string) => void
+  /** Show title — becomes the default save filename. */
+  setChartName: (name: string) => void
+  /** The Keys cheat-sheet panel ("?" or the Toolbar button). */
+  helpOpen: boolean
+  setHelpOpen: (on: boolean) => void
 }
 
 /** A small sample chart (shapes patched to U0/1 so the test sender lights them). */
@@ -231,6 +269,7 @@ export const useStore = create<AppState>()((set, get) => ({
   clipboard: null,
   pasteArmed: false,
   pasteMark: null,
+  lastDup: null,
   started: initialStarted(),
   imageLight: false,
   imageLightUndo: null,
@@ -303,12 +342,19 @@ export const useStore = create<AppState>()((set, get) => ({
       chart: {
         ...s.chart,
         canvas: { w, h },
-        underlay: {
-          dataUrl,
-          opacity: 0.5,
-          visible: true,
-          mask: { enabled: true, invert: false }
-        }
+        layers: s.chart.layers.map((l) =>
+          l.id === s.chart.activeLayerId
+            ? {
+                ...l,
+                underlay: {
+                  dataUrl,
+                  opacity: 0.5,
+                  visible: true,
+                  mask: { enabled: true, invert: false }
+                }
+              }
+            : l
+        )
       }
     }))
   },
@@ -369,12 +415,14 @@ export const useStore = create<AppState>()((set, get) => ({
     // shapes keep the top-left anchor; whole-cell offsets keep .5 centres crisp
     const { x: dx, y: dy } = pasteDelta(cb.shapes, at)
     const idMap = new Map<string, string>()
+    const pasteLayer = get().chart.activeLayerId // stamps land on the song being edited
     const newShapes: Shape[] = cb.shapes.map((sh) => {
       const nid = newId('shape')
       idMap.set(sh.id, nid)
       return {
         ...sh,
         id: nid,
+        layerId: pasteLayer,
         points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
         fixtureId: undefined // wired below when the original was patched
       }
@@ -476,22 +524,74 @@ export const useStore = create<AppState>()((set, get) => ({
 
   setUnderlay: (underlay) => {
     get().beginHistory()
-    set((s) => ({ chart: { ...s.chart, underlay } }))
+    set((s) => ({ chart: patchActiveUnderlay(s.chart, () => underlay) }))
   },
   setUnderlayOpacity: (opacity) => {
     get().beginHistory('underlay-op')
-    set((s) => ({
-      chart: {
-        ...s.chart,
-        underlay: s.chart.underlay ? { ...s.chart.underlay, opacity } : null
-      }
-    }))
+    set((s) => ({ chart: patchActiveUnderlay(s.chart, (u) => (u ? { ...u, opacity } : null)) }))
   },
   setUnderlayVisible: (visible) =>
+    set((s) => ({ chart: patchActiveUnderlay(s.chart, (u) => (u ? { ...u, visible } : null)) })),
+
+  addLayer: (init) => {
+    const id = newId('layer')
+    get().beginHistory()
     set((s) => ({
       chart: {
         ...s.chart,
-        underlay: s.chart.underlay ? { ...s.chart.underlay, visible } : null
+        layers: [
+          ...s.chart.layers,
+          {
+            id,
+            name: init?.name ?? `CHART ${s.chart.layers.length + 1}`,
+            underlay: init?.underlay ?? null,
+            visible: true
+          }
+        ],
+        activeLayerId: id
+      },
+      selectedId: null,
+      selectedIds: []
+    }))
+    return id
+  },
+  removeLayer: (id) => {
+    get().beginHistory()
+    set((s) => {
+      if (s.chart.layers.length <= 1) return {}
+      const layers = s.chart.layers.filter((l) => l.id !== id)
+      const dead = new Set(s.chart.shapes.filter((sh) => sh.layerId === id).map((sh) => sh.id))
+      return {
+        chart: {
+          ...s.chart,
+          layers,
+          activeLayerId: s.chart.activeLayerId === id ? layers[0].id : s.chart.activeLayerId,
+          shapes: s.chart.shapes.filter((sh) => sh.layerId !== id),
+          fixtures: s.chart.fixtures.filter((f) => !dead.has(f.shapeId))
+        },
+        selectedId: null,
+        selectedIds: []
+      }
+    })
+  },
+  setActiveLayer: (id) =>
+    set((s) =>
+      s.chart.layers.some((l) => l.id === id)
+        ? { chart: { ...s.chart, activeLayerId: id }, selectedId: null, selectedIds: [] }
+        : {}
+    ),
+  setLayerVisible: (id, visible) =>
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        layers: s.chart.layers.map((l) => (l.id === id ? { ...l, visible } : l))
+      }
+    })),
+  renameLayer: (id, name) =>
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        layers: s.chart.layers.map((l) => (l.id === id ? { ...l, name } : l))
       }
     })),
 
@@ -582,6 +682,12 @@ export const useStore = create<AppState>()((set, get) => ({
   setManualMode: (on) => set({ manualMode: on }),
   setManualColor: (fixtureId, rgb) =>
     set((s) => ({ manualByFixture: { ...s.manualByFixture, [fixtureId]: rgb } })),
+  setManualMany: (fixtureIds, rgb) =>
+    set((s) => {
+      const next = { ...s.manualByFixture }
+      for (const id of fixtureIds) next[id] = rgb
+      return { manualByFixture: next, manualMode: true }
+    }),
   setManualAll: (rgb) =>
     set((s) => {
       if (rgb === null) return { manualByFixture: {} }
@@ -616,14 +722,18 @@ export const useStore = create<AppState>()((set, get) => ({
   setGlowAmount: (px) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glowAmount: px } } })),
   setSyphonName: (name) => set((s) => ({ chart: { ...s.chart, syphon: { name } } })),
+  setChartName: (name) => set((s) => ({ chart: { ...s.chart, name } })),
+  helpOpen: false,
+  setHelpOpen: (helpOpen) => set({ helpOpen }),
   setSnap: (on) => set({ snapToPixel: on }),
   setStepPatch: (on) => set({ stepPatch: on }),
   setUnderlayMask: (patch) =>
     set((s) => {
-      if (!s.chart.underlay) return {}
-      const cur = s.chart.underlay.mask ?? { enabled: false, invert: false }
+      const u = activeLayerOf(s.chart).underlay
+      if (!u) return {}
+      const cur = u.mask ?? { enabled: false, invert: false }
       return {
-        chart: { ...s.chart, underlay: { ...s.chart.underlay, mask: { ...cur, ...patch } } }
+        chart: patchActiveUnderlay(s.chart, () => ({ ...u, mask: { ...cur, ...patch } }))
       }
     }),
   setMaskData: (m) => set({ mask: m }),
@@ -634,7 +744,7 @@ export const useStore = create<AppState>()((set, get) => ({
   eraseCells: (keys) => {
     get().beginHistory('erase')
     set((s) => {
-      const r = eraseCellsFromChart(s.chart, new Set(keys))
+      const r = eraseCellsFromChart(s.chart, new Set(keys), s.chart.activeLayerId)
       if (!r.changed) return {}
       const alive = new Set(r.chart.shapes.map((sh) => sh.id))
       const ids = s.selectedIds.filter((x) => alive.has(x))
@@ -664,6 +774,7 @@ export const useStore = create<AppState>()((set, get) => ({
         newShapes.push({
           id,
           type: 'rect',
+          layerId: get().chart.activeLayerId,
           points: [
             { x: Math.round(x - opts.cellW / 2), y: Math.round(y - opts.cellH / 2) },
             { x: Math.round(x + opts.cellW / 2), y: Math.round(y + opts.cellH / 2) }
@@ -704,6 +815,21 @@ export const useStore = create<AppState>()((set, get) => ({
       }
     }))
   },
+  nudgeShapes: (ids, dx, dy) => {
+    if (!ids.length) return
+    get().beginHistory(`nudge-${ids.join('+')}`)
+    const idSet = new Set(ids)
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        shapes: s.chart.shapes.map((sh) =>
+          idSet.has(sh.id)
+            ? { ...sh, points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
+            : sh
+        )
+      }
+    }))
+  },
   setShapePoints: (id, points) =>
     set((s) => ({
       chart: {
@@ -716,11 +842,26 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => {
       const sh = s.chart.shapes.find((x) => x.id === id)
       if (!sh) return {}
+      // duplicating the copy from the last ⌘D repeats that pair's offset — drag the
+      // first copy into place, then ⌘D ⌘D ⌘D continues the run at the same pitch
+      let dx = 10
+      let dy = 10
+      if (s.lastDup && s.lastDup.newId === id) {
+        const src = s.chart.shapes.find((x) => x.id === s.lastDup!.srcId)
+        if (src && src.points[0] && sh.points[0]) {
+          const px = sh.points[0].x - src.points[0].x
+          const py = sh.points[0].y - src.points[0].y
+          if (px !== 0 || py !== 0) {
+            dx = px
+            dy = py
+          }
+        }
+      }
       const nid = newId('shape')
       const copy: Shape = {
         ...sh,
         id: nid,
-        points: sh.points.map((p) => ({ x: p.x + 10, y: p.y + 10 })),
+        points: sh.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
         fixtureId: undefined
       }
       let fixtures = s.chart.fixtures
@@ -733,7 +874,8 @@ export const useStore = create<AppState>()((set, get) => ({
       return {
         chart: { ...s.chart, shapes: [...s.chart.shapes, copy], fixtures },
         selectedId: nid,
-        selectedIds: [nid]
+        selectedIds: [nid],
+        lastDup: { srcId: id, newId: nid }
       }
     })
   }

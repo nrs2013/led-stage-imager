@@ -17,6 +17,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const setGamma = useStore((s) => s.setGamma)
   const setHoldOnTimeout = useStore((s) => s.setHoldOnTimeout)
   const setSyphonName = useStore((s) => s.setSyphonName)
+  const setChartName = useStore((s) => s.setChartName)
   const setGlow = useStore((s) => s.setGlow)
   const setGlowAmount = useStore((s) => s.setGlowAmount)
   const setStageWidthMeters = useStore((s) => s.setStageWidthMeters)
@@ -40,6 +41,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             Close
           </button>
         </div>
+
+        <Field label="Chart Name">
+          <input
+            type="text"
+            value={chart.name}
+            placeholder="公演名・現場名（保存ファイル名になります）"
+            style={{ ...inputStyle, fontFamily: F.ui }}
+            onChange={(e) => setChartName(e.target.value)}
+          />
+        </Field>
 
         <Field label="ステージ実寸 横 (m)">
           <input
@@ -109,7 +120,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
         </div>
         {tooBig && (
           <div style={{ color: C.amber, fontSize: 11, fontFamily: F.ui, marginBottom: 10 }}>
-            ⚠ over {MAX_W}×{MAX_H} — large canvas may be heavy.
+            over {MAX_W}×{MAX_H} — large canvas may be heavy.
           </div>
         )}
 

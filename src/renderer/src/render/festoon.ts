@@ -4,7 +4,7 @@ import { reflectGain } from './fixtures'
 
 export const FESTOON_DEFAULT_SAG = 12 // % of the span length
 export const FESTOON_DEFAULT_PITCH = 30 // px along the wire
-export const FESTOON_DEFAULT_DIAMETER = 4
+export const FESTOON_DEFAULT_DIAMETER = 7
 export const FESTOON_DEFAULT_GLOW = 55
 export const FESTOON_MAX_BULBS = 512
 

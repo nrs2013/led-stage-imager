@@ -6,8 +6,10 @@ import {
   useState,
   type PointerEvent as RPointerEvent
 } from 'react'
-import { useStore } from '../state/store'
+import { useStore, activeLayerOf } from '../state/store'
 import type { Point, Shape } from '../model/types'
+import { fileToDataUrl } from '../io/image-pick'
+import { saveChartToFile } from '../io/file-ops'
 import { C, F } from '../ui/tokens'
 import {
   cornerBounds,
@@ -28,9 +30,16 @@ import {
   salientOfGroup,
   snap1D,
   snapMoveDelta,
+  buildGapCandidates,
+  mergeCand,
   softAxis,
-  type SnapCand
+  type SnapCand,
+  type Salient
 } from './snapping'
+
+/** Vertex / corner / edge handles are POINTS: they may snap to either family. */
+const flatX = (c: SnapCand): number[] => [...c.xs, ...(c.cxs ?? [])]
+const flatY = (c: SnapCand): number[] => [...c.ys, ...(c.cys ?? [])]
 import { cleanPaintStroke, regenChain } from './stroke-fit'
 import { findDrawableRegions, type Region } from './regions'
 import {
@@ -127,7 +136,7 @@ type Interaction =
       origs: Point[][]
       forceSnap?: boolean
       cand?: SnapCand // alignment targets (single-shape moves only)
-      sal?: { xs: number[]; ys: number[] }
+      sal?: Salient
     }
   | { kind: 'vertex'; id: string; idx: number; cand?: SnapCand }
   | { kind: 'corner'; id: string; anchor: Point; aspect: number; cand?: SnapCand }
@@ -351,10 +360,7 @@ export function EditorCanvas(): React.JSX.Element {
     () => centerCandidates(regions, chart.canvas),
     [regions, chart.canvas]
   )
-  const withCenters = (c: SnapCand): SnapCand => ({
-    xs: [...c.xs, ...centerCand.xs],
-    ys: [...c.ys, ...centerCand.ys]
-  })
+  const withCenters = (c: SnapCand): SnapCand => mergeCand(c, centerCand)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -487,7 +493,7 @@ export function EditorCanvas(): React.JSX.Element {
     ctx.clearRect(0, 0, w, h)
     ctx.fillStyle = '#000'
     ctx.fillRect(0, 0, w, h)
-    const u = chart.underlay
+    const u = activeLayerOf(chart).underlay
     // neutral grey under the drawable punch-outs (before the artwork, so the artwork
     // itself is never tinted) — makes transparent holes readable on dark charts
     if (holesImg.current) ctx.drawImage(holesImg.current, 0, 0, w, h)
@@ -498,10 +504,18 @@ export function EditorCanvas(): React.JSX.Element {
     }
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
+    // other songs' layers: hidden unless toggled visible, and then only as ghosts —
+    // the active layer is always full-strength and is the only editable one
+    const layerVisible = new Map(chart.layers.map((l) => [l.id, l.visible]))
+    const activeId = chart.activeLayerId
+    const homeId = chart.layers[0]?.id // layerless shapes = first layer (v1 rule)
     chart.shapes.forEach((shape, i) => {
-      if (shape.locked) ctx.globalAlpha = 0.4 // locked backdrops sit back quietly
+      const lid = shape.layerId ?? homeId
+      const ghost = lid !== activeId
+      if (ghost && !layerVisible.get(lid)) return
+      ctx.globalAlpha = ghost ? 0.22 : shape.locked ? 0.4 : 1
       drawShapeInto(ctx, shape, shapeColor(i), shapeFill(i), boostRef.current)
-      if (shape.locked) ctx.globalAlpha = 1
+      ctx.globalAlpha = 1
     })
   }
 
@@ -775,11 +789,11 @@ export function EditorCanvas(): React.JSX.Element {
     rafRef.current = requestAnimationFrame(() => drawRef.current())
   })
 
-  // mark content dirty when chart / underlay / mask change
+  // mark content dirty when chart / layers / mask change
   useEffect(() => {
     contentDirty.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chart.shapes, chart.canvas, chart.underlay, mask])
+  }, [chart.shapes, chart.canvas, chart.layers, chart.activeLayerId, mask])
 
   // neon webfonts arrive async: stale measurements (taken against the fallback
   // font) must be thrown away and the offscreen repainted once the real font lands
@@ -803,12 +817,14 @@ export function EditorCanvas(): React.JSX.Element {
     return () => window.removeEventListener('decor:image-loaded', onImg)
   }, [])
 
-  // cache underlay + mask images
+  // cache underlay + mask images (the ACTIVE layer's chart image)
+  const activeUnderlayUrl = activeLayerOf(chart).underlay?.dataUrl
   useEffect(() => {
-    const url = chart.underlay?.dataUrl
+    const url = activeUnderlayUrl
     if (!url) {
       underlayImg.current = null
       contentDirty.current = true
+      drawRef.current()
       return
     }
     const img = new Image()
@@ -818,7 +834,7 @@ export function EditorCanvas(): React.JSX.Element {
       drawRef.current()
     }
     img.src = url
-  }, [chart.underlay?.dataUrl])
+  }, [activeUnderlayUrl])
   useEffect(() => {
     const url = mask?.holes
     if (!url) {
@@ -909,6 +925,27 @@ export function EditorCanvas(): React.JSX.Element {
         }
         return
       }
+      // ⌘S = save to file (the Save button's keyboard twin; blocks the browser dialog)
+      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        void saveChartToFile(st.chart).then((label) => {
+          if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
+        })
+        return
+      }
+      // ⌘A = select the whole active layer (locked shapes stay out, ghosts untouched)
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
+        const c = st.chart
+        const ids = c.shapes
+          .filter((s) => !s.locked && (s.layerId ?? c.layers[0]?.id) === c.activeLayerId)
+          .map((s) => s.id)
+        if (ids.length) {
+          st.setTool('select')
+          st.selectMany(ids)
+        }
+        e.preventDefault()
+        return
+      }
       // quick tool keys (industry-standard letters) + F = fit + Z = one-key undo
       if (!e.metaKey && !e.ctrlKey && !e.altKey) {
         const k = e.key.toLowerCase()
@@ -920,6 +957,11 @@ export function EditorCanvas(): React.JSX.Element {
         }
         if (k === 'f') {
           fitRef.current()
+          e.preventDefault()
+          return
+        }
+        if (k === '?') {
+          st.setHelpOpen(!st.helpOpen)
           e.preventDefault()
           return
         }
@@ -964,6 +1006,26 @@ export function EditorCanvas(): React.JSX.Element {
         e.preventDefault()
         return
       }
+      // arrow-key nudge — single or multi selection (1 dot, Shift = 10)
+      if (e.key.startsWith('Arrow')) {
+        const stp = e.shiftKey ? 10 : 1
+        let dx = 0
+        let dy = 0
+        if (e.key === 'ArrowLeft') dx = -stp
+        else if (e.key === 'ArrowRight') dx = stp
+        else if (e.key === 'ArrowUp') dy = -stp
+        else if (e.key === 'ArrowDown') dy = stp
+        const ids = st.selectedIds.length
+          ? st.selectedIds
+          : st.selectedId
+            ? [st.selectedId]
+            : []
+        if ((dx || dy) && ids.length) {
+          st.nudgeShapes(ids, dx, dy)
+          e.preventDefault()
+        }
+        return
+      }
       const sel = st.selectedId
       if (!sel) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -986,16 +1048,6 @@ export function EditorCanvas(): React.JSX.Element {
         e.preventDefault()
         return
       }
-      const stp = e.shiftKey ? 10 : 1
-      let dx = 0
-      let dy = 0
-      if (e.key === 'ArrowLeft') dx = -stp
-      else if (e.key === 'ArrowRight') dx = stp
-      else if (e.key === 'ArrowUp') dy = -stp
-      else if (e.key === 'ArrowDown') dy = stp
-      else return
-      st.nudgeShape(sel, dx, dy)
-      e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -1069,14 +1121,17 @@ export function EditorCanvas(): React.JSX.Element {
   /** Precise pick, NEAREST-first: among everything within reach of the cursor the
    *  closest stroke wins — so tightly packed 1px lines pick the one you aimed at,
    *  not whichever is on top. */
-  const hitTest = (p: Point): string | null => {
+  const hitTest = (p: Point, opts?: { locked?: boolean }): string | null => {
+    const wantLocked = opts?.locked ?? false // locked-only pass = the unlock door (right-click)
     const ctx = scratchCtx.current
     const tol = Math.max(2, 6 / viewRef.current.scale)
     let best: string | null = null
     let bd = Infinity
     for (let i = chart.shapes.length - 1; i >= 0; i--) {
       const sh = chart.shapes[i]
-      if (sh.locked) continue // locked backdrops: clicks pass straight through
+      if (!!sh.locked !== wantLocked) continue // locked backdrops: left-clicks pass through
+      // other songs' ghosts are untouchable — only the active layer is editable
+      if ((sh.layerId ?? chart.layers[0]?.id) !== chart.activeLayerId) continue
       const b = shapeArrayBounds(sh)
       const half = (sh.strokeWidth || 1) / 2
       const pad = tol + half
@@ -1164,9 +1219,14 @@ export function EditorCanvas(): React.JSX.Element {
       forceSnap,
       // groups align as one body (union bbox + centre); island/canvas centres are
       // always on the candidate list so parts can click onto panel middles
-      cand: withCenters(
-        buildCandidates(chart.shapes, single ? single.id : new Set(shs.map((s) => s.id)))
-      ),
+      cand: (() => {
+        const ex = single ? single.id : new Set(shs.map((s) => s.id))
+        // edges + centres + island middles + equal-spacing rhythm
+        return mergeCand(
+          withCenters(buildCandidates(chart.shapes, ex)),
+          buildGapCandidates(chart.shapes, ex)
+        )
+      })(),
       sal: single ? salientOf(single) : salientOfGroup(shs)
     }
     return true
@@ -1180,9 +1240,11 @@ export function EditorCanvas(): React.JSX.Element {
       return
     }
     if (e.button === 2) {
-      // right button: click = context menu, drag = grab & move (decided on movement)
+      // right button: click = context menu, drag = grab & move (decided on movement).
+      // Locked shapes ignore left-clicks entirely, so right-click is their one
+      // remaining door — fall back to a locked-only pass to reach the unlock menu.
       const raw = toCanvasRaw(e.clientX, e.clientY)
-      const hit = hitTest(raw)
+      const hit = hitTest(raw) ?? hitTest(raw, { locked: true })
       if (hit) {
         rcPending.current = { id: hit, x: e.clientX, y: e.clientY }
         canvasRef.current?.setPointerCapture(e.pointerId)
@@ -1353,9 +1415,11 @@ export function EditorCanvas(): React.JSX.Element {
       drawRef.current()
     }
     if (rcPending.current && (e.buttons & 2) !== 0) {
-      // right-drag past the threshold = grab & move (otherwise it stays a menu click)
+      // right-drag past the threshold = grab & move (otherwise it stays a menu click);
+      // locked shapes never move — their right-click stays menu-only (the unlock door)
       const d = Math.hypot(e.clientX - rcPending.current.x, e.clientY - rcPending.current.y)
-      if (d > 4) {
+      const grabbed = useStore.getState().chart.shapes.find((s) => s.id === rcPending.current!.id)
+      if (d > 4 && !grabbed?.locked) {
         const p0 = rcPending.current
         rcPending.current = null
         const st0 = useStore.getState()
@@ -1389,6 +1453,11 @@ export function EditorCanvas(): React.JSX.Element {
         const free = it.forceSnap ? false : e.metaKey || e.altKey // Cmd/Opt = no pixel snap
         let dx = raw.x - it.sx
         let dy = raw.y - it.sy
+        // Shift while moving = straight horizontal / vertical slide (PowerPoint style)
+        if (e.shiftKey) {
+          if (Math.abs(dx) >= Math.abs(dy)) dy = 0
+          else dx = 0
+        }
         let gx: number | null = null
         let gy: number | null = null
         if (!free && snapToPixel && it.cand && it.sal) {
@@ -1422,8 +1491,8 @@ export function EditorCanvas(): React.JSX.Element {
           let gx: number | null = null
           let gy: number | null = null
           if (it.cand) {
-            const sx2 = snap1D(cell.x + 0.5, it.cand.xs, tolA, 0, 0, false)
-            const sy2 = snap1D(cell.y + 0.5, it.cand.ys, tolA, 0, 0, false)
+            const sx2 = snap1D(cell.x + 0.5, flatX(it.cand), tolA, 0, 0, false)
+            const sy2 = snap1D(cell.y + 0.5, flatY(it.cand), tolA, 0, 0, false)
             gx = sx2.guide
             gy = sy2.guide
             cell = { x: Math.floor(sx2.v), y: Math.floor(sy2.v) }
@@ -1451,8 +1520,8 @@ export function EditorCanvas(): React.JSX.Element {
         } else if (snapToPixel && !(e.metaKey || e.altKey)) {
           // soft snaps: align to other shapes first, then gently towards H/V/45°
           if (it.cand) {
-            const sx2 = snap1D(cell.x + 0.5, it.cand.xs, tolA, 0, 0, false)
-            const sy2 = snap1D(cell.y + 0.5, it.cand.ys, tolA, 0, 0, false)
+            const sx2 = snap1D(cell.x + 0.5, flatX(it.cand), tolA, 0, 0, false)
+            const sy2 = snap1D(cell.y + 0.5, flatY(it.cand), tolA, 0, 0, false)
             gx = sx2.guide
             gy = sy2.guide
             cell = { x: Math.floor(sx2.v), y: Math.floor(sy2.v) }
@@ -1486,8 +1555,8 @@ export function EditorCanvas(): React.JSX.Element {
         let gx: number | null = null
         let gy: number | null = null
         if (!free && snapToPixel && it.cand) {
-          const sx2 = snap1D(raw.x, it.cand.xs, tolA, 10, 2, true)
-          const sy2 = snap1D(raw.y, it.cand.ys, tolA, 10, 2, true)
+          const sx2 = snap1D(raw.x, flatX(it.cand), tolA, 10, 2, true)
+          const sy2 = snap1D(raw.y, flatY(it.cand), tolA, 10, 2, true)
           np = { x: sx2.v, y: sy2.v }
           gx = sx2.guide
           gy = sy2.guide
@@ -1516,7 +1585,7 @@ export function EditorCanvas(): React.JSX.Element {
         if (it.dir === 'e' || it.dir === 'w') {
           let nx = free ? raw.x : Math.round(raw.x)
           if (!free && snapToPixel && it.cand) {
-            const s2 = snap1D(raw.x, it.cand.xs, tolA, 10, 2, true)
+            const s2 = snap1D(raw.x, flatX(it.cand), tolA, 10, 2, true)
             nx = s2.v
             gx = s2.guide
           }
@@ -1525,7 +1594,7 @@ export function EditorCanvas(): React.JSX.Element {
         } else {
           let ny = free ? raw.y : Math.round(raw.y)
           if (!free && snapToPixel && it.cand) {
-            const s2 = snap1D(raw.y, it.cand.ys, tolA, 10, 2, true)
+            const s2 = snap1D(raw.y, flatY(it.cand), tolA, 10, 2, true)
             ny = s2.v
             gy = s2.guide
           }
@@ -1543,8 +1612,8 @@ export function EditorCanvas(): React.JSX.Element {
         let gx: number | null = null
         let gy: number | null = null
         if (!free && snapToPixel && it.cand) {
-          const sx2 = snap1D(raw.x, it.cand.xs, tolA, 10, 2, true)
-          const sy2 = snap1D(raw.y, it.cand.ys, tolA, 10, 2, true)
+          const sx2 = snap1D(raw.x, flatX(it.cand), tolA, 10, 2, true)
+          const sy2 = snap1D(raw.y, flatY(it.cand), tolA, 10, 2, true)
           np = { x: sx2.v, y: sy2.v }
           gx = sx2.guide
           gy = sy2.guide
@@ -1779,7 +1848,12 @@ export function EditorCanvas(): React.JSX.Element {
         // real geometry test — a hollow L-chain must not be grabbed through the empty
         // interior of its bounding box
         const inIds = chart.shapes
-          .filter((s) => !s.locked && shapeIntersectsRect(s, x0, y0, x1, y1))
+          .filter(
+            (s) =>
+              !s.locked &&
+              (s.layerId ?? chart.layers[0]?.id) === chart.activeLayerId &&
+              shapeIntersectsRect(s, x0, y0, x1, y1)
+          )
           .map((s) => s.id)
         st.selectMany(m.add ? Array.from(new Set([...st.selectedIds, ...inIds])) : inIds)
         st.setPasteMark(null)
@@ -1821,12 +1895,28 @@ export function EditorCanvas(): React.JSX.Element {
   // parts palette drop target: dropping a part stamps it centred on the cell under
   // the cursor (bulb centre = the dropped dot), then hands over to Select for moving
   const onDragOver = (e: React.DragEvent<HTMLCanvasElement>): void => {
-    if (e.dataTransfer.types.includes('application/x-decor-part')) {
+    if (
+      e.dataTransfer.types.includes('application/x-decor-part') ||
+      e.dataTransfer.types.includes('Files')
+    ) {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'copy'
     }
   }
   const onDrop = (e: React.DragEvent<HTMLCanvasElement>): void => {
+    // a chart image dropped mid-edit = a new song page (layer), named after the file
+    const file = Array.from(e.dataTransfer.files ?? []).find((f) => f.type.startsWith('image/'))
+    if (file) {
+      e.preventDefault()
+      void fileToDataUrl(file).then((dataUrl) => {
+        if (!dataUrl) return
+        useStore.getState().addLayer({
+          name: file.name.replace(/\.[^.]+$/, ''),
+          underlay: { dataUrl, opacity: 0.5, visible: true, mask: { enabled: true, invert: false } }
+        })
+      })
+      return
+    }
     const part = e.dataTransfer.getData('application/x-decor-part')
     const PARTS = [
       'bulb',
@@ -2109,16 +2199,26 @@ export function EditorCanvas(): React.JSX.Element {
               </button>
             )
           })()}
-          <button
-            style={menuBtn}
-            onClick={() => {
-              const st = useStore.getState()
-              st.setLocked(st.selectedIds, true)
-              setCtxMenu(null)
-            }}
-          >
-            ロック（キャンバスから掴めなくする・⌘L）
-          </button>
+          {(() => {
+            const lockedCount = chart.shapes.filter(
+              (s) => selectedIds.includes(s.id) && s.locked
+            ).length
+            const unlockMode = lockedCount > 0
+            return (
+              <button
+                style={menuBtn}
+                onClick={() => {
+                  const st = useStore.getState()
+                  st.setLocked(st.selectedIds, !unlockMode)
+                  setCtxMenu(null)
+                }}
+              >
+                {unlockMode
+                  ? `ロック解除（${lockedCount}個）`
+                  : 'ロック（キャンバスから掴めなくする・⌘L）'}
+              </button>
+            )
+          })()}
           <button
             style={{ ...menuBtn, color: '#e0726a' }}
             onClick={() => {

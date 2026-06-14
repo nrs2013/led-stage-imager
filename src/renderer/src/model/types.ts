@@ -29,6 +29,8 @@ export interface Point {
 export interface Shape {
   id: string
   type: ShapeType
+  /** Which layer (song page) owns this shape; absent only mid-migration. */
+  layerId?: string
   points: Point[] // geometry in canvas pixels
   display: DisplayMode
   strokeWidth: number
@@ -95,18 +97,32 @@ export interface Fixture {
   fixedColor?: [number, number, number] // for 'dim' mode (the fixed color the dimmer scales)
 }
 
+export interface Underlay {
+  dataUrl: string
+  opacity: number
+  visible: boolean
+  /** Use the image's alpha as a drawable-area mask (transparent = drawable; invert flips). */
+  mask?: { enabled: boolean; invert: boolean }
+}
+
+/** One song's page: its chart image + the shapes drawn on it. Layers exist for the
+ *  EDITOR only — the live output always renders every layer's shapes (unlit = invisible),
+ *  so the console "calls up" a song simply by raising that song's addresses. */
+export interface Layer {
+  id: string
+  name: string
+  underlay: Underlay | null
+  /** Editor-side visibility (ghosting other songs in/out); never affects the output. */
+  visible: boolean
+}
+
 export interface Chart {
-  version: 1
+  version: 2
   id: string
   name: string
   canvas: { w: number; h: number }
-  underlay: {
-    dataUrl: string
-    opacity: number
-    visible: boolean
-    /** Use the image's alpha as a drawable-area mask (transparent = drawable; invert flips). */
-    mask?: { enabled: boolean; invert: boolean }
-  } | null
+  layers: Layer[]
+  activeLayerId: string
   shapes: Shape[]
   fixtures: Fixture[]
   syphon: { name: string }

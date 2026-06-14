@@ -216,6 +216,14 @@ export function Toolbar({
       <div style={{ flex: 1 }} />
 
       <button
+        style={buttonStyle({})}
+        onClick={() => useStore.getState().setHelpOpen(!useStore.getState().helpOpen)}
+        title="ショートカット・隠し操作の一覧（?キーでも開く）"
+      >
+        Keys
+      </button>
+      <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
+      <button
         style={buttonStyle({ active: testOpen, accent: C.fuchsia, accentRGB: '193,134,200' })}
         onClick={onToggleTest}
       >

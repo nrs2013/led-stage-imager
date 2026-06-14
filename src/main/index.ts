@@ -228,6 +228,24 @@ app.whenReady().then(() => {
     if (res.canceled || res.filePaths.length === 0) return null
     return readFileSync(res.filePaths[0], 'utf8')
   })
+  // Crash net: the editor mirrors its chart here (debounced) so a crash or an
+  // accidental quit never loses the rig — the start screen offers it back as RESUME.
+  const autosavePath = (): string => join(app.getPath('userData'), 'autosave.decor.json')
+  ipcMain.handle('chart:autosave-write', (_e, json: string) => {
+    try {
+      writeFileSync(autosavePath(), json, 'utf8')
+      return true
+    } catch {
+      return false
+    }
+  })
+  ipcMain.handle('chart:autosave-read', () => {
+    try {
+      return readFileSync(autosavePath(), 'utf8')
+    } catch {
+      return null
+    }
+  })
   // MVR export (grandMA3 patch + layout, GDTF embedded)
   ipcMain.handle('mvr:save', async (_e, name: string, data: Uint8Array) => {
     const res = await dialog.showSaveDialog({

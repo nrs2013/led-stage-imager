@@ -5,12 +5,14 @@ export const newId = (prefix = 'id'): string =>
   `${prefix}_${Date.now().toString(36)}_${(counter++).toString(36)}`
 
 export function createChart(canvas: { w: number; h: number }): Chart {
+  const layerId = newId('layer')
   return {
-    version: 1,
+    version: 2,
     id: newId('chart'),
     name: 'Untitled',
     canvas,
-    underlay: null,
+    layers: [{ id: layerId, name: 'CHART 1', underlay: null, visible: true }],
+    activeLayerId: layerId,
     shapes: [],
     fixtures: [],
     syphon: { name: 'LED STAGE IMAGER' },
@@ -26,6 +28,7 @@ export function addShape(
     id: newId('shape'),
     display: 'stroke',
     strokeWidth: 1,
+    layerId: chart.activeLayerId,
     ...init
   } as Shape
   return { ...chart, shapes: [...chart.shapes, shape] }

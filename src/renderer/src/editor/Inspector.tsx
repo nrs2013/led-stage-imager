@@ -716,9 +716,9 @@ export function Inspector(): React.JSX.Element {
       <button
         style={{ ...buttonStyle({ active: !!shape.locked }), width: '100%', marginTop: rowGap }}
         onClick={() => setLocked([shape.id], !shape.locked)}
-        title="ロック中はキャンバスから掴めません。このパネルは下のパッチチップから開けます（⌘Lでも切替）"
+        title="ロック中は左クリックで掴めません。解除はロック品の上で右クリック→ロック解除、下のパッチチップ→このボタン、⌘L"
       >
-        {shape.locked ? '🔒 ロック解除' : 'ロック（キャンバスから掴めなくする）'}
+        {shape.locked ? 'ロック解除' : 'ロック（キャンバスから掴めなくする）'}
       </button>
       <button
         style={{

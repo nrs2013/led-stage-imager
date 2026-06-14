@@ -4,15 +4,18 @@ import { SubBar } from './editor/SubBar'
 import { EditorCanvas } from './editor/EditorCanvas'
 import { Inspector } from './editor/Inspector'
 import { PartsPalette } from './editor/PartsPalette'
+import { LayersPanel } from './editor/LayersPanel'
 import { PatchTable } from './editor/PatchTable'
 import { LiveView } from './output/LiveView'
 import { StatusBar } from './ui/StatusBar'
 import { StartScreen } from './ui/StartScreen'
 import { ManualFaders } from './test/ManualFaders'
 import { ImageLightingMode } from './imagelight/ImageLightingMode'
+import { HelpPanel } from './ui/HelpPanel'
 import { useStore } from './state/store'
 import { useDmxBridge } from './state/dmx-bridge'
 import { useMask } from './state/use-mask'
+import { useAutosave } from './io/autosave'
 import type { Chart } from './model/types'
 import { C } from './ui/tokens'
 
@@ -148,13 +151,16 @@ function EditorApp(): React.JSX.Element {
   const started = useStore((s) => s.started)
   const imageLight = useStore((s) => s.imageLight)
   const setImageLight = useStore((s) => s.setImageLight)
+  const helpOpen = useStore((s) => s.helpOpen)
   const [testOpen, setTestOpen] = useState(false)
   useDmxBridge()
   useMask()
   usePreviewMirror()
   useDropGuard()
   useMenuUndo()
-  // 画像照明モード: エディタ/Liveに代えて全画面表示（自前でSyphonへpublish）
+  useAutosave()
+  // 画像照明モード: エディタ/Liveに代えて全画面表示（自前でSyphonへpublish）。
+  // hooks は全てこの分岐より前で呼ぶこと（条件付きreturnの後にhookは置けない）。
   if (imageLight) return <ImageLightingMode onExit={() => setImageLight(false)} />
   if (mode === 'edit' && !started) {
     return (
@@ -185,6 +191,7 @@ function EditorApp(): React.JSX.Element {
                 borderLeft: `0.5px solid ${C.border}`
               }}
             >
+              <LayersPanel />
               <PartsPalette />
               <Inspector />
             </div>
@@ -206,6 +213,7 @@ function EditorApp(): React.JSX.Element {
       )}
       <StatusBar />
       {testOpen && <ManualFaders onClose={() => setTestOpen(false)} />}
+      {helpOpen && <HelpPanel />}
     </div>
   )
 }

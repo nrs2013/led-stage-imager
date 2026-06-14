@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCandidates, centerCandidates, salientOf, salientOfGroup, snap1D, snapMoveDelta, softAxis } from './snapping'
+import { buildCandidates, buildGapCandidates, centerCandidates, salientOf, salientOfGroup, snap1D, snapMoveDelta, softAxis } from './snapping'
 import type { Shape } from '../model/types'
 
 describe('snap1D', () => {
@@ -49,8 +49,9 @@ describe('centerCandidates: island centres + canvas centre', () => {
       ],
       { w: 1920, h: 1080 }
     )
-    expect(c.xs).toEqual([960, 60, 225])
-    expect(c.ys).toEqual([540, 40, 25.5])
+    expect(c.cxs).toEqual([960, 60, 225])
+    expect(c.cys).toEqual([540, 40, 25.5])
+    expect(c.xs).toEqual([])
   })
 })
 
@@ -67,8 +68,9 @@ describe('salient centres', () => {
       strokeWidth: 1
     } as Shape
     const s = salientOf(sh)
-    expect(s.xs).toContain(20)
-    expect(s.ys).toContain(30)
+    expect(s.cxs).toContain(20)
+    expect(s.cys).toContain(30)
+    expect(s.xs).toEqual([10, 30])
   })
   it('salientOfGroup spans the union bbox with its centre', () => {
     const mk = (x: number, y: number): Shape =>
@@ -81,11 +83,13 @@ describe('salient centres', () => {
         diameter: 10
       }) as Shape
     const g = salientOfGroup([mk(100, 100), mk(200, 100)])
-    expect(g.xs).toEqual([95, 205, 150])
-    expect(g.ys).toEqual([95, 105, 100])
+    expect(g.xs).toEqual([95, 205])
+    expect(g.cxs).toEqual([150])
+    expect(g.ys).toEqual([95, 105])
+    expect(g.cys).toEqual([100])
   })
   it('a group centre lands exactly on an island centre via snapMoveDelta', () => {
-    const sal = { xs: [150], ys: [100] }
+    const sal = { xs: [], ys: [], cxs: [150], cys: [100] }
     const cand = centerCandidates([{ x: 130, y: 80, w: 60, h: 50 }], { w: 1000, h: 1000 })
     const r = snapMoveDelta(8.6, 4.2, sal, cand, 12)
     expect(150 + r.dx).toBe(160)
@@ -124,7 +128,44 @@ describe('parts snap by their centre only', () => {
       diameter: 5.5
     } as Shape
     const s = salientOf(bulb)
-    expect(s.xs).toEqual([100])
-    expect(s.ys).toEqual([100])
+    expect(s.xs).toEqual([])
+    expect(s.cxs).toEqual([100])
+    expect(s.cys).toEqual([100])
+  })
+})
+
+describe('buildGapCandidates: equal-spacing rhythm', () => {
+  const rect = (id: string, x: number, y: number, w: number, h: number): Shape => ({
+    id,
+    type: 'rect',
+    points: [
+      { x, y },
+      { x: x + w, y: y + h }
+    ],
+    display: 'fill',
+    strokeWidth: 1
+  })
+  it('offers the next slot continuing a row (edges and centre pitch)', () => {
+    // A: 0..10, B: 20..30 → gap 10, centre pitch 20 (same y row)
+    const cands = buildGapCandidates([rect('a', 0, 0, 10, 10), rect('b', 20, 0, 10, 10)], null)
+    expect(cands.xs).toContain(40) // mover's left edge right of B with gap 10
+    expect(cands.xs).toContain(-10) // mover's right edge left of A with gap 10
+    expect(cands.cxs).toContain(45) // mover's centre at B.cx + pitch (25 + 20)
+    expect(cands.cxs).toContain(-15) // mover's centre at A.cx - pitch (5 - 20)
+  })
+  it('column pairs feed the y axis', () => {
+    const cands = buildGapCandidates([rect('a', 0, 0, 10, 10), rect('b', 0, 25, 10, 10)], null)
+    expect(cands.ys).toContain(50) // below B with the same 15px gap
+  })
+  it('different rows produce no x rhythm', () => {
+    const cands = buildGapCandidates([rect('a', 0, 0, 10, 10), rect('b', 20, 100, 10, 10)], null)
+    expect(cands.xs).toHaveLength(0)
+  })
+  it('excluded (moving) shapes are not part of the rhythm', () => {
+    const cands = buildGapCandidates(
+      [rect('a', 0, 0, 10, 10), rect('b', 20, 0, 10, 10), rect('m', 40, 0, 10, 10)],
+      'm'
+    )
+    expect(cands.xs).toContain(40)
   })
 })

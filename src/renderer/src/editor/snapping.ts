@@ -1,15 +1,31 @@
 import type { Point, Shape } from '../model/types'
 import { shapeArrayBounds } from './geometry'
 
-/** Alignment candidates: other shapes' bbox edges and (for open shapes) endpoints. */
+/** Alignment candidates, split into two families that never cross-match:
+ *  xs/ys = bbox EDGES, cxs/cys = CENTRES & points (shape centres, line endpoints,
+ *  island middles). A bulb is centre-anchored — letting its centre snap onto some
+ *  box's edge produced off-by-half-a-bulb "almost" alignments, so edges only ever
+ *  match edges and centres only ever match centres. */
 export interface SnapCand {
   xs: number[]
   ys: number[]
+  cxs?: number[]
+  cys?: number[]
+}
+
+/** What the moving shape offers for matching — same two families as SnapCand. */
+export interface Salient {
+  xs: number[]
+  ys: number[]
+  cxs?: number[]
+  cys?: number[]
 }
 
 export function buildCandidates(shapes: Shape[], exclude: string | null | Set<string>): SnapCand {
   const xs: number[] = []
   const ys: number[] = []
+  const cxs: number[] = []
+  const cys: number[] = []
   const skip = (id: string): boolean =>
     typeof exclude === 'string' ? id === exclude : exclude ? exclude.has(id) : false
   for (const sh of shapes) {
@@ -17,6 +33,8 @@ export function buildCandidates(shapes: Shape[], exclude: string | null | Set<st
     const b = shapeArrayBounds(sh)
     xs.push(b.x, b.x + b.w)
     ys.push(b.y, b.y + b.h)
+    cxs.push(b.x + b.w / 2) // centre-to-centre row/column alignment
+    cys.push(b.y + b.h / 2)
     if (
       sh.type === 'line' ||
       sh.type === 'polyline' ||
@@ -26,17 +44,16 @@ export function buildCandidates(shapes: Shape[], exclude: string | null | Set<st
       const a = sh.points[0]
       const z = sh.points[sh.points.length - 1]
       if (a && z) {
-        xs.push(a.x, z.x)
-        ys.push(a.y, z.y)
+        cxs.push(a.x, z.x) // endpoints are points: centre family
+        cys.push(a.y, z.y)
       }
     }
   }
-  return { xs, ys }
+  return { xs, ys, cxs, cys }
 }
 
-/** Salient coordinates of the shape being moved (tested against the candidates).
- *  Includes the bbox CENTRE so a part can land dead-centre on a cutout island. */
-export function salientOf(sh: Shape): { xs: number[]; ys: number[] } {
+/** Salient coordinates of the shape being moved (tested against the candidates). */
+export function salientOf(sh: Shape): Salient {
   const b = shapeArrayBounds(sh)
   // parts (bulb / neon / stage fixtures) are anchored bodies: the CENTRE is their only
   // salient — an edge must not out-compete the centre for island snaps
@@ -48,10 +65,12 @@ export function salientOf(sh: Shape): { xs: number[]; ys: number[] } {
     sh.type === 'patt' ||
     sh.type === 'pixelpatt'
   ) {
-    return { xs: [b.x + b.w / 2], ys: [b.y + b.h / 2] }
+    return { xs: [], ys: [], cxs: [b.x + b.w / 2], cys: [b.y + b.h / 2] }
   }
-  const xs = [b.x, b.x + b.w, b.x + b.w / 2]
-  const ys = [b.y, b.y + b.h, b.y + b.h / 2]
+  const xs = [b.x, b.x + b.w]
+  const ys = [b.y, b.y + b.h]
+  const cxs = [b.x + b.w / 2]
+  const cys = [b.y + b.h / 2]
   if (
     sh.type === 'line' ||
     sh.type === 'polyline' ||
@@ -61,16 +80,16 @@ export function salientOf(sh: Shape): { xs: number[]; ys: number[] } {
     const a = sh.points[0]
     const z = sh.points[sh.points.length - 1]
     if (a && z) {
-      xs.push(a.x, z.x)
-      ys.push(a.y, z.y)
+      cxs.push(a.x, z.x)
+      cys.push(a.y, z.y)
     }
   }
-  return { xs, ys }
+  return { xs, ys, cxs, cys }
 }
 
 /** Salient coordinates of a multi-selection: the GROUP's union bbox edges + centre
  *  (a flock of bulbs centres onto an island as one body). */
-export function salientOfGroup(shapes: Shape[]): { xs: number[]; ys: number[] } {
+export function salientOfGroup(shapes: Shape[]): Salient {
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
@@ -82,10 +101,12 @@ export function salientOfGroup(shapes: Shape[]): { xs: number[]; ys: number[] } 
     maxX = Math.max(maxX, b.x + b.w)
     maxY = Math.max(maxY, b.y + b.h)
   }
-  if (!Number.isFinite(minX)) return { xs: [], ys: [] }
+  if (!Number.isFinite(minX)) return { xs: [], ys: [], cxs: [], cys: [] }
   return {
-    xs: [minX, maxX, (minX + maxX) / 2],
-    ys: [minY, maxY, (minY + maxY) / 2]
+    xs: [minX, maxX],
+    ys: [minY, maxY],
+    cxs: [(minX + maxX) / 2],
+    cys: [(minY + maxY) / 2]
   }
 }
 
@@ -96,13 +117,79 @@ export function centerCandidates(
   regions: { x: number; y: number; w: number; h: number }[],
   canvas: { w: number; h: number }
 ): SnapCand {
-  const xs = [canvas.w / 2]
-  const ys = [canvas.h / 2]
+  const cxs = [canvas.w / 2]
+  const cys = [canvas.h / 2]
   for (const r of regions) {
-    xs.push(r.x + r.w / 2)
-    ys.push(r.y + r.h / 2)
+    cxs.push(r.x + r.w / 2)
+    cys.push(r.y + r.h / 2)
   }
-  return { xs, ys }
+  return { xs: [], ys: [], cxs, cys }
+}
+
+/** Equal-spacing candidates (PowerPoint smart-guide style): for every same-row pair
+ *  A|B (their y-ranges overlap), the mover can sit right of B or left of A with the
+ *  SAME gap. Edge-to-edge gaps land in the edge family; centre-to-centre pitches land
+ *  in the centre family, so a string of bulbs clicks into an even run by its centres. */
+export function buildGapCandidates(
+  shapes: Shape[],
+  exclude: string | null | Set<string>
+): SnapCand {
+  const skip = (id: string): boolean =>
+    typeof exclude === 'string' ? id === exclude : exclude ? exclude.has(id) : false
+  const boxes = shapes.filter((s) => !skip(s.id)).map((s) => shapeArrayBounds(s))
+  const xs: number[] = []
+  const ys: number[] = []
+  const cxs: number[] = []
+  const cys: number[] = []
+  const MAX_GAP = 1200 // ignore far-apart pairs: they are not a visual rhythm
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = 0; j < boxes.length; j++) {
+      if (i === j) continue
+      const a = boxes[i]
+      const b = boxes[j]
+      // same row, a strictly left of b
+      const yOv = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+      if (yOv > 0 && a.x + a.w <= b.x) {
+        const gap = b.x - (a.x + a.w)
+        if (gap <= MAX_GAP) {
+          xs.push(b.x + b.w + gap) // mover's LEFT edge, continuing the row rightward
+          xs.push(a.x - gap) // mover's RIGHT edge, continuing leftward
+        }
+        const pitch = b.x + b.w / 2 - (a.x + a.w / 2)
+        if (pitch <= MAX_GAP * 2) {
+          cxs.push(b.x + b.w / 2 + pitch) // mover's CENTRE (bulbs snap by centre)
+          cxs.push(a.x + a.w / 2 - pitch)
+        }
+      }
+      // same column, a strictly above b
+      const xOv = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+      if (xOv > 0 && a.y + a.h <= b.y) {
+        const gap = b.y - (a.y + a.h)
+        if (gap <= MAX_GAP) {
+          ys.push(b.y + b.h + gap)
+          ys.push(a.y - gap)
+        }
+        const pitch = b.y + b.h / 2 - (a.y + a.h / 2)
+        if (pitch <= MAX_GAP * 2) {
+          cys.push(b.y + b.h / 2 + pitch)
+          cys.push(a.y + a.h / 2 - pitch)
+        }
+      }
+    }
+  }
+  return { xs, ys, cxs, cys }
+}
+
+/** Merge several candidate sets into one. */
+export function mergeCand(...cands: SnapCand[]): SnapCand {
+  const out: Required<SnapCand> = { xs: [], ys: [], cxs: [], cys: [] }
+  for (const c of cands) {
+    out.xs.push(...c.xs)
+    out.ys.push(...c.ys)
+    out.cxs.push(...(c.cxs ?? []))
+    out.cys.push(...(c.cys ?? []))
+  }
+  return out
 }
 
 /** 1D snap: alignment candidate (within tolAlign) > soft grid (within tolGrid) > 1px. */
@@ -132,11 +219,12 @@ export function snap1D(
 }
 
 /** Move delta with alignment: shifts (dx,dy) so a salient coordinate lands exactly on a
- *  candidate when close; otherwise whole-pixel. Returns guide coords when aligned. */
+ *  candidate when close; otherwise whole-pixel. Edge salients only test edge candidates
+ *  and centre salients only test centre candidates — the closer family wins. */
 export function snapMoveDelta(
   dxRaw: number,
   dyRaw: number,
-  sal: { xs: number[]; ys: number[] },
+  sal: Salient,
   cand: SnapCand,
   tolAlign: number
 ): { dx: number; dy: number; gx: number | null; gy: number | null } {
@@ -144,7 +232,7 @@ export function snapMoveDelta(
     delta: number,
     vals: number[],
     cands: number[]
-  ): { d: number; g: number | null } => {
+  ): { d: number; g: number | null; bd: number } => {
     let bestDelta = 0
     let bestC: number | null = null
     let bd = Infinity
@@ -159,10 +247,23 @@ export function snapMoveDelta(
         }
       }
     }
-    return bestC !== null ? { d: bestDelta, g: bestC } : { d: Math.round(delta), g: null }
+    return bestC !== null
+      ? { d: bestDelta, g: bestC, bd }
+      : { d: Math.round(delta), g: null, bd: Infinity }
   }
-  const rx = one(dxRaw, sal.xs, cand.xs)
-  const ry = one(dyRaw, sal.ys, cand.ys)
+  const axis = (
+    delta: number,
+    edgeVals: number[],
+    centreVals: number[],
+    c: SnapCand,
+    isX: boolean
+  ): { d: number; g: number | null } => {
+    const e = one(delta, edgeVals, isX ? c.xs : c.ys)
+    const m = one(delta, centreVals, (isX ? c.cxs : c.cys) ?? [])
+    return m.bd < e.bd ? m : e
+  }
+  const rx = axis(dxRaw, sal.xs, sal.cxs ?? [], cand, true)
+  const ry = axis(dyRaw, sal.ys, sal.cys ?? [], cand, false)
   return { dx: rx.d, dy: ry.d, gx: rx.g, gy: ry.g }
 }
 
