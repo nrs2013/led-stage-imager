@@ -1010,17 +1010,18 @@ export class ImageLightEngine {
     this.pushHistory()
     this.rigCustomized = true // 配置をいじった → 写真下端への自動追従を止める
     const ref = this.refBeam()
+    const beamRef = ref?.motif ? undefined : ref // モチーフ選択中は寸法を引き継がない
     this.beams.push({
       x,
       y,
-      w0: ref?.w0 ?? 40,
-      w1: ref?.w1 ?? 260,
-      len: ref?.len ?? 600,
+      w0: beamRef?.w0 ?? 40,
+      w1: beamRef?.w1 ?? 260,
+      len: beamRef?.len ?? 600,
       pan: 0,
       tilt: 0,
       zoom: 1,
-      gauge: ref?.gauge ?? 0.72,
-      color: (ref?.color.slice() as RGB3) ?? (WHITE.slice() as RGB3),
+      gauge: beamRef?.gauge ?? 0.72,
+      color: (beamRef?.color.slice() as RGB3) ?? (WHITE.slice() as RGB3),
       sp: makeSearchParams(this.rnd)
     })
     this.selected = [this.beams.length - 1]
