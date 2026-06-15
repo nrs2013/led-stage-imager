@@ -727,6 +727,10 @@ export class ImageLightEngine {
     const beams = this.beams
     const Is = beams.map((b, i) => this.effI(b, i, ms))
     const maxI = Is.length ? Math.max(...Is) : 0
+    let maxNonMotifI = 0
+    for (let i = 0; i < beams.length; i++) {
+      if (!beams[i].motif && Is[i] > maxNonMotifI) maxNonMotifI = Is[i]
+    }
     const lc = this.lc
     const wc = this.wc
     const fc = this.fc
@@ -746,8 +750,7 @@ export class ImageLightEngine {
       })
       lc.setTransform(Q, 0, 0, Q, 0, 0)
       beams.forEach((b, i) => {
-        if (b.motif) this.drawMotifLit(lc, b, Is[i], ms)
-        else this.drawWallBeam(lc, b, Is[i], b._tn!)
+        if (!b.motif) this.drawWallBeam(lc, b, Is[i], b._tn!)
       })
       lc.setTransform(1, 0, 0, 1, 0, 0)
       // 縞退治のブラー書き戻し
@@ -825,6 +828,13 @@ export class ImageLightEngine {
     fc.setTransform(1, 0, 0, 1, 0, 0)
     fc.globalCompositeOperation = 'source-over'
     this.drawPiecesOnFrame(fc)
+    // モチーフ描画（街灯・シャンデリア・マーキー等）
+    fc.setTransform(Q, 0, 0, Q, 0, 0)
+    beams.forEach((b, i) => {
+      if (b.motif) this.drawMotifLit(fc, b, Is[i], ms)
+    })
+    fc.setTransform(1, 0, 0, 1, 0, 0)
+    fc.globalCompositeOperation = 'source-over'
     const airA = (this.st.smoke / 30) * 0.42
     if (maxI > 0.004 && airA > 0.01 && this.mat && this.box) {
       const ac = this.ac
