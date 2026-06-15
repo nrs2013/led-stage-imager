@@ -73,6 +73,7 @@ const layoutCache = new Map<string, MarqueeLayout>()
 
 export function clearMarqueeCache(): void {
   layoutCache.clear()
+  bulbsCache.clear()
 }
 
 export function layoutMarquee(
@@ -135,33 +136,63 @@ export function marqueeGlyphCenter(shape: Shape, i: number): { x: number; y: num
 /* ---- every bulb in world coordinates, in order — the single source of truth for
  *      addressing (1 bulb = 1 ch) and for rendering. ---- */
 export interface MarqueeBulb {
-  x: number
+  x: number // world centre
   y: number
-  d: number
+  d: number // drawn diameter
   letter: number
-  index: number
+  index: number // channel index — canonical left→right (then top→bottom) order
+  ox: number // its letter's world origin x
+  baseline: number
+  F: number // em→px scale
+  bx: number // bulb centre in the glyph's em space (for the dye)
+  by: number
+  br: number
+  sil: string // its letter's silhouette path (clips the dye)
 }
+const bulbsCache = new Map<string, MarqueeBulb[]>()
+/** Every bulb, ordered left→right then top→bottom. This order IS the channel order
+ *  (1 bulb = 1 ch), so a desk chase ramping channels ascending sweeps the sign L→R. */
 export function marqueeBulbs(shape: Shape): MarqueeBulb[] {
-  const L = layoutMarquee(shape)
+  const c = shape.points[0] ?? { x: 0, y: 0 }
   const F = marqueeSize(shape)
+  const key = `${F}|${marqueeText(shape)}|${c.x}|${c.y}`
+  const hit = bulbsCache.get(key)
+  if (hit) return hit
+  const L = layoutMarquee(shape)
   const { x0, baseline } = originOf(shape, L)
-  const out: MarqueeBulb[] = []
-  let idx = 0
+  const raw: MarqueeBulb[] = []
   L.glyphs.forEach((gph, li) => {
+    const glyph = glyphOf(gph.ch)
     const ox = x0 + gph.x
-    for (const [bx, by, br] of glyphOf(gph.ch).bulbs) {
-      out.push({
+    for (const [bx, by, br] of glyph.bulbs) {
+      raw.push({
         x: ox + bx * F,
         y: baseline + by * F,
         d: br * 2 * F * BULB_SCALE,
         letter: li,
-        index: idx++
+        index: 0,
+        ox,
+        baseline,
+        F,
+        bx,
+        by,
+        br,
+        sil: glyph.sil
       })
     }
   })
-  return out
+  raw.sort((a, b) => a.x - b.x || a.y - b.y)
+  raw.forEach((b, i) => (b.index = i))
+  if (bulbsCache.size > 100) bulbsCache.clear()
+  bulbsCache.set(key, raw)
+  return raw
 }
-export const marqueeBulbCount = (shape: Shape): number => marqueeBulbs(shape).length
+/** Channel count = total bulbs (1 bulb = 1 DMX ch). Depends only on the text. */
+export function marqueeBulbCount(shape: Pick<Shape, 'text'>): number {
+  let n = 0
+  for (const ch of marqueeChars(marqueeText(shape))) n += glyphOf(ch).bulbs.length
+  return n
+}
 
 /* -------------------------------- colours ----------------------------------- */
 const mix = (a: RGB, b: RGB, t: number): RGB => [
@@ -226,74 +257,83 @@ export function drawMarqueeSchematic(
 
 /* -------------------------------- lit output -------------------------------- */
 
-/** Draw one letter: the dark channel frame (always), then — for each bulb whose gauge
- *  is up — a warm dye pool stained onto the channel face (clipped to the letter) and the
- *  round glass bulb on top (unclipped, blooms outward). `gaugeOf(bulbInLetter)` returns
- *  0..1 per bulb so a chase can light bulbs individually (1 bulb = 1 ch). */
-function litLetter(
+/** The dark channel-letter body (the metal フチ). Drawn ONCE per sign in the output's
+ *  unit pass, BEFORE the per-bulb chase, so it never paints over the lit bulbs. */
+function drawLetterFrame(
   ctx: CanvasRenderingContext2D,
-  shape: Shape,
-  L: MarqueeLayout,
-  instance: number,
-  gaugeOf: (bulbInLetter: number) => number
+  sil: string,
+  ox: number,
+  baseline: number,
+  F: number
 ): void {
-  const g = L.glyphs[instance]
-  if (!g) return
-  const glyph = glyphOf(g.ch)
-  const F = marqueeSize(shape)
-  const { x0, baseline } = originOf(shape, L)
-  const ox = x0 + g.x
-
-  // 1) dark channel frame so the letter reads even when its bulbs are off
-  if (glyph.sil) {
-    ctx.save()
-    ctx.translate(ox, baseline)
-    ctx.scale(F, F)
-    const p = new Path2D(glyph.sil)
-    ctx.fillStyle = rgba(FRAME, 0.92)
-    ctx.fill(p, 'evenodd')
-    ctx.strokeStyle = rgba(mix(FRAME, [0, 0, 0], 0.4), 1)
-    ctx.lineWidth = 1.4 / F
-    ctx.stroke(p)
-    ctx.restore()
-  }
-
-  // 2) reflected dye on the channel face — warm pools at lit bulbs, clipped to the letter
+  if (!sil) return
   ctx.save()
   ctx.translate(ox, baseline)
   ctx.scale(F, F)
-  if (glyph.sil) ctx.clip(new Path2D(glyph.sil), 'evenodd')
-  ctx.globalCompositeOperation = 'lighter'
-  glyph.bulbs.forEach((b, bi) => {
-    const gg = gaugeOf(bi)
-    if (gg <= 0.004) return
-    const [bx, by, br] = b
-    const rr = br * 2.6
-    const grd = ctx.createRadialGradient(bx, by, 0, bx, by, rr)
-    grd.addColorStop(0, rgba(DYE, 0.55 * gg))
-    grd.addColorStop(0.55, rgba(DYE, 0.2 * gg))
-    grd.addColorStop(1, rgba(DYE, 0))
-    ctx.fillStyle = grd
-    ctx.beginPath()
-    ctx.arc(bx, by, rr, 0, Math.PI * 2)
-    ctx.fill()
-  })
+  const p = new Path2D(sil)
+  ctx.fillStyle = rgba(FRAME, 0.92)
+  ctx.fill(p, 'evenodd')
+  ctx.strokeStyle = rgba(mix(FRAME, [0, 0, 0], 0.4), 1)
+  ctx.lineWidth = 1.4 / F
+  ctx.stroke(p)
   ctx.restore()
-
-  // 3) the round glass bulbs — fixed warm colour, brightness = gauge — on top, unclipped
-  glyph.bulbs.forEach((b, bi) => {
-    const gg = gaugeOf(bi)
-    if (gg <= 0.004) return
-    const [bx, by, br] = b
-    const wx = ox + bx * F
-    const wy = baseline + by * F
-    const d = br * 2 * F * BULB_SCALE
-    drawBulbLit(ctx, wx, wy, d, [WARM_BULB[0] * gg, WARM_BULB[1] * gg, WARM_BULB[2] * gg], 'clear', 0.34)
-  })
 }
 
-/** One lit letter (instance = letter index). Per-letter addressing: every bulb in the
- *  letter burns at the console gauge. (Phase 4 swaps to per-bulb via litLetter/marqueeBulbs.) */
+/** One bulb's light: a warm dye pool stained onto its letter (clipped to the silhouette
+ *  so it stays inside the letter = 反射光) plus the round glass bulb on top (unclipped,
+ *  blooms outward = 光源). gauge 0..1 = brightness; the bulb colour is fixed warm. */
+function litBulb(ctx: CanvasRenderingContext2D, b: MarqueeBulb, gauge: number): void {
+  if (gauge <= 0.004) return
+  ctx.save()
+  ctx.translate(b.ox, b.baseline)
+  ctx.scale(b.F, b.F)
+  if (b.sil) ctx.clip(new Path2D(b.sil), 'evenodd')
+  ctx.globalCompositeOperation = 'lighter'
+  const rr = b.br * 2.6
+  const grd = ctx.createRadialGradient(b.bx, b.by, 0, b.bx, b.by, rr)
+  grd.addColorStop(0, rgba(DYE, 0.55 * gauge))
+  grd.addColorStop(0.55, rgba(DYE, 0.2 * gauge))
+  grd.addColorStop(1, rgba(DYE, 0))
+  ctx.fillStyle = grd
+  ctx.beginPath()
+  ctx.arc(b.bx, b.by, rr, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+  drawBulbLit(
+    ctx,
+    b.x,
+    b.y,
+    b.d,
+    [WARM_BULB[0] * gauge, WARM_BULB[1] * gauge, WARM_BULB[2] * gauge],
+    'clear',
+    0.34
+  )
+}
+
+/** The dark sign body (all letter frames). Output unit pass draws this once per sign. */
+export function drawMarqueeFrame(ctx: CanvasRenderingContext2D, shape: Shape): void {
+  if (!shape.points[0]) return
+  const L = layoutMarquee(shape)
+  const F = marqueeSize(shape)
+  const { x0, baseline } = originOf(shape, L)
+  for (const g of L.glyphs) drawLetterFrame(ctx, glyphOf(g.ch).sil, x0 + g.x, baseline, F)
+}
+
+/** Output: light ONLY bulb #globalBulbIndex (1 bulb = 1 ch). Brightness from the console
+ *  gauge; colour is the fixed warm bulb. Frame comes separately from drawMarqueeFrame. */
+export function drawMarqueeBulbLit(
+  ctx: CanvasRenderingContext2D,
+  shape: Shape,
+  rgb: RGB,
+  globalBulbIndex: number
+): void {
+  const { intensity: I } = bulbHueIntensity(rgb)
+  if (I <= 0.004) return
+  const b = marqueeBulbs(shape)[globalBulbIndex]
+  if (b) litBulb(ctx, b, I)
+}
+
+/** Per-letter (palette thumbnail): every bulb of letter `instance` at the console gauge. */
 export function drawMarqueeGlyphLit(
   ctx: CanvasRenderingContext2D,
   shape: Shape,
@@ -301,26 +341,23 @@ export function drawMarqueeGlyphLit(
   instance: number
 ): void {
   const L = layoutMarquee(shape)
-  if (!L.glyphs[instance] || !shape.points[0]) return
+  const g = L.glyphs[instance]
+  if (!g || !shape.points[0]) return
+  const F = marqueeSize(shape)
+  const { x0, baseline } = originOf(shape, L)
+  drawLetterFrame(ctx, glyphOf(g.ch).sil, x0 + g.x, baseline, F)
   const { intensity: I } = bulbHueIntensity(rgb)
-  litLetter(ctx, shape, L, instance, () => I)
+  if (I <= 0.004) return
+  for (const b of marqueeBulbs(shape)) if (b.letter === instance) litBulb(ctx, b, I)
 }
 
-/** Per-bulb render (1 bulb = 1 ch). `gaugeAt(globalBulbIndex)` → 0..1 brightness for the
- *  bulb at that global index (same order as marqueeBulbs). Used by the output once every
- *  bulb has its own address; a chase lights bulbs individually and the dye flows with them. */
+/** Whole sign from a per-bulb gauge (frame + every bulb). For previews/tools. */
 export function drawMarqueeLit(
   ctx: CanvasRenderingContext2D,
   shape: Shape,
   gaugeAt: (globalBulbIndex: number) => number
 ): void {
   if (!shape.points[0]) return
-  const L = layoutMarquee(shape)
-  let base = 0
-  L.glyphs.forEach((gph, li) => {
-    const count = glyphOf(gph.ch).bulbs.length
-    const start = base
-    litLetter(ctx, shape, L, li, (bi) => gaugeAt(start + bi))
-    base += count
-  })
+  drawMarqueeFrame(ctx, shape)
+  for (const b of marqueeBulbs(shape)) litBulb(ctx, b, gaugeAt(b.index))
 }

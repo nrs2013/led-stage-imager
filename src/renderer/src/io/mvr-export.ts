@@ -2,7 +2,7 @@ import JSZip from 'jszip'
 import type { Chart, Fixture, Shape } from '../model/types'
 import { addressAt, repeatCount } from '../dmx/address'
 import { neonGlyphCenter } from '../render/neon'
-import { marqueeGlyphCenter } from '../render/marquee'
+import { marqueeBulbs } from '../render/marquee'
 import { festoonBulbs } from '../render/festoon'
 import { blinderCells, pixelPattCells } from '../render/fixtures'
 
@@ -123,7 +123,7 @@ export function patchRows(chart: Chart): MvrFixtureRow[] {
       // festoon: each bulb at its true spot on the sagging wire
       const pos =
         sh.type === 'marquee'
-          ? marqueeGlyphCenter(sh, i)
+          ? (marqueeBulbs(sh)[i] ?? p0)
           : sh.type === 'neon'
           ? neonGlyphCenter(sh, i)
           : sh.type === 'stars'

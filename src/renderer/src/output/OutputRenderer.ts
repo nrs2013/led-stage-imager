@@ -19,7 +19,7 @@ import {
 } from '../editor/geometry'
 import { drawBulbLit, BULB_DEFAULT_STYLE } from '../render/bulb'
 import { drawNeonGlyphLit } from '../render/neon'
-import { drawMarqueeGlyphLit } from '../render/marquee'
+import { drawMarqueeBulbLit, drawMarqueeFrame } from '../render/marquee'
 import { drawStarsLit } from '../render/stars'
 import { drawFestoonBulbLit, drawFestoonWireLit } from '../render/festoon'
 import {
@@ -115,12 +115,19 @@ export class OutputRenderer {
       // REFLECTION of all their cells at once, so they draw once per unit with every
       // colour known (all-off units draw nothing — the dark stays dark)
       let unitRgbs: RGB[] | null = null
-      if (shape.type === 'pixelpatt' || shape.type === 'festoon' || shape.type === 'blinder') {
+      if (
+        shape.type === 'pixelpatt' ||
+        shape.type === 'festoon' ||
+        shape.type === 'blinder' ||
+        shape.type === 'marquee'
+      ) {
         unitRgbs = []
         for (let i = 0; i < reps; i++) unitRgbs.push(resolve(i))
         if (shape.type === 'pixelpatt') drawPixelPattFrame(this.ctx, shape, unitRgbs)
         else if (shape.type === 'festoon') drawFestoonWireLit(this.ctx, shape, unitRgbs)
-        else drawBlinderHousing(this.ctx, shape, unitRgbs)
+        else if (shape.type === 'blinder') drawBlinderHousing(this.ctx, shape, unitRgbs)
+        // marquee: the dark sign body, drawn once, but only while a bulb is lit (else dark)
+        else if (unitRgbs.some((c) => c[0] || c[1] || c[2])) drawMarqueeFrame(this.ctx, shape)
       }
       for (let i = 0; i < reps; i++) {
         const rgb = unitRgbs ? unitRgbs[i] : resolve(i)
@@ -331,10 +338,10 @@ export class OutputRenderer {
       ctx.restore()
       return
     }
-    // marquee lights: instance i lights ONLY letter #i (its bulbs in the console
-    // colour) — per-letter chase, same addressing as neon
+    // marquee lights: instance i lights ONLY bulb #i (fixed warm colour, console
+    // gauge = brightness) — 1 bulb = 1 ch, the chase flows L→R; frame drawn in unit pass
     if (shape.type === 'marquee') {
-      drawMarqueeGlyphLit(ctx, shape, rgb, rep)
+      drawMarqueeBulbLit(ctx, shape, rgb, rep)
       ctx.restore()
       return
     }
