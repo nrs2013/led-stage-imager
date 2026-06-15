@@ -99,6 +99,7 @@ export interface Beam {
   motifText?: string
   motifLetterColors?: string[]
   motifSpeed?: number
+  motifReverse?: boolean // マーキー逆方向チェイス
 }
 
 /** シーンに保存されるFXの点き具合（master/smoke は含めない＝呼び出しても親フェーダーは動かない）。 */
@@ -694,7 +695,8 @@ export class ImageLightEngine {
       const n = marqueeBulbCount(shape)
       if (n <= 0) return
       const speed = b.motifSpeed ?? 8
-      const head = ((ms / 1000) * speed) % n
+      const raw = ((ms / 1000) * speed) % n
+      const head = b.motifReverse ? (n - raw) % n : raw
       const win = Math.max(2, n * 0.25)
       drawMarqueeLit(g, shape, (i) => {
         const dist = (i - head + n) % n
@@ -1077,8 +1079,14 @@ export class ImageLightEngine {
     if (x > 1480) x = 140 + ((this.beams.length * 137) % 1200)
     this.addFixtureAt(x, 840)
   }
-  addMotifAt(x: number, y: number, type: 'streetlamp' | 'chandelier' | 'marquee' | 'bulb' | 'parlight' | 'patt' | 'blinder' | 'pixelpatt'): void {
+  addMotifAuto(type: 'streetlamp' | 'chandelier' | 'marquee' | 'bulb' | 'parlight' | 'patt' | 'blinder' | 'pixelpatt'): void {
     if (this.beams.length >= MAX_BEAMS) return
+    // 同種モチーフの最後の位置から右にずらす、なければ中央上寄りに配置
+    const same = this.beams.filter((b) => b.motif === type)
+    const last = same[same.length - 1]
+    let x = last ? last.x + 220 : 800
+    let y = last ? last.y : 380
+    if (x > 1460) { x = 200 + ((same.length * 180) % 1200); y += 180 }
     this.pushHistory()
     this.rigCustomized = true
     const warm: RGB3 = [255, 190, 100]
@@ -1113,6 +1121,31 @@ export class ImageLightEngine {
   setMotifSpeed(v: number): void {
     const n = Math.max(0.5, v)
     this.targets().forEach((b) => { b.motifSpeed = n })
+    this.bump()
+  }
+  setMotifReverse(v: boolean): void {
+    this.targets().forEach((b) => { b.motifReverse = v })
+    this.bump()
+  }
+  /** 特定ビームの gauge を直接設定（PLAY モードのモチーフ個別スライダー用）。 */
+  setBeamGauge(idx: number, v: number): void {
+    const b = this.beams[idx]
+    if (!b) return
+    b.gauge = Math.max(0, Math.min(1, v))
+    this.bump()
+  }
+  /** 背景写真なしで使える空シーンを追加。モチーフだけ使いたい場合に。 */
+  addEmptyScene(): void {
+    const mat = document.createElement('canvas')
+    mat.width = 16; mat.height = 9
+    const thumb = document.createElement('canvas')
+    thumb.width = 96; thumb.height = 54
+    const tc = thumb.getContext('2d')!
+    tc.fillStyle = '#111'
+    tc.fillRect(0, 0, 96, 54)
+    this.pushHistory()
+    this.scenes.push({ name: '空の背景', kind: 'photo', mat, thumb })
+    this.selectScene(this.scenes.length - 1)
     this.bump()
   }
   /** ドラッグ移動: 選択中の灯体すべてを (dx,dy) 動かす。 */

@@ -436,13 +436,17 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       }
     }
     // ヒットは「手前に見えている方」から探す（描画は配列の後ろが手前）。
+    // モチーフは見た目に合わせてヒット半径を motifDiam/2 に拡大。
     // さらに、いま選択中の灯体を最優先＝コピー直後の群を確実につかめる。
+    const hitR = (b: typeof beams[0]) => b.motif ? Math.max(30, (b.motifDiam ?? 200) / 2) : 30
+    const hitRY = (b: typeof beams[0]) => b.motif ? Math.max(24, (b.motifDiam ?? 200) / 2) : 24
     let hit = -1
     for (let i = beams.length - 1; i >= 0; i--) {
+      const b = beams[i]
       if (
         engine.isSelected(i) &&
-        Math.abs(p.x - beams[i].x) < 30 &&
-        Math.abs(p.y - beams[i].y) < 24
+        Math.abs(p.x - b.x) < hitR(b) &&
+        Math.abs(p.y - b.y) < hitRY(b)
       ) {
         hit = i
         break
@@ -450,7 +454,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     }
     if (hit < 0)
       for (let i = beams.length - 1; i >= 0; i--) {
-        if (Math.abs(p.x - beams[i].x) < 30 && Math.abs(p.y - beams[i].y) < 24) {
+        const b = beams[i]
+        if (Math.abs(p.x - b.x) < hitR(b) && Math.abs(p.y - b.y) < hitRY(b)) {
           hit = i
           break
         }
@@ -687,11 +692,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             onPointerUp={onStageUp}
           />
           {engine.scenes.length === 0 && (
-            <div className="il-empty" onClick={() => fileInputRef.current?.click()}>
-              <div className="il-empty-big">＋ 写真／動画をドロップ</div>
+            <div className="il-empty">
+              <div className="il-empty-big" onClick={() => fileInputRef.current?.click()}>＋ 写真／動画をドロップ</div>
               <div className="il-empty-sub">
                 セット写真やループ動画を読み込むと、ここで灯体が照らします（クリックでも選べます）
               </div>
+              <button className="il-mini" style={{ marginTop: 8 }} onClick={() => engine.addEmptyScene()}>
+                空の背景を追加（モチーフだけ使う）
+              </button>
             </div>
           )}
           {uiMode === 'build' && (
@@ -866,6 +874,42 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <br />
               写真は下の棚をクリック。明かりはシーンを押すだけ。
             </div>
+            {engine.beams.some((b) => b.motif) && (
+              <>
+                <hr />
+                <div className="il-lbl">MOTIF<em>— 個別調整（ゲージ・ミュート）</em></div>
+                {engine.beams.map((b, i) => {
+                  if (!b.motif) return null
+                  const label: Record<string, string> = {
+                    streetlamp: '街灯', chandelier: 'シャンデリア', marquee: 'マーキー',
+                    bulb: 'ボール球', parlight: 'PAR', blinder: 'ミニブル', patt: 'PAT', pixelpatt: 'PixelPAT'
+                  }
+                  return (
+                    <div key={i} className="il-frow" style={{ gap: 4, marginBottom: 3 }}>
+                      <span style={{ width: 64, fontSize: 11, color: 'var(--il-txt)', flexShrink: 0 }}>
+                        {label[b.motif] ?? b.motif}
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={Math.round(b.gauge * 100)}
+                        style={{ flex: 1 }}
+                        onChange={(e) => engine.setBeamGauge(i, +e.target.value / 100)}
+                      />
+                      <div className="il-val small">{Math.round(b.gauge * 100)}%</div>
+                      <button
+                        className={'il-mini' + (b.mute ? ' learnon' : '')}
+                        style={{ padding: '1px 5px', fontSize: 10 }}
+                        onClick={() => engine.toggleMute(i)}
+                      >
+                        {b.mute ? 'OFF' : 'ON'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </>
+            )}
           </aside>
         ) : (
           // ===================== 明かり作り BUILD =====================
@@ -1123,7 +1167,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   key={type}
                   className="il-mini"
                   disabled={engine.beams.length >= MAX_BEAMS}
-                  onClick={() => engine.addMotifAt(800, 540, type)}
+                  onClick={() => engine.addMotifAuto(type)}
                 >
                   {label}
                 </button>
@@ -1171,8 +1215,21 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       />
                       <div className="il-val big">{Math.round(ref.motifSpeed ?? 8)}</div>
                     </div>
+                    <div className="il-frow" style={{ gap: 6 }}>
+                      <button
+                        className={'il-mini' + (ref.motifReverse ? ' learnon' : '')}
+                        onClick={() => engine.setMotifReverse(!ref.motifReverse)}
+                      >
+                        {ref.motifReverse ? '← 逆方向' : '→ 正方向'}
+                      </button>
+                    </div>
                   </>
                 )}
+                <div className="il-frow" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
+                  <button className="il-mini" onClick={() => engine.removeSelected()}>
+                    削除（Del）
+                  </button>
+                </div>
               </>
             )}
 
