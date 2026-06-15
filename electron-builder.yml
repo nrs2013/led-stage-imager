@@ -24,6 +24,9 @@ asarUnpack:
   - '**/node_modules/node-syphon/**'
 win:
   executableName: decor-studio
+  files:
+    # node-syphon は Mac 専用。Windows パッケージには含めない。
+    - '!**/node_modules/node-syphon/**'
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

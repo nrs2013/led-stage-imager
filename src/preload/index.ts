@@ -23,7 +23,8 @@ const api = {
   listInterfaces: (): Promise<{ name: string; address: string }[]> =>
     ipcRenderer.invoke('net:interfaces'),
   setBind: (ip: string): Promise<boolean> => ipcRenderer.invoke('net:bind', ip),
-  getStatus: (): Promise<{ hasClients: boolean }> => ipcRenderer.invoke('engine:status'),
+  getStatus: (): Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }> =>
+    ipcRenderer.invoke('engine:status'),
   // Edit menu (Cmd+Z/C/V routed from the app menu so the canvas gets them)
   onEditUndo: (cb: () => void): void => {
     ipcRenderer.on('edit:undo', () => cb())

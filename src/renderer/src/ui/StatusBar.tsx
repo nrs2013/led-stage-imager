@@ -5,7 +5,7 @@ import { C, F } from '../ui/tokens'
 interface NetApi {
   listInterfaces?: () => Promise<{ name: string; address: string }[]>
   setBind?: (ip: string) => Promise<boolean>
-  getStatus?: () => Promise<{ hasClients: boolean }>
+  getStatus?: () => Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }>
 }
 const netApi = (): NetApi | undefined => (window as unknown as { api?: NetApi }).api
 
@@ -15,6 +15,8 @@ export function StatusBar(): React.JSX.Element {
   const [nics, setNics] = useState<{ name: string; address: string }[]>([])
   const [nic, setNic] = useState('0.0.0.0')
   const [syphon, setSyphon] = useState(false)
+  const [platform, setPlatform] = useState<string>('darwin')
+  const [syphonAvailable, setSyphonAvailable] = useState(true)
 
   useEffect(() => {
     netApi()
@@ -25,7 +27,11 @@ export function StatusBar(): React.JSX.Element {
     const poll = setInterval(() => {
       netApi()
         ?.getStatus?.()
-        .then((r) => setSyphon(r.hasClients))
+        .then((r) => {
+          setSyphon(r.hasClients)
+          setSyphonAvailable(r.syphonAvailable)
+          setPlatform(r.platform)
+        })
         .catch(() => {})
     }, 1000)
     return () => {
@@ -57,15 +63,21 @@ export function StatusBar(): React.JSX.Element {
       )}
 
       <div style={sep} />
-      <span
-        style={{
-          ...chip,
-          color: syphon ? C.green : C.faint,
-          borderColor: syphon ? C.green : C.border
-        }}
-      >
-        Syphon Out {syphon ? '● Linked' : '○ —'}
-      </span>
+      {syphonAvailable ? (
+        <span
+          style={{
+            ...chip,
+            color: syphon ? C.green : C.faint,
+            borderColor: syphon ? C.green : C.border
+          }}
+        >
+          Syphon Out {syphon ? '● Linked' : '○ —'}
+        </span>
+      ) : (
+        <span style={{ ...chip, color: C.faint, borderColor: C.border }}>
+          {platform === 'win32' ? 'Spout Out ○ 準備中' : 'Output ○ —'}
+        </span>
+      )}
 
       <div style={{ flex: 1 }} />
 

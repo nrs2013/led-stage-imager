@@ -208,7 +208,11 @@ app.whenReady().then(() => {
     receiver.start(ip || '0.0.0.0')
     return true
   })
-  ipcMain.handle('engine:status', () => ({ hasClients: publisher.hasClients }))
+  ipcMain.handle('engine:status', () => ({
+    hasClients: publisher.hasClients,
+    syphonAvailable: publisher.available,
+    platform: process.platform
+  }))
 
   // Chart save / open + Syphon source rename.
   ipcMain.handle('chart:save', async (_e, json: string, name: string) => {
