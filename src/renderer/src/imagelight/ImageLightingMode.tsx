@@ -1106,17 +1106,26 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 
             <div className="il-lbl">
               MOTIF — モチーフを置く
-              <em>— 街灯・シャンデリア・マーキーを追加（⌘＋ドラッグで移動）</em>
+              <em>— 電飾・照明オブジェクトを追加（⌘＋ドラッグで移動）</em>
             </div>
             <div className="il-frow" style={{ gap: 4, flexWrap: 'wrap' }}>
-              {(['streetlamp', 'chandelier', 'marquee'] as const).map((type) => (
+              {([
+                { type: 'streetlamp' as const, label: '街灯' },
+                { type: 'chandelier' as const, label: 'シャンデリア' },
+                { type: 'marquee' as const, label: 'マーキー' },
+                { type: 'bulb' as const, label: 'ボール球' },
+                { type: 'parlight' as const, label: 'PAR' },
+                { type: 'blinder' as const, label: 'ミニブル' },
+                { type: 'patt' as const, label: 'PAT' },
+                { type: 'pixelpatt' as const, label: 'PixelPAT' },
+              ]).map(({ type, label }) => (
                 <button
                   key={type}
                   className="il-mini"
                   disabled={engine.beams.length >= MAX_BEAMS}
                   onClick={() => engine.addMotifAt(800, 540, type)}
                 >
-                  {type === 'streetlamp' ? '街灯' : type === 'chandelier' ? 'シャンデリア' : 'マーキー'}
+                  {label}
                 </button>
               ))}
             </div>

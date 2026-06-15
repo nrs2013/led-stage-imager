@@ -28,6 +28,15 @@ import { alignSnap, equalSnapX, type Pt } from './snap'
 import { drawStreetLampLit } from '../render/streetlamp'
 import { drawChandelierLit } from '../render/chandelier'
 import { drawMarqueeLit, marqueeBulbCount } from '../render/marquee'
+import { drawBulbLit } from '../render/bulb'
+import {
+  drawParLit,
+  drawPattLit,
+  drawBlinderCellLit,
+  drawBlinderHousing,
+  drawPixelPattCellLit,
+  drawPixelPattFrame
+} from '../render/fixtures'
 import type { Shape } from '../model/types'
 
 /** 写真×光の合成方式。
@@ -84,8 +93,8 @@ export interface Beam {
   _tn?: number
   _cn?: RGB3
   _zp?: number
-  // モチーフ（街灯・シャンデリア・マーキー）
-  motif?: 'streetlamp' | 'chandelier' | 'marquee'
+  // モチーフ（街灯・シャンデリア・マーキー・電球・PAR・PAT・ミニブル・ピクセルPAT）
+  motif?: 'streetlamp' | 'chandelier' | 'marquee' | 'bulb' | 'parlight' | 'patt' | 'blinder' | 'pixelpatt'
   motifDiam?: number
   motifText?: string
   motifLetterColors?: string[]
@@ -691,6 +700,20 @@ export class ImageLightEngine {
         const dist = (i - head + n) % n
         return Math.max(0, 1 - dist / win) * I
       })
+    } else if (b.motif === 'bulb') {
+      drawBulbLit(g, b.x, b.y, d, rgb, 'clear')
+    } else if (b.motif === 'parlight') {
+      drawParLit(g, b.x, b.y, d, rgb)
+    } else if (b.motif === 'patt') {
+      drawPattLit(g, b.x, b.y, d, rgb)
+    } else if (b.motif === 'blinder') {
+      const shape = { points: [{ x: b.x, y: b.y }], diameter: d } as unknown as Shape
+      for (let i = 0; i < 8; i++) drawBlinderCellLit(g, shape, rgb, i)
+      drawBlinderHousing(g, shape, Array(8).fill(rgb))
+    } else if (b.motif === 'pixelpatt') {
+      const shape = { points: [{ x: b.x, y: b.y }], diameter: d } as unknown as Shape
+      for (let i = 0; i < 7; i++) drawPixelPattCellLit(g, shape, rgb, i)
+      drawPixelPattFrame(g, shape, Array(7).fill(rgb))
     }
   }
 
@@ -1034,7 +1057,7 @@ export class ImageLightEngine {
     if (x > 1480) x = 140 + ((this.beams.length * 137) % 1200)
     this.addFixtureAt(x, 840)
   }
-  addMotifAt(x: number, y: number, type: 'streetlamp' | 'chandelier' | 'marquee'): void {
+  addMotifAt(x: number, y: number, type: 'streetlamp' | 'chandelier' | 'marquee' | 'bulb' | 'parlight' | 'patt' | 'blinder' | 'pixelpatt'): void {
     if (this.beams.length >= MAX_BEAMS) return
     this.pushHistory()
     this.rigCustomized = true
@@ -1052,7 +1075,7 @@ export class ImageLightEngine {
       color: warm,
       sp: makeSearchParams(this.rnd),
       motif: type,
-      motifDiam: type === 'marquee' ? 260 : 200,
+      motifDiam: type === 'marquee' ? 260 : type === 'bulb' ? 150 : type === 'patt' ? 300 : type === 'pixelpatt' ? 300 : 200,
       ...(type === 'marquee' ? { motifText: 'LIVE', motifSpeed: 8 } : {})
     })
     this.selected = [this.beams.length - 1]
