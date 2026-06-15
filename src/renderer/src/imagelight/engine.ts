@@ -265,9 +265,12 @@ function mk(w: number, h: number, readback = false): HTMLCanvasElement {
   return c
 }
 
-/** 写真アルベド(mat)の作業解像度上限。出力は1920×1080固定なので原寸を抱えるのは
- *  ただのメモリ浪費（シーンを積むとOOM）。長辺をここまで縮小して持つ。動画は1280px。 */
-export const ALBEDO_MAX = 2560
+/** 写真アルベド(mat)の作業解像度上限。Syphon 出力(outCv)はこの mat 解像度で
+ *  アリーナへ送る（編集画面のフレームは別途 1920×1080 固定なので編集は軽いまま）。
+ *  長辺をここまで縮小して持つ＝これより大きい画像だけ縮む（拡大はしない）。動画は1280px。
+ *  4K(3840) 出力可。これ以上は OUT_CAP も一緒に上げる必要あり。シーンを大量に積むと
+ *  1シーンあたり最大 約33MB(3840×2160×4) になる点に注意。 */
+export const ALBEDO_MAX = 3840
 
 /** Cap a photo's albedo working size to ALBEDO_MAX on its longest side (aspect kept,
  *  never upscales). Pure — unit-tested. */
@@ -550,9 +553,16 @@ export class ImageLightEngine {
     this.activeScene >= 0 && this.scenes[this.activeScene]?.kind === 'video'
   /** ESCパニックのフェード進行中フラグ。 */
   fading = false
+  /** モチーフ専用チェイス（テスト用＝モチーフだけを順番に点けたり消したり）。 */
+  motifChase = false
   /** 毎フレーム描き直しが必要か（FX中・動画・パニックフェード中）。これが false かつ
    *  状態変化も無ければ、描画ループは1フレーム描いて止まってよい＝静止画は無負荷。 */
-  isAnimating = (): boolean => this.anyFx() || this.activeIsVideo() || this.fading
+  isAnimating = (): boolean =>
+    this.anyFx() ||
+    this.activeIsVideo() ||
+    this.fading ||
+    this.motifChase ||
+    this.beams.some((b) => b.motif === 'marquee')
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
 
@@ -567,6 +577,13 @@ export class ImageLightEngine {
     if (s.bolt) v *= boltK(this.fxp.bolt, ms)
     if (s.strobe === 'all') v *= strobeAllK(this.fxp.strobe, ms)
     else if (s.strobe === 'rnd') v *= strobeRndK(this.fxp.rndstrobe, ms, i)
+    // モチーフ専用チェイス：モチーフだけを「モチーフ内の並び順」で順番に点滅
+    // （通常灯体が間に挟まっても等間隔になるよう、モチーフ内の順位で位相をずらす）。
+    if (b.motif && this.motifChase) {
+      let rank = 0
+      for (let j = 0; j < i; j++) if (this.beams[j].motif) rank++
+      v *= chaseK(this.fxp.chase, ms, rank)
+    }
     return v
   }
   /** カラフルチェイスで実際に流す色並び（自前パレットが空なら固定8色ぜんぶ）。 */
@@ -890,6 +907,28 @@ export class ImageLightEngine {
 
     // ---- Syphon出力: 写真の部分だけを写真の解像度で（余白なし・写真フル解像度）
     this.composeOutput(maxI)
+    // 出力(outCv)にもモチーフを乗せる＝編集画面と同じ絵を Resolume へ送る
+    // （composeOutput は写真＋光だけ。モチーフはここで box→出力の写像で重ねる）。
+    this.drawMotifsOnOutput(beams, Is, ms)
+  }
+
+  /** 出力(outCv)にモチーフを重ねる。outCv は box 領域を出力解像度に伸ばしたものなので、
+   *  ステージ座標(LW×LH) → 出力座標へ写像してから drawMotifLit を呼ぶ（位置・大きさが
+   *  写真上の見え方と一致）。空シーンは warpBox=全ステージなので全モチーフが入る。 */
+  private drawMotifsOnOutput(beams: Beam[], Is: number[], ms: number): void {
+    if (this.lightOnly || !this.box || this.outW <= 16) return
+    if (!beams.some((b) => b.motif)) return
+    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const box = this.box
+    const sx = this.outW / box.w
+    const sy = this.outH / box.h
+    oc.setTransform(sx, 0, 0, sy, -box.x * sx, -box.y * sy)
+    oc.globalCompositeOperation = 'source-over'
+    beams.forEach((b, i) => {
+      if (b.motif) this.drawMotifLit(oc, b, Is[i], ms)
+    })
+    oc.setTransform(1, 0, 0, 1, 0, 0)
+    oc.globalCompositeOperation = 'source-over'
   }
 
   /** 出力(outCv)を「写真の部分だけ・写真の解像度・余白なし」で合成する。写真(mat)はフル解像度、
@@ -1107,14 +1146,22 @@ export class ImageLightEngine {
       color: warm,
       sp: makeSearchParams(this.rnd),
       motif: type,
-      motifDiam: type === 'marquee' ? 260 : type === 'bulb' ? 150 : type === 'patt' ? 300 : type === 'pixelpatt' ? 300 : 200,
+      motifDiam:
+        type === 'streetlamp' ? 160 :  // 4m
+        type === 'chandelier' ? 48 :   // 1.2m
+        type === 'marquee' ? 72 :      // 1.8m
+        type === 'blinder' ? 20 :      // 50cm
+        type === 'parlight' ? 8 :      // 20cm
+        type === 'bulb' ? 6 :          // 15cm
+        type === 'patt' ? 20 :         // 50cm
+        type === 'pixelpatt' ? 28 : 200, // 70cm
       ...(type === 'marquee' ? { motifText: 'LIVE', motifSpeed: 8 } : {})
     })
     this.selected = [this.beams.length - 1]
     this.bump()
   }
   setMotifDiam(v: number): void {
-    const n = Math.max(40, Math.round(v))
+    const n = Math.max(4, Math.round(v))
     this.targets().forEach((b) => { b.motifDiam = n })
     this.bump()
   }
@@ -1131,6 +1178,12 @@ export class ImageLightEngine {
     this.targets().forEach((b) => { b.motifReverse = v })
     this.bump()
   }
+  /** モチーフ専用チェイスの ON/OFF（テスト用）。速さ・柔らかさは CHASE のツマミと共用。 */
+  setMotifChase(on: boolean): void {
+    this.motifChase = on
+    if (on) this.t0 = performance.now() // 押した瞬間から流し始める
+    this.bump()
+  }
   /** 特定ビームの gauge を直接設定（PLAY モードのモチーフ個別スライダー用）。 */
   setBeamGauge(idx: number, v: number): void {
     const b = this.beams[idx]
@@ -1138,17 +1191,25 @@ export class ImageLightEngine {
     b.gauge = Math.max(0, Math.min(1, v))
     this.bump()
   }
-  /** 背景写真なしで使える空シーンを追加。モチーフだけ使いたい場合に。 */
+  /** 背景写真なしで使える空シーンを追加。モチーフだけ使いたい場合に。
+   *  mat は「全画面・透明」＝出力(outCv)は IW×IH の透明地にモチーフだけが乗る。
+   *  warpBox を全ステージにして、ステージのどこに置いたモチーフも出力に入るようにする。 */
   addEmptyScene(): void {
     const mat = document.createElement('canvas')
-    mat.width = 16; mat.height = 9
+    mat.width = IW; mat.height = IH // 透明のまま（塗らない）＝出力は透明地
     const thumb = document.createElement('canvas')
     thumb.width = 96; thumb.height = 54
     const tc = thumb.getContext('2d')!
     tc.fillStyle = '#111'
     tc.fillRect(0, 0, 96, 54)
     this.pushHistory()
-    this.scenes.push({ name: '空の背景', kind: 'photo', mat, thumb })
+    this.scenes.push({
+      name: '空の背景',
+      kind: 'photo',
+      mat,
+      thumb,
+      warpBox: { x: 0, y: 0, w: LW, h: LH }
+    })
     this.selectScene(this.scenes.length - 1)
     this.bump()
   }

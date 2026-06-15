@@ -7,6 +7,7 @@ import { useStore } from '../state/store'
 
 interface DecorApi {
   publishFrame?: (width: number, height: number, buffer: Uint8ClampedArray) => void
+  getStatus?: () => Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }>
   saveImageLightShow?: (
     json: string,
     media: { file: string; dataUrl: string }[],
@@ -147,6 +148,28 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     return () => ro.disconnect()
   }, [])
 
+  // ---- Syphon クライアント有無を1秒ごとに確認。フェイルオープン＝迷ったら「送る」。
+  //  ネイティブのリークは根本修正済みなので、未接続時に送信を省くのは「無駄なIPC削減」
+  //  だけが目的。取得失敗・getStatus 不在・状態不明のときは必ず送る側に倒す＝本番で
+  //  Resolume への出力が黙って止まる事故を防ぐ（Resolume が来ていない確証があるときだけ省く）。
+  const syphonReadyRef = useRef(true)
+  useEffect(() => {
+    const api = getApi()
+    if (!api?.getStatus) return // getStatus が無くてもデフォルト true のまま＝送る
+    const poll = async (): Promise<void> => {
+      try {
+        const s = await api.getStatus!()
+        // Syphon が動いていてクライアント未接続のときだけ送信を省く。それ以外は送る。
+        syphonReadyRef.current = s.syphonAvailable ? s.hasClients : true
+      } catch {
+        syphonReadyRef.current = true // 取得失敗 → 送る側に倒す
+      }
+    }
+    poll()
+    const iv = setInterval(poll, 1000)
+    return () => clearInterval(iv)
+  }, [])
+
   // ---- 30fps: 描画 → Syphon publish → 画面へ転写（＋BUILDだけマーカー）
   useEffect(() => {
     const cv = displayRef.current
@@ -166,8 +189,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       lastVRef.current = v
       const now = performance.now()
       engine.renderFrame(now)
-      // Syphon出力は「写真の部分だけ・写真の解像度・余白なし」（outCv）。画面表示は余白ありのframe。
-      if (api?.publishFrame) api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
+      // Syphon出力は outCv（写真＋光＋モチーフ）。画面表示は余白ありの frame。
+      // クライアント未接続の確証があるときだけ readOutputRGBA()(重い getImageData) を省いて
+      // 無駄な IPC を減らす。それ以外は必ず送る（フェイルオープン）。
+      if (syphonReadyRef.current && api?.publishFrame) {
+        api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
+      }
       // 画面へ
       const { scale, ox, oy } = viewRef.current
       ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -878,6 +905,18 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <>
                 <hr />
                 <div className="il-lbl">MOTIF<em>— 個別調整（ゲージ・ミュート）</em></div>
+                <div className="il-frow" style={{ gap: 4, marginBottom: 6 }}>
+                  <span style={{ width: 64, fontSize: 11, color: 'var(--il-txt)', flexShrink: 0 }}>
+                    チェイス
+                  </span>
+                  <button
+                    className={'il-mini' + (engine.motifChase ? ' learnon' : '')}
+                    style={{ flex: 1, padding: '2px 6px', fontSize: 11 }}
+                    onClick={() => engine.setMotifChase(!engine.motifChase)}
+                  >
+                    {engine.motifChase ? '流れ中（押して停止）' : 'モチーフを順に点滅'}
+                  </button>
+                </div>
                 {engine.beams.map((b, i) => {
                   if (!b.motif) return null
                   const label: Record<string, string> = {
@@ -1181,7 +1220,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 <div className="il-frow">
                   <input
                     type="range"
-                    min={40}
+                    min={4}
                     max={600}
                     value={ref.motifDiam ?? 200}
                     onChange={(e) => engine.setMotifDiam(+e.target.value)}

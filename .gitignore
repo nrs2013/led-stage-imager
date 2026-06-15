@@ -7,3 +7,7 @@ out
 *.log*
 node_modules.nosync
 dist.nosync
+*.tsbuildinfo
+# 引き継ぎ書は公演機密を含む可能性があるため公開リポに上げない
+LED-STAGE-IMAGER-引き継ぎ-*.md
+DECOR-STUDIO-引き継ぎ-*.md
