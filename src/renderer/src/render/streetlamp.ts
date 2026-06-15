@@ -237,7 +237,10 @@ export function drawStreetLampSchematic(
   ctx.restore()
 }
 
-function scrollArm(
+/** All the wrought-iron bracket strokes (two rails, a big volute, answering scrolls, a
+ *  leaf collar, the hanger ring) using the CURRENT stroke style. Schematic strokes it
+ *  once; the lit pass strokes it twice (thick warm iron + a fine bright edge). */
+function armStrokes(
   ctx: CanvasRenderingContext2D,
   px: number,
   py: number,
@@ -246,18 +249,45 @@ function scrollArm(
   d: number
 ): void {
   const dir = Math.sign(lx - px) || 1
+  const mx = (px + lx) / 2
+  // main top rail (ogee) — arches up out of the post and down to the lantern hanger
   ctx.beginPath()
-  ctx.moveTo(px + dir * d * 0.03, py - d * 0.02)
-  ctx.bezierCurveTo(px + dir * d * 0.3, py - d * 0.2, lx - dir * d * 0.14, ly - d * 0.24, lx, ly - d * 0.03)
+  ctx.moveTo(px + dir * d * 0.02, py - d * 0.05)
+  ctx.bezierCurveTo(px + dir * d * 0.26, py - d * 0.27, lx - dir * d * 0.08, ly - d * 0.3, lx, ly - d * 0.04)
   ctx.stroke()
-  curl(ctx, px + dir * d * 0.1, py - d * 0.06, d * 0.035, dir)
-  curl(ctx, (px + lx) / 2, py - d * 0.16, d * 0.03, -dir)
-  // under-brace with a curl
+  // lower rail — sweeps out of the post and runs under the top rail to the lantern
   ctx.beginPath()
-  ctx.moveTo(px + dir * d * 0.02, py + d * 0.04)
-  ctx.quadraticCurveTo(px + dir * d * 0.22, py + d * 0.02, lx, ly + d * 0.02)
+  ctx.moveTo(px + dir * d * 0.03, py + d * 0.03)
+  ctx.bezierCurveTo(px + dir * d * 0.3, py - d * 0.08, lx - dir * d * 0.12, ly - d * 0.14, lx, ly - d * 0.02)
   ctx.stroke()
-  curl(ctx, px + dir * d * 0.18, py + d * 0.03, d * 0.025, -dir)
+  // big C-scroll volute under the arm at the post (the structural bracket support)
+  curl(ctx, px + dir * d * 0.13, py + d * 0.03, d * 0.085, dir)
+  // answering scroll mid-span, hung under the top rail
+  curl(ctx, mx + dir * d * 0.02, py - d * 0.17, d * 0.055, -dir)
+  // a smaller scroll near the lantern end
+  curl(ctx, lx - dir * d * 0.12, ly - d * 0.16, d * 0.04, dir)
+  // leaf collar where the bracket bolts to the post
+  curl(ctx, px + dir * d * 0.05, py - d * 0.05, d * 0.03, dir)
+  curl(ctx, px + dir * d * 0.06, py + d * 0.04, d * 0.026, -dir)
+  // hanger drop + ring the lantern swings from
+  ctx.beginPath()
+  ctx.moveTo(lx, ly - d * 0.04)
+  ctx.lineTo(lx, ly - d * 0.004)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(lx, ly + d * 0.012, d * 0.018, 0, Math.PI * 2)
+  ctx.stroke()
+}
+
+function scrollArm(
+  ctx: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  lx: number,
+  ly: number,
+  d: number
+): void {
+  armStrokes(ctx, px, py, lx, ly, d)
 }
 
 function lanternSchematic(
@@ -457,21 +487,14 @@ function litArm(
   warmIron: RGB,
   I: number
 ): void {
-  const dir = Math.sign(lx - px) || 1
-  const arm = (): void => {
-    ctx.beginPath()
-    ctx.moveTo(px + dir * d * 0.03, py - d * 0.02)
-    ctx.bezierCurveTo(px + dir * d * 0.3, py - d * 0.2, lx - dir * d * 0.14, ly - d * 0.24, lx, ly - d * 0.03)
-    ctx.stroke()
-  }
+  // thick warm cast-iron body
   ctx.strokeStyle = rgba(warmIron, 0.4 * I)
-  ctx.lineWidth = Math.max(1, d * 0.014)
-  arm()
+  ctx.lineWidth = Math.max(1, d * 0.013)
+  armStrokes(ctx, px, py, lx, ly, d)
+  // fine bright edge so the bracket catches the lantern's light
   ctx.strokeStyle = rgba(mix(warmIron, W, 0.55), 0.28 * I)
   ctx.lineWidth = Math.max(0.5, d * 0.004)
-  arm()
-  curl(ctx, px + dir * d * 0.1, py - d * 0.06, d * 0.035, dir)
-  curl(ctx, (px + lx) / 2, py - d * 0.16, d * 0.03, -dir)
+  armStrokes(ctx, px, py, lx, ly, d)
 }
 
 function lanternLit(
@@ -500,7 +523,23 @@ function lanternLit(
   ctx.fillStyle = g
   ctx.fillRect(x - lw, bodyTop - lh, lw * 2, lh * 2)
   ctx.restore()
-  glow(ctx, x, cyB, bh * 0.5, mix(hue, W, 0.68 + 0.3 * blast), (0.55 + 0.3 * blast) * I)
+  glow(ctx, x, cyB, bh * 0.5, mix(hue, W, 0.68 + 0.3 * blast), (0.45 + 0.3 * blast) * I)
+  // a tall mantle core (the burning element) — vertical, flame-like, not a round blob
+  ctx.save()
+  bodyPath(ctx, x, bodyTop, lw, bh)
+  ctx.clip()
+  ctx.translate(x, cyB)
+  ctx.scale(0.4, 1)
+  ctx.translate(-x, -cyB)
+  const core = ctx.createRadialGradient(x, cyB, 0, x, cyB, bh * 0.66)
+  core.addColorStop(0, rgba(mix(hue, W, 0.82), (0.7 + 0.2 * blast) * I))
+  core.addColorStop(0.45, rgba(mix(hue, W, 0.4), 0.32 * I))
+  core.addColorStop(1, rgba(hue, 0))
+  ctx.fillStyle = core
+  ctx.beginPath()
+  ctx.arc(x, cyB, bh * 0.66, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
 
   const frameCol = rgba(mix(hue, W, 0.5), 0.42 * I)
   const fine = rgba(mix(hue, W, 0.6), 0.3 * I)
@@ -529,7 +568,18 @@ function lanternLit(
   beadRow(ctx, x - lw * 0.42, x + lw * 0.42, bodyTop - lh * 0.025, 9, Math.max(0.6, d * 0.006))
   beadRow(ctx, x - lw * 0.4, x + lw * 0.4, by + d * 0.006, 8, Math.max(0.6, d * 0.006))
 
-  // ogee roof: silhouette rim + ridges + finial
+  // ogee roof: a solid dark-metal face whose eaves catch the warm light, then the rim
+  ctx.save()
+  ogeeRoof(ctx, x, bodyTop - lh * 0.05, lw, rh)
+  ctx.clip()
+  const roofTop = bodyTop - lh * 0.05 - rh
+  const roofG = ctx.createLinearGradient(0, roofTop, 0, bodyTop - lh * 0.05)
+  roofG.addColorStop(0, rgba(mix(warmIron, [0, 0, 0], 0.35), 0.14 * I))
+  roofG.addColorStop(0.65, rgba(warmIron, 0.12 * I))
+  roofG.addColorStop(1, rgba(mix(hue, W, 0.45), 0.4 * I))
+  ctx.fillStyle = roofG
+  ctx.fillRect(x - lw, roofTop - 2, lw * 2, rh + 4)
+  ctx.restore()
   ctx.strokeStyle = rgba(mix(hue, W, 0.5), 0.34 * I)
   ctx.lineWidth = Math.max(0.8, d * 0.008)
   ogeeRoof(ctx, x, bodyTop - lh * 0.05, lw, rh)
