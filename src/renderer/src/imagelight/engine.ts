@@ -824,10 +824,20 @@ export class ImageLightEngine {
     // 光だけ出力モードは編集画面も写真なしで光マップを表示（プレビュー）
     fc.drawImage(this.lightOnly ? this.lightCv : this.workCv, 0, 0)
     // ピース（写真の一部を切り抜いて 4 隅コーナーピンで貼る）を最終フレームに重ねる。
-    // Step 1：光合成からは外しているので、写真 box 外にも自由に置ける。
+    // workCv（この時点で用済み）を中間バッファとして再利用し、照明を掛けてから fc に乗せる。
+    wc.setTransform(1, 0, 0, 1, 0, 0)
+    wc.clearRect(0, 0, QW, QH)
+    wc.globalCompositeOperation = 'source-over'
+    this.drawPiecesOnFrame(wc)
+    if (maxI > 0.004) {
+      wc.setTransform(1, 0, 0, 1, 0, 0)
+      wc.globalCompositeOperation = 'multiply'
+      wc.drawImage(this.lightCv, 0, 0)
+      wc.globalCompositeOperation = 'source-over'
+    }
     fc.setTransform(1, 0, 0, 1, 0, 0)
     fc.globalCompositeOperation = 'source-over'
-    this.drawPiecesOnFrame(fc)
+    fc.drawImage(this.workCv, 0, 0)
     // モチーフ描画（街灯・シャンデリア・マーキー等）
     fc.setTransform(Q, 0, 0, Q, 0, 0)
     beams.forEach((b, i) => {
