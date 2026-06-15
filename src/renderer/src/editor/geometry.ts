@@ -1,8 +1,25 @@
 import type { Point, Shape } from '../model/types'
 import { BULB_DEFAULT_DIAMETER } from '../render/bulb'
 import { neonBounds } from '../render/neon'
+import { marqueeBounds } from '../render/marquee'
 import { festoonSamples } from '../render/festoon'
 import { parDiameter, blinderWidth, pattDiameter, pixelPattDiameter } from '../render/fixtures'
+import { roomLampDiameter } from '../render/roomlamp'
+import { streetLampDiameter } from '../render/streetlamp'
+import { chandelierDiameter } from '../render/chandelier'
+
+/** Virtual set-dressing lights (roomlamp/streetlamp/chandelier) — the grab target is
+ *  a box around the placed centre; the spilled light extends beyond but isn't grabbable
+ *  (uplightの流儀)。 */
+function decorItemDiameter(shape: Shape): number {
+  return shape.type === 'roomlamp'
+    ? roomLampDiameter(shape)
+    : shape.type === 'streetlamp'
+      ? streetLampDiameter(shape)
+      : chandelierDiameter(shape)
+}
+const isDecorItem = (t: Shape['type']): boolean =>
+  t === 'roomlamp' || t === 'streetlamp' || t === 'chandelier'
 
 export interface Bounds {
   x: number
@@ -93,6 +110,9 @@ export function shapeBounds(shape: Shape): Bounds {
   if (shape.type === 'neon' && shape.points.length >= 1) {
     return neonBounds(shape)
   }
+  if (shape.type === 'marquee' && shape.points.length >= 1) {
+    return marqueeBounds(shape)
+  }
   if (shape.type === 'festoon' && shape.points.length >= 2) {
     return boundsOfPoints(festoonSamples(shape, 48)) // the belly hangs below the chord
   }
@@ -108,6 +128,11 @@ export function shapeBounds(shape: Shape): Bounds {
           ? pattDiameter(shape)
           : pixelPattDiameter(shape)
     const r = (d / 2) * 1.14
+    return { x: c.x - r, y: c.y - r, w: r * 2, h: r * 2 }
+  }
+  if (isDecorItem(shape.type) && shape.points.length >= 1) {
+    const c = shape.points[0]
+    const r = (decorItemDiameter(shape) / 2) * 1.1
     return { x: c.x - r, y: c.y - r, w: r * 2, h: r * 2 }
   }
   if (shape.type === 'blinder' && shape.points.length >= 1) {
@@ -160,6 +185,12 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
     ctx.rect(b.x, b.y, b.w, b.h)
     return
   }
+  if (shape.type === 'marquee' && p.length >= 1) {
+    const b = marqueeBounds(shape)
+    ctx.beginPath()
+    ctx.rect(b.x, b.y, b.w, b.h)
+    return
+  }
   if (shape.type === 'festoon' && p.length >= 2) {
     const pts = festoonSamples(shape, 48)
     ctx.beginPath()
@@ -179,6 +210,12 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
           : pixelPattDiameter(shape)
     ctx.beginPath()
     ctx.arc(p[0].x, p[0].y, (d / 2) * 1.14, 0, Math.PI * 2)
+    return
+  }
+  if (isDecorItem(shape.type) && p.length >= 1) {
+    const r = (decorItemDiameter(shape) / 2) * 1.1
+    ctx.beginPath()
+    ctx.arc(p[0].x, p[0].y, r, 0, Math.PI * 2)
     return
   }
   if (shape.type === 'blinder' && p.length >= 1) {

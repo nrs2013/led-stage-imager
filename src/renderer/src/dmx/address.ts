@@ -1,6 +1,7 @@
 import type { ChannelMode, Fixture, Shape } from '../model/types'
 import { channelCount } from './channel-math'
 import { neonCharCount } from '../render/neon'
+import { marqueeCharCount } from '../render/marquee'
 import { festoonCount } from '../render/festoon'
 
 export interface Addr {
@@ -18,6 +19,7 @@ export function repeatCount(
   shape: Pick<Shape, 'repeat' | 'type' | 'text' | 'points' | 'sagPct' | 'bulbPitch'>
 ): number {
   if (shape.type === 'neon') return neonCharCount(shape.text ?? '')
+  if (shape.type === 'marquee') return marqueeCharCount(shape.text ?? '')
   if (shape.type === 'stars') return 2
   if (shape.type === 'festoon') return festoonCount(shape)
   if (shape.type === 'blinder') return 8

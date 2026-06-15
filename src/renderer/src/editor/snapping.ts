@@ -60,10 +60,14 @@ export function salientOf(sh: Shape): Salient {
   if (
     sh.type === 'bulb' ||
     sh.type === 'neon' ||
+    sh.type === 'marquee' ||
     sh.type === 'parlight' ||
     sh.type === 'blinder' ||
     sh.type === 'patt' ||
-    sh.type === 'pixelpatt'
+    sh.type === 'pixelpatt' ||
+    sh.type === 'roomlamp' ||
+    sh.type === 'streetlamp' ||
+    sh.type === 'chandelier'
   ) {
     return { xs: [], ys: [], cxs: [b.x + b.w / 2], cys: [b.y + b.h / 2] }
   }

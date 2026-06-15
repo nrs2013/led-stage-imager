@@ -19,6 +19,7 @@ import {
 } from '../editor/geometry'
 import { drawBulbLit, BULB_DEFAULT_STYLE } from '../render/bulb'
 import { drawNeonGlyphLit } from '../render/neon'
+import { drawMarqueeGlyphLit } from '../render/marquee'
 import { drawStarsLit } from '../render/stars'
 import { drawFestoonBulbLit, drawFestoonWireLit } from '../render/festoon'
 import {
@@ -31,6 +32,9 @@ import {
   parDiameter,
   pattDiameter
 } from '../render/fixtures'
+import { drawRoomLampLit, roomLampDiameter } from '../render/roomlamp'
+import { drawStreetLampLit, streetLampDiameter } from '../render/streetlamp'
+import { drawChandelierLit, chandelierDiameter } from '../render/chandelier'
 
 const ZEROS = new Uint8Array(512)
 
@@ -327,6 +331,13 @@ export class OutputRenderer {
       ctx.restore()
       return
     }
+    // marquee lights: instance i lights ONLY letter #i (its bulbs in the console
+    // colour) — per-letter chase, same addressing as neon
+    if (shape.type === 'marquee') {
+      drawMarqueeGlyphLit(ctx, shape, rgb, rep)
+      ctx.restore()
+      return
+    }
     // star fields: instance 0 = the white sky, instance 1 = the blue sky — two desk
     // faders run the whole curtain; the channel level IS the population's gauge
     if (shape.type === 'stars') {
@@ -358,6 +369,19 @@ export class OutputRenderer {
     // Pixel PAT: instance i lights ONLY cell #i (centre=1, ring 2..7) — pixel control
     if (shape.type === 'pixelpatt') {
       drawPixelPattCellLit(ctx, shape, rgb, rep)
+      ctx.restore()
+      return
+    }
+    // virtual set-dressing lights (電飾屋が物理で用意できないアイテム): single-address
+    // warm fixtures — the console RGB owns both hue and gauge, like the ball bulb.
+    if (shape.type === 'roomlamp' || shape.type === 'streetlamp' || shape.type === 'chandelier') {
+      const c = shape.points[0]
+      if (c) {
+        if (shape.type === 'roomlamp') drawRoomLampLit(ctx, c.x, c.y, roomLampDiameter(shape), rgb)
+        else if (shape.type === 'streetlamp')
+          drawStreetLampLit(ctx, c.x, c.y, streetLampDiameter(shape), rgb)
+        else drawChandelierLit(ctx, c.x, c.y, chandelierDiameter(shape), rgb)
+      }
       ctx.restore()
       return
     }

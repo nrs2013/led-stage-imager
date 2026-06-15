@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { C, F } from '../ui/tokens'
 import { drawBulbGlass, drawBulbLit, BULB_DEFAULT_DIAMETER, type RGB } from '../render/bulb'
 import { drawNeonGlyphLit, clearNeonLayoutCache } from '../render/neon'
+import { drawMarqueeGlyphLit, clearMarqueeCache, marqueeCharCount } from '../render/marquee'
 import { drawStarsLit } from '../render/stars'
 import { drawFestoonBulbLit, drawFestoonWireLit, festoonCount } from '../render/festoon'
 import {
@@ -13,6 +14,9 @@ import {
   drawBlinderHousing
 } from '../render/fixtures'
 import { drawWallBeamInto } from '../render/uplight'
+import { drawRoomLampLit } from '../render/roomlamp'
+import { drawStreetLampLit } from '../render/streetlamp'
+import { drawChandelierLit } from '../render/chandelier'
 import type { Shape } from '../model/types'
 
 /** Live-rendered thumbnail: the actual bulb renderer at a thumbnail-friendly size,
@@ -76,6 +80,49 @@ function NeonThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX.El
     draw()
     const onFonts = (): void => {
       clearNeonLayoutCache()
+      draw()
+    }
+    document.fonts?.addEventListener('loadingdone', onFonts)
+    return () => document.fonts?.removeEventListener('loadingdone', onFonts)
+  }, [w, h])
+  return (
+    <canvas
+      ref={ref}
+      width={w}
+      height={h}
+      style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 4, pointerEvents: 'none' }}
+    />
+  )
+}
+
+/** Live-rendered thumbnail: the real marquee renderer — letters filled with warm bulbs. */
+function MarqueeThumb({ w = 74, h = 46 }: { w?: number; h?: number }): React.JSX.Element {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const draw = (): void => {
+      const ctx = cv.getContext('2d')
+      if (!ctx) return
+      ctx.clearRect(0, 0, w, h)
+      ctx.fillStyle = '#000'
+      ctx.fillRect(0, 0, w, h)
+      const shape = {
+        id: 'marquee-thumb',
+        type: 'marquee',
+        points: [{ x: w / 2, y: h / 2 }],
+        display: 'fill',
+        strokeWidth: 1,
+        text: 'LED',
+        fontSize: 32,
+        bulbPitch: 5
+      } as Shape
+      const n = marqueeCharCount('LED')
+      for (let i = 0; i < n; i++) drawMarqueeGlyphLit(ctx, shape, [255, 180, 100], i)
+    }
+    draw()
+    const onFonts = (): void => {
+      clearMarqueeCache()
       draw()
     }
     document.fonts?.addEventListener('loadingdone', onFonts)
@@ -269,6 +316,12 @@ const paintImage = (ctx: CanvasRenderingContext2D): void => {
   ctx.restore()
 }
 
+const paintRoomLamp = (ctx: CanvasRenderingContext2D): void => drawRoomLampLit(ctx, 37, 13, 38, WARM)
+const paintStreetLamp = (ctx: CanvasRenderingContext2D): void =>
+  drawStreetLampLit(ctx, 37, 6, 11, WARM)
+const paintChandelier = (ctx: CanvasRenderingContext2D): void =>
+  drawChandelierLit(ctx, 37, 24, 46, WARM)
+
 /** The shelf line-up — のむさん指定の並び：上段=電球系の灯体、下段=ストリング/文字/面。 */
 const CARDS: {
   part: string
@@ -327,6 +380,13 @@ const CARDS: {
     thumb: <NeonThumb />
   },
   {
+    part: 'marquee',
+    label: 'マーキー',
+    hint: 'BULB TEXT',
+    title: 'マーキーライト — 電球で文字を描く劇場サイン。Inspectorで文字を打つ（1文字=1番地・文字ごとにチェイス・電球間隔も調整可）',
+    thumb: <MarqueeThumb />
+  },
+  {
     part: 'stars',
     label: '星球',
     hint: 'W+B 2ch',
@@ -346,6 +406,27 @@ const CARDS: {
     hint: 'BEAM',
     title: 'アッパーライト — 1灯ずつ置いて、出口の幅・広がり・届く高さをInspectorで決める。チャートの外にも置ける。Beam 6chモードで卓からPan/Tilt/Zoom',
     thumb: <FixtureThumb paint={paintUplight} />
+  },
+  {
+    part: 'roomlamp',
+    label: '室内ランプ',
+    hint: 'LAMP',
+    title: '室内ランプ — シェードが暖色に灯り、下へ光がこぼれる。電飾屋が用意できないセットの灯り（卓RGBで色・明るさ・単一番地）',
+    thumb: <FixtureThumb paint={paintRoomLamp} />
+  },
+  {
+    part: 'streetlamp',
+    label: '街灯',
+    hint: 'STREET',
+    title: '街灯 — 灯具から下へ光のコーン・地面に光の輪。夜景・寒色にも（卓RGBで色・明るさ・単一番地）',
+    thumb: <FixtureThumb paint={paintStreetLamp} />
+  },
+  {
+    part: 'chandelier',
+    label: 'シャンデリア',
+    hint: 'CHAND',
+    title: 'シャンデリア — 複数のロウソク球が暖色に灯る豪華アイテム。まず全体を1番地で一斉点灯（卓RGBで色・明るさ）',
+    thumb: <FixtureThumb paint={paintChandelier} />
   }
 ]
 

@@ -51,6 +51,14 @@ import {
   NEON_DEFAULT_GLOW
 } from '../render/neon'
 import {
+  drawMarqueeSchematic,
+  clearMarqueeCache,
+  MARQUEE_DEFAULT_TEXT,
+  MARQUEE_DEFAULT_SIZE,
+  MARQUEE_DEFAULT_PITCH,
+  MARQUEE_DEFAULT_FONT
+} from '../render/marquee'
+import {
   drawStarsSchematic,
   STARS_DEFAULT_DENSITY,
   STARS_DEFAULT_WHITE_RATIO,
@@ -82,6 +90,9 @@ import {
   UPLIGHT_DEFAULT_LEN
 } from '../render/uplight'
 import { BULB_DEFAULT_DIAMETER } from '../render/bulb'
+import { drawRoomLampSchematic, ROOMLAMP_DEFAULT_DIAMETER } from '../render/roomlamp'
+import { drawStreetLampSchematic, STREETLAMP_DEFAULT_DIAMETER } from '../render/streetlamp'
+import { drawChandelierSchematic, CHANDELIER_DEFAULT_DIAMETER } from '../render/chandelier'
 import { mmToCanvasPx, mmPerPx } from '../model/scale'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
@@ -277,6 +288,11 @@ function drawShapeInto(
     drawNeonSchematic(ctx, shape, stroke, fill, boost)
     return
   }
+  // marquee lights: cold bulb-letters in the editor (lit render in Live/Syphon)
+  if (shape.type === 'marquee') {
+    drawMarqueeSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
   // star fields: dashed frame + the cold dots (same sky the output will light)
   if (shape.type === 'stars') {
     drawStarsSchematic(ctx, shape, stroke, fill, boost)
@@ -302,6 +318,19 @@ function drawShapeInto(
   }
   if (shape.type === 'pixelpatt') {
     drawPixelPattSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
+  // virtual set-dressing lights: cold housings in the editor (lit render in Live/Syphon)
+  if (shape.type === 'roomlamp') {
+    drawRoomLampSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
+  if (shape.type === 'streetlamp') {
+    drawStreetLampSchematic(ctx, shape, stroke, fill, boost)
+    return
+  }
+  if (shape.type === 'chandelier') {
+    drawChandelierSchematic(ctx, shape, stroke, fill, boost)
     return
   }
   // photo material: the albedo at half strength + dashed frame (lights up in Live)
@@ -800,6 +829,7 @@ export function EditorCanvas(): React.JSX.Element {
   useEffect(() => {
     const onDone = (): void => {
       clearNeonLayoutCache()
+      clearMarqueeCache()
       contentDirty.current = true
       drawRef.current()
     }
@@ -1975,6 +2005,19 @@ export function EditorCanvas(): React.JSX.Element {
         fontSize: NEON_DEFAULT_SIZE,
         neonGlow: NEON_DEFAULT_GLOW
       })
+    } else if (part === 'marquee') {
+      // marquee sign: type text in the Inspector — each letter is filled with bulbs,
+      // 1 letter = 1 address (per-letter chase, same as neon)
+      addShape({
+        type: 'marquee',
+        points: [center],
+        display: 'fill',
+        strokeWidth: 1,
+        text: MARQUEE_DEFAULT_TEXT,
+        fontId: MARQUEE_DEFAULT_FONT,
+        fontSize: MARQUEE_DEFAULT_SIZE,
+        bulbPitch: MARQUEE_DEFAULT_PITCH
+      })
     } else if (part === 'stars') {
       // star field: a corner-box part — drops as a 120×70 sky centred on the cell,
       // then the ordinary corner/edge handles stretch it over the LED area
@@ -2039,9 +2082,22 @@ export function EditorCanvas(): React.JSX.Element {
             ? BLINDER_DEFAULT_WIDTH
             : part === 'patt'
               ? PATT_DEFAULT_DIAMETER
-              : PIXELPATT_DEFAULT_DIAMETER
+              : part === 'pixelpatt'
+                ? PIXELPATT_DEFAULT_DIAMETER
+                : part === 'roomlamp'
+                  ? ROOMLAMP_DEFAULT_DIAMETER
+                  : part === 'streetlamp'
+                    ? STREETLAMP_DEFAULT_DIAMETER
+                    : CHANDELIER_DEFAULT_DIAMETER
       addShape({
-        type: part as 'parlight' | 'blinder' | 'patt' | 'pixelpatt',
+        type: part as
+          | 'parlight'
+          | 'blinder'
+          | 'patt'
+          | 'pixelpatt'
+          | 'roomlamp'
+          | 'streetlamp'
+          | 'chandelier',
         points: [center],
         display: 'fill',
         strokeWidth: 1,

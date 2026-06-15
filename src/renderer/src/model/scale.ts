@@ -29,7 +29,16 @@ export function stageWidthMeters(chart: Chart): number | null {
 
 // 実寸サイズが定義された「照明モチーフ」＝§5でmm化した灯体（diameter基準）。
 // 手描き系（neon/festoon/stars/line/freehand/image）は実寸が未定義なので対象外。
-const SIZED_FIXTURES = new Set<Shape['type']>(['parlight', 'blinder', 'patt', 'pixelpatt', 'bulb'])
+const SIZED_FIXTURES = new Set<Shape['type']>([
+  'parlight',
+  'blinder',
+  'patt',
+  'pixelpatt',
+  'bulb',
+  'roomlamp',
+  'streetlamp',
+  'chandelier'
+])
 
 /** 「既にある部品を実寸に合わせる」対象の数（校正済みのとき Setup のボタンに出す）。 */
 export function countFittableFixtures(shapes: Shape[]): number {

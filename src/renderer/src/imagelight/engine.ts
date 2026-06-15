@@ -245,6 +245,18 @@ function mk(w: number, h: number, readback = false): HTMLCanvasElement {
   return c
 }
 
+/** 写真アルベド(mat)の作業解像度上限。出力は1920×1080固定なので原寸を抱えるのは
+ *  ただのメモリ浪費（シーンを積むとOOM）。長辺をここまで縮小して持つ。動画は1280px。 */
+export const ALBEDO_MAX = 2560
+
+/** Cap a photo's albedo working size to ALBEDO_MAX on its longest side (aspect kept,
+ *  never upscales). Pure — unit-tested. */
+export function albedoFitSize(nw: number, nh: number, max = ALBEDO_MAX): { w: number; h: number } {
+  const longest = Math.max(nw, nh)
+  const s = longest > max ? max / longest : 1
+  return { w: Math.max(1, Math.round(nw * s)), h: Math.max(1, Math.round(nh * s)) }
+}
+
 const rgs = (c: RGB3 | number[], a: number): string =>
   `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${Math.max(0, Math.min(1, a)).toFixed(3)})`
 
@@ -1288,7 +1300,9 @@ export class ImageLightEngine {
     c.globalCompositeOperation = 'source-over'
   }
   private albedoOf(img: HTMLImageElement): HTMLCanvasElement {
-    const a = mk(img.naturalWidth || img.width, img.naturalHeight || img.height)
+    // cap to ALBEDO_MAX so a high-res photo doesn't keep tens of MB per scene (OOM fix)
+    const { w, h } = albedoFitSize(img.naturalWidth || img.width, img.naturalHeight || img.height)
+    const a = mk(w, h)
     this.buildAlbedo(a, img, a.width, a.height, false)
     return a
   }
@@ -1311,7 +1325,8 @@ export class ImageLightEngine {
         const scene: Scene = {
           name: name || 'PHOTO ' + (this.scenes.length + 1),
           kind: 'photo',
-          img: im,
+          // deliberately DON'T keep `img`: the full-res decoded bitmap is huge and only the
+          // downscaled `mat` (render) + `src` (save) are needed → `im` is GC'd after this.
           src: dataUrl, // 公演保存でファイルに書き出すため元データを保持
           mat: this.albedoOf(im),
           thumb: this.makeThumbFrom(im, w, h)

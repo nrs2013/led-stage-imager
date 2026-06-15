@@ -7,6 +7,13 @@ import { NumberField } from '../ui/NumberField'
 import { shapeBounds, bulbDiameter } from './geometry'
 import { BULB_DEFAULT_STYLE } from '../render/bulb'
 import { NEON_FONTS, neonFont, neonSize, neonGlowAmount, neonCharCount } from '../render/neon'
+import {
+  marqueeSize,
+  marqueePitch,
+  marqueeCharCount,
+  MARQUEE_FONTS,
+  marqueeFontDef
+} from '../render/marquee'
 import { genStars, starsDensity, starsWhiteRatio, starsSize } from '../render/stars'
 import {
   festoonSag,
@@ -17,6 +24,9 @@ import {
   FESTOON_DEFAULT_GLOW
 } from '../render/festoon'
 import { parDiameter, blinderWidth, pattDiameter, pixelPattDiameter } from '../render/fixtures'
+import { roomLampDiameter } from '../render/roomlamp'
+import { streetLampDiameter } from '../render/streetlamp'
+import { chandelierDiameter } from '../render/chandelier'
 
 /** Human-readable size of a shape: spans, dot counts, lengths — diagonals included. */
 function sizeText(shape: Shape): string {
@@ -26,6 +36,9 @@ function sizeText(shape: Shape): string {
   }
   if (shape.type === 'neon') {
     return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${neonCharCount(shape.text ?? '')} 管`
+  }
+  if (shape.type === 'marquee') {
+    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${marqueeCharCount(shape.text ?? '')} 文字`
   }
   if (shape.type === 'stars') {
     const f = genStars(shape)
@@ -37,6 +50,9 @@ function sizeText(shape: Shape): string {
   if (shape.type === 'parlight') return `Φ ${parDiameter(shape)} px`
   if (shape.type === 'patt') return `Φ ${pattDiameter(shape)} px`
   if (shape.type === 'pixelpatt') return `Φ ${pixelPattDiameter(shape)} px · 7セル`
+  if (shape.type === 'roomlamp') return `Φ ${roomLampDiameter(shape)} px`
+  if (shape.type === 'streetlamp') return `Φ ${streetLampDiameter(shape)} px`
+  if (shape.type === 'chandelier') return `Φ ${chandelierDiameter(shape)} px`
   if (shape.type === 'blinder') {
     const w = blinderWidth(shape)
     return `W ${w} × H ${w * 2} px · 8球`
@@ -302,6 +318,75 @@ export function Inspector(): React.JSX.Element {
         </>
       )}
 
+      {/* marquee: text + letter size + bulb spacing — each letter is filled with
+          bulbs, 1 letter = 1 address (per-letter chase, same idea as neon) */}
+      {shape.type === 'marquee' && (
+        <>
+          <Field label="テキスト（1行）">
+            <input
+              value={shape.text ?? ''}
+              placeholder="STAGE"
+              style={{ ...inputStyle, fontFamily: F.ui, width: '100%', boxSizing: 'border-box' }}
+              onChange={(e) => updateShape(shape.id, { text: e.target.value })}
+            />
+          </Field>
+          <Field label="書体">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+              {MARQUEE_FONTS.map((f) => {
+                const active = marqueeFontDef(shape).id === f.id
+                return (
+                  <button
+                    key={f.id}
+                    style={{
+                      ...buttonStyle({ active }),
+                      padding: '6px 4px 4px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 2
+                    }}
+                    onClick={() => updateShape(shape.id, { fontId: f.id })}
+                  >
+                    <span
+                      style={{
+                        fontFamily: `"${f.family}"`,
+                        fontWeight: f.weight,
+                        fontSize: 15,
+                        lineHeight: 1.15,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        maxWidth: '100%'
+                      }}
+                    >
+                      {f.sample}
+                    </span>
+                    <span style={{ fontFamily: F.mono, fontSize: 8.5, opacity: 0.65 }}>{f.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </Field>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Field label="文字サイズ (px)">
+              <NumberField
+                value={marqueeSize(shape)}
+                min={20}
+                max={600}
+                onChange={(v) => updateShape(shape.id, { fontSize: v })}
+              />
+            </Field>
+            <Field label="電球の間隔 (px)">
+              <NumberField
+                value={marqueePitch(shape)}
+                min={5}
+                max={60}
+                onChange={(v) => updateShape(shape.id, { bulbPitch: v })}
+              />
+            </Field>
+          </div>
+        </>
+      )}
+
       {/* stars: density / white-blue mix / dot size / reshuffle (colour & gauge come
           from two desk channels — instance 0 = white sky, instance 1 = blue sky) */}
       {shape.type === 'stars' && (
@@ -487,7 +572,10 @@ export function Inspector(): React.JSX.Element {
       {(shape.type === 'parlight' ||
         shape.type === 'patt' ||
         shape.type === 'pixelpatt' ||
-        shape.type === 'blinder') && (
+        shape.type === 'blinder' ||
+        shape.type === 'roomlamp' ||
+        shape.type === 'streetlamp' ||
+        shape.type === 'chandelier') && (
         <Field label={shape.type === 'blinder' ? '幅（ドット）· 高さは自動で2倍' : '径（ドット）'}>
           <NumberField
             value={
@@ -497,10 +585,16 @@ export function Inspector(): React.JSX.Element {
                   ? pattDiameter(shape)
                   : shape.type === 'pixelpatt'
                     ? pixelPattDiameter(shape)
-                    : blinderWidth(shape)
+                    : shape.type === 'roomlamp'
+                      ? roomLampDiameter(shape)
+                      : shape.type === 'streetlamp'
+                        ? streetLampDiameter(shape)
+                        : shape.type === 'chandelier'
+                          ? chandelierDiameter(shape)
+                          : blinderWidth(shape)
             }
             min={6}
-            max={800}
+            max={2500}
             onChange={(v) => updateShape(shape.id, { diameter: v })}
           />
         </Field>
@@ -517,7 +611,11 @@ export function Inspector(): React.JSX.Element {
         shape.type !== 'patt' &&
         shape.type !== 'pixelpatt' &&
         shape.type !== 'image' &&
-        shape.type !== 'uplight' && (
+        shape.type !== 'uplight' &&
+        shape.type !== 'roomlamp' &&
+        shape.type !== 'streetlamp' &&
+        shape.type !== 'chandelier' &&
+        shape.type !== 'marquee' && (
         <Field label="Display">
           <div style={{ display: 'flex', gap: 6 }}>
             {DISPLAY_MODES.map((m) => (
@@ -540,7 +638,8 @@ export function Inspector(): React.JSX.Element {
         shape.type !== 'parlight' &&
         shape.type !== 'blinder' &&
         shape.type !== 'patt' &&
-        shape.type !== 'pixelpatt' && (
+        shape.type !== 'pixelpatt' &&
+        shape.type !== 'marquee' && (
           <Field label="Width">
           <NumberField
             value={shape.strokeWidth}
@@ -553,6 +652,7 @@ export function Inspector(): React.JSX.Element {
 
       {/* repeat / array (neon, stars, festoon, blinder & pixelpatt ARE their own arrays) */}
       {shape.type !== 'neon' &&
+        shape.type !== 'marquee' &&
         shape.type !== 'stars' &&
         shape.type !== 'festoon' &&
         shape.type !== 'blinder' &&
@@ -656,7 +756,7 @@ export function Inspector(): React.JSX.Element {
           {(hasRepeat || repeatCount(shape) > 1) && (
             <Field
               label={
-                shape.type === 'neon'
+                shape.type === 'neon' || shape.type === 'marquee'
                   ? `文字間隔 ch（0=一斉 / 既定 ${channelCount(fixture.mode)}）`
                   : shape.type === 'stars'
                     ? `白→青 間隔 ch（既定 ${channelCount(fixture.mode)}）`
