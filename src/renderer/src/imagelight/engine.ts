@@ -826,20 +826,24 @@ export class ImageLightEngine {
     // 光だけ出力モードは編集画面も写真なしで光マップを表示（プレビュー）
     fc.drawImage(this.lightOnly ? this.lightCv : this.workCv, 0, 0)
     // ピース（写真の一部を切り抜いて 4 隅コーナーピンで貼る）を最終フレームに重ねる。
-    // workCv（この時点で用済み）を中間バッファとして再利用し、照明を掛けてから fc に乗せる。
-    wc.setTransform(1, 0, 0, 1, 0, 0)
-    wc.clearRect(0, 0, QW, QH)
-    wc.globalCompositeOperation = 'source-over'
-    this.drawPiecesOnFrame(wc)
-    if (maxI > 0.004) {
+    // ピースが存在する場合のみ workCv を中間バッファとして再利用し照明を掛けて fc に乗せる。
+    // ピースが無い場合はこのブロック全体をスキップする（透明 wc を fc に重ねると写真が消えるため）。
+    const activeSceneForPieces = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (activeSceneForPieces?.pieces?.length && activeSceneForPieces.mat) {
       wc.setTransform(1, 0, 0, 1, 0, 0)
-      wc.globalCompositeOperation = 'multiply'
-      wc.drawImage(this.lightCv, 0, 0)
+      wc.clearRect(0, 0, QW, QH)
       wc.globalCompositeOperation = 'source-over'
+      this.drawPiecesOnFrame(wc)
+      if (maxI > 0.004) {
+        wc.setTransform(1, 0, 0, 1, 0, 0)
+        wc.globalCompositeOperation = 'multiply'
+        wc.drawImage(this.lightCv, 0, 0)
+        wc.globalCompositeOperation = 'source-over'
+      }
+      fc.setTransform(1, 0, 0, 1, 0, 0)
+      fc.globalCompositeOperation = 'source-over'
+      fc.drawImage(this.workCv, 0, 0)
     }
-    fc.setTransform(1, 0, 0, 1, 0, 0)
-    fc.globalCompositeOperation = 'source-over'
-    fc.drawImage(this.workCv, 0, 0)
     // モチーフ描画（街灯・シャンデリア・マーキー等）
     fc.setTransform(Q, 0, 0, Q, 0, 0)
     beams.forEach((b, i) => {
