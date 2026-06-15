@@ -61,6 +61,10 @@ export interface Shape {
   fontId?: string
   /** Neon only: glyph height in canvas px. */
   fontSize?: number
+  /** Marquee only: per-letter base colour (hex), indexed by visible-letter order
+   *  (spaces skipped). Missing/empty entry = the default dark channel. Lit bulbs
+   *  always dye warm on top regardless of the base colour (のむさん 2026-06-15). */
+  letterColors?: string[]
   /** Neon / Festoon: glow dial 0–100 (halo reach; のむさんの「光りすぎ防止」ツマミ). */
   neonGlow?: number
   /** Festoon only: sag depth as % of the span between the two grabbed ends. */

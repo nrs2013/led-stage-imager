@@ -206,7 +206,20 @@ const rgba = (c: RGB, a: number): string => {
 }
 const WARM_BULB: RGB = [255, 176, 94] // fixed incandescent; console controls brightness only
 const DYE: RGB = [255, 148, 70] // reflected warm light that stains the channel face
-const FRAME: RGB = [70, 66, 60] // dark cast-metal channel
+const FRAME: RGB = [70, 66, 60] // dark cast-metal channel (default base colour)
+
+/** Parse '#rrggbb' / '#rgb' → RGB; null on anything unparseable. */
+function hexToRgb(hex: string): RGB | null {
+  let h = hex.trim().replace(/^#/, '')
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
+}
+/** Base colour of visible-letter #i (spaces skipped): its set hex, else the default frame. */
+function letterRgb(shape: Pick<Shape, 'letterColors'>, glyphIndex: number): RGB {
+  const hex = shape.letterColors?.[glyphIndex]
+  return (hex ? hexToRgb(hex) : null) ?? FRAME
+}
 
 /* -------------------------------- schematic --------------------------------- */
 
@@ -225,14 +238,16 @@ export function drawMarqueeSchematic(
   ctx.save()
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
-  for (const gph of L.glyphs) {
+  L.glyphs.forEach((gph, gi) => {
     const g = glyphOf(gph.ch)
     ctx.save()
     ctx.translate(x0 + gph.x, baseline)
     ctx.scale(F, F)
     if (g.sil) {
       const p = new Path2D(g.sil)
-      ctx.fillStyle = fill
+      const lc = shape.letterColors?.[gi]
+      const lcRgb = lc ? hexToRgb(lc) : null
+      ctx.fillStyle = lcRgb ? rgba(lcRgb, 0.9) : fill
       ctx.fill(p, 'evenodd')
       ctx.strokeStyle = stroke
       ctx.lineWidth = (Math.max(1, boost) * 0.6) / F
@@ -249,7 +264,7 @@ export function drawMarqueeSchematic(
       ctx.stroke()
     }
     ctx.restore()
-  }
+  })
   ctx.fillStyle = stroke
   ctx.fillRect(c.x - 0.5, c.y - 0.5, 1, 1)
   ctx.restore()
@@ -264,16 +279,17 @@ function drawLetterFrame(
   sil: string,
   ox: number,
   baseline: number,
-  F: number
+  F: number,
+  base: RGB = FRAME
 ): void {
   if (!sil) return
   ctx.save()
   ctx.translate(ox, baseline)
   ctx.scale(F, F)
   const p = new Path2D(sil)
-  ctx.fillStyle = rgba(FRAME, 0.92)
+  ctx.fillStyle = rgba(base, 0.92)
   ctx.fill(p, 'evenodd')
-  ctx.strokeStyle = rgba(mix(FRAME, [0, 0, 0], 0.4), 1)
+  ctx.strokeStyle = rgba(mix(base, [0, 0, 0], 0.45), 1)
   ctx.lineWidth = 1.4 / F
   ctx.stroke(p)
   ctx.restore()
@@ -316,7 +332,9 @@ export function drawMarqueeFrame(ctx: CanvasRenderingContext2D, shape: Shape): v
   const L = layoutMarquee(shape)
   const F = marqueeSize(shape)
   const { x0, baseline } = originOf(shape, L)
-  for (const g of L.glyphs) drawLetterFrame(ctx, glyphOf(g.ch).sil, x0 + g.x, baseline, F)
+  L.glyphs.forEach((g, i) =>
+    drawLetterFrame(ctx, glyphOf(g.ch).sil, x0 + g.x, baseline, F, letterRgb(shape, i))
+  )
 }
 
 /** Output: light ONLY bulb #globalBulbIndex (1 bulb = 1 ch). Brightness from the console
@@ -345,7 +363,7 @@ export function drawMarqueeGlyphLit(
   if (!g || !shape.points[0]) return
   const F = marqueeSize(shape)
   const { x0, baseline } = originOf(shape, L)
-  drawLetterFrame(ctx, glyphOf(g.ch).sil, x0 + g.x, baseline, F)
+  drawLetterFrame(ctx, glyphOf(g.ch).sil, x0 + g.x, baseline, F, letterRgb(shape, instance))
   const { intensity: I } = bulbHueIntensity(rgb)
   if (I <= 0.004) return
   for (const b of marqueeBulbs(shape)) if (b.letter === instance) litBulb(ctx, b, I)

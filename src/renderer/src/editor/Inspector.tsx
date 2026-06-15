@@ -11,6 +11,7 @@ import {
   marqueeSize,
   marqueePitch,
   marqueeCharCount,
+  marqueeChars,
   MARQUEE_FONTS,
   marqueeFontDef
 } from '../render/marquee'
@@ -384,6 +385,40 @@ export function Inspector(): React.JSX.Element {
               />
             </Field>
           </div>
+          <Field label="一文字ずつの色（消灯時の素の色・点いた電球は暖色に染まる）">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {marqueeChars(shape.text ?? '').map((ch, i) => {
+                const col = shape.letterColors?.[i] ?? '#46423c'
+                return (
+                  <label
+                    key={i}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
+                  >
+                    <input
+                      type="color"
+                      value={col}
+                      onChange={(e) => {
+                        const chars = marqueeChars(shape.text ?? '')
+                        const next = [...(shape.letterColors ?? [])]
+                        while (next.length < chars.length) next.push('#46423c')
+                        next[i] = e.target.value
+                        updateShape(shape.id, { letterColors: next.slice(0, chars.length) })
+                      }}
+                      style={{
+                        width: 30,
+                        height: 26,
+                        border: 'none',
+                        background: 'none',
+                        padding: 0,
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <span style={{ fontFamily: F.mono, fontSize: 9, opacity: 0.6 }}>{ch}</span>
+                  </label>
+                )
+              })}
+            </div>
+          </Field>
         </>
       )}
 
