@@ -25,6 +25,10 @@ import {
 } from './effects'
 import { composeColorRatio } from '../render/compose'
 import { alignSnap, equalSnapX, type Pt } from './snap'
+import { drawStreetLampLit } from '../render/streetlamp'
+import { drawChandelierLit } from '../render/chandelier'
+import { drawMarqueeLit, marqueeBulbCount } from '../render/marquee'
+import type { Shape } from '../model/types'
 
 /** 写真×光の合成方式。
  *  'mock'  = 出荷モック準拠（乗算＋暗部トー）。のむさんが v7 で検証済みの見え方。既定。
@@ -80,6 +84,12 @@ export interface Beam {
   _tn?: number
   _cn?: RGB3
   _zp?: number
+  // モチーフ（街灯・シャンデリア・マーキー）
+  motif?: 'streetlamp' | 'chandelier' | 'marquee'
+  motifDiam?: number
+  motifText?: string
+  motifLetterColors?: string[]
+  motifSpeed?: number
 }
 
 /** シーンに保存されるFXの点き具合（master/smoke は含めない＝呼び出しても親フェーダーは動かない）。 */
@@ -655,6 +665,35 @@ export class ImageLightEngine {
     this.withTilt(g, b, T, () => this.drawBeamCore(g, geo, col, 2.0))
   }
 
+  // ---------- モチーフ描画 ----------
+  private drawMotifLit(g: CanvasRenderingContext2D, b: Beam, I: number, ms: number): void {
+    if (I <= 0.004) return
+    const c = b._cn ?? b.color
+    const rgb: RGB3 = [c[0] * I, c[1] * I, c[2] * I]
+    const d = b.motifDiam ?? 200
+    if (b.motif === 'streetlamp') {
+      drawStreetLampLit(g, b.x, b.y, d, rgb)
+    } else if (b.motif === 'chandelier') {
+      drawChandelierLit(g, b.x, b.y, d, rgb)
+    } else if (b.motif === 'marquee') {
+      const shape = {
+        points: [{ x: b.x, y: b.y }],
+        text: b.motifText ?? 'LIVE',
+        fontSize: b.motifDiam ?? 200,
+        letterColors: b.motifLetterColors
+      } as unknown as Shape
+      const n = marqueeBulbCount(shape)
+      if (n <= 0) return
+      const speed = b.motifSpeed ?? 8
+      const head = ((ms / 1000) * speed) % n
+      const win = Math.max(2, n * 0.25)
+      drawMarqueeLit(g, shape, (i) => {
+        const dist = (i - head + n) % n
+        return Math.max(0, 1 - dist / win) * I
+      })
+    }
+  }
+
   // ---------- フレーム描画 ----------
   /** frame キャンバスに1フレーム描く（マーカー無し）。React の30fpsループから呼ぶ。 */
   renderFrame(now = performance.now()): void {
@@ -676,12 +715,17 @@ export class ImageLightEngine {
     lc.fillRect(0, 0, QW, QH)
     if (maxI > 0.004) {
       beams.forEach((b, i) => {
-        b._tn = this.tiltNow(b, ms)
         b._cn = this.colorNow(b, i, ms)
-        b._zp = this.st.zoompulse ? zoomPulseK(this.fxp.zoompulse, ms) : 1
+        if (!b.motif) {
+          b._tn = this.tiltNow(b, ms)
+          b._zp = this.st.zoompulse ? zoomPulseK(this.fxp.zoompulse, ms) : 1
+        }
       })
       lc.setTransform(Q, 0, 0, Q, 0, 0)
-      beams.forEach((b, i) => this.drawWallBeam(lc, b, Is[i], b._tn!))
+      beams.forEach((b, i) => {
+        if (b.motif) this.drawMotifLit(lc, b, Is[i], ms)
+        else this.drawWallBeam(lc, b, Is[i], b._tn!)
+      })
       lc.setTransform(1, 0, 0, 1, 0, 0)
       // 縞退治のブラー書き戻し
       const sc = this.smoothCv.getContext('2d')!
@@ -766,7 +810,9 @@ export class ImageLightEngine {
       ac.clearRect(0, 0, QW, QH)
       ac.globalCompositeOperation = 'source-over'
       ac.setTransform(Q, 0, 0, Q, 0, 0)
-      beams.forEach((bm, i) => this.drawAirBeam(ac, bm, Is[i], bm._tn ?? this.tiltNow(bm, ms)))
+      beams.forEach((bm, i) => {
+        if (!bm.motif) this.drawAirBeam(ac, bm, Is[i], bm._tn ?? this.tiltNow(bm, ms))
+      })
       ac.globalCompositeOperation = 'destination-out'
       ac.drawImage(this.mat, b.x, b.y, b.w, b.h)
       ac.setTransform(1, 0, 0, 1, 0, 0)
@@ -986,6 +1032,44 @@ export class ImageLightEngine {
     let x = last ? last.x + 165 : 800
     if (x > 1480) x = 140 + ((this.beams.length * 137) % 1200)
     this.addFixtureAt(x, 840)
+  }
+  addMotifAt(x: number, y: number, type: 'streetlamp' | 'chandelier' | 'marquee'): void {
+    if (this.beams.length >= MAX_BEAMS) return
+    this.pushHistory()
+    this.rigCustomized = true
+    const warm: RGB3 = [255, 190, 100]
+    this.beams.push({
+      x,
+      y,
+      w0: 0,
+      w1: 0,
+      len: 0,
+      pan: 0,
+      tilt: 0,
+      zoom: 1,
+      gauge: 0.9,
+      color: warm,
+      sp: makeSearchParams(this.rnd),
+      motif: type,
+      motifDiam: type === 'marquee' ? 260 : 200,
+      ...(type === 'marquee' ? { motifText: 'LIVE', motifSpeed: 8 } : {})
+    })
+    this.selected = [this.beams.length - 1]
+    this.bump()
+  }
+  setMotifDiam(v: number): void {
+    const n = Math.max(40, Math.round(v))
+    this.targets().forEach((b) => { b.motifDiam = n })
+    this.bump()
+  }
+  setMotifText(s: string): void {
+    this.targets().forEach((b) => { b.motifText = s || 'LIVE' })
+    this.bump()
+  }
+  setMotifSpeed(v: number): void {
+    const n = Math.max(0.5, v)
+    this.targets().forEach((b) => { b.motifSpeed = n })
+    this.bump()
   }
   /** ドラッグ移動: 選択中の灯体すべてを (dx,dy) 動かす。 */
   moveSelectedBy(dx: number, dy: number): void {

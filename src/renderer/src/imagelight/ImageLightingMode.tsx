@@ -1105,6 +1105,69 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             </details>
 
             <div className="il-lbl">
+              MOTIF — モチーフを置く
+              <em>— 街灯・シャンデリア・マーキーを追加（⌘＋ドラッグで移動）</em>
+            </div>
+            <div className="il-frow" style={{ gap: 4, flexWrap: 'wrap' }}>
+              {(['streetlamp', 'chandelier', 'marquee'] as const).map((type) => (
+                <button
+                  key={type}
+                  className="il-mini"
+                  disabled={engine.beams.length >= MAX_BEAMS}
+                  onClick={() => engine.addMotifAt(800, 540, type)}
+                >
+                  {type === 'streetlamp' ? '街灯' : type === 'chandelier' ? 'シャンデリア' : 'マーキー'}
+                </button>
+              ))}
+            </div>
+            {ref?.motif && (
+              <>
+                <div className="il-lbl">
+                  MOTIF SIZE<em>— モチーフの大きさ</em>
+                </div>
+                <div className="il-frow">
+                  <input
+                    type="range"
+                    min={40}
+                    max={600}
+                    value={ref.motifDiam ?? 200}
+                    onChange={(e) => engine.setMotifDiam(+e.target.value)}
+                  />
+                  <div className="il-val big">{ref.motifDiam ?? 200}px</div>
+                </div>
+                {ref.motif === 'marquee' && (
+                  <>
+                    <div className="il-lbl">
+                      TEXT<em>— マーキーの文字</em>
+                    </div>
+                    <div className="il-frow">
+                      <input
+                        type="text"
+                        value={ref.motifText ?? 'LIVE'}
+                        maxLength={16}
+                        style={{ flex: 1, background: '#111', color: '#eee', border: '0.5px solid #555', padding: '2px 6px', fontSize: 13 }}
+                        onChange={(e) => engine.setMotifText(e.target.value)}
+                      />
+                    </div>
+                    <div className="il-lbl">
+                      CHASE SPEED<em>— 流れる速さ（球/秒）</em>
+                    </div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={1}
+                        max={40}
+                        value={Math.round(ref.motifSpeed ?? 8)}
+                        onChange={(e) => engine.setMotifSpeed(+e.target.value)}
+                      />
+                      <div className="il-val big">{Math.round(ref.motifSpeed ?? 8)}</div>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            <div className="il-lbl">
               GAUGE<em>— 明るさ</em>
             </div>
             <div className="il-frow">
