@@ -22,17 +22,26 @@ asarUnpack:
   # node-syphon ships a native .node + Syphon.framework — keep them on disk (not in asar)
   # so the addon and its framework load at runtime.
   - '**/node_modules/node-syphon/**'
+  # koffi (FFI) loads a prebuilt .node per platform at runtime — must be unpacked from asar.
+  # Windows の NDI 直送に使う（import 自体は全プラットフォームで走る）。
+  - '**/node_modules/koffi/**'
 win:
   executableName: decor-studio
   files:
     # node-syphon は Mac 専用。Windows パッケージには含めない。
     - '!**/node_modules/node-syphon/**'
+    # Mac 用の NDI 部品（dylib / arm64 ブリッジ）は Windows では使わない。
+    - '!resources/ndi/libndi.dylib'
+    - '!resources/ndi/syphon2ndi'
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  files:
+    # Windows 用の NDI DLL（28MB）は Mac では使わない。Mac は libndi.dylib + ブリッジを使う。
+    - '!resources/ndi/Processing.NDI.Lib.x64.dll'
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.

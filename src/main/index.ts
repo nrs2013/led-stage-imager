@@ -7,6 +7,14 @@ import icon from '../../resources/icon.png?asset'
 import { ArtNetReceiver } from './artnet/artnet-receiver'
 import type { ArtDmxPacket } from './artnet/artdmx-parser'
 import { OutputPublisher } from './output/syphon-publisher'
+import { startNdiBridge, stopNdiBridge, restartNdiBridge, getNdiStatus } from './output/ndi-bridge'
+import {
+  startNdiDirect,
+  stopNdiDirect,
+  sendNdiFrame,
+  getNdiDirectStatus,
+  resolveNdiLibPath
+} from './output/ndi-direct'
 
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
@@ -18,18 +26,29 @@ let lastChart: unknown = null
 
 function startEngine(): void {
   publisher.start('LED STAGE IMAGER')
+  if (process.platform === 'darwin') {
+    startNdiBridge('LED STAGE IMAGER') // Mac: 同梱 Syphon→NDI ブリッジを自動起動（実績経路）
+  } else {
+    // Windows 等: Syphon が無いので RGBA を直接 NDI 送信。NDIランタイムを探して使う。
+    const ndiDir = join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'ndi')
+    const lib = resolveNdiLibPath(ndiDir)
+    if (lib) startNdiDirect('LED STAGE IMAGER', lib)
+    else console.warn('[ndi-direct] NDIランタイム未検出。NDI Tools か Resolume を入れると有効になります。')
+  }
   receiver.on('dmx', (pkt: ArtDmxPacket) => {
     const msg = { universe: pkt.universe, sequence: pkt.sequence, data: pkt.data }
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('artnet:dmx', msg)
   })
   receiver.on('error', (err) => console.error('[artnet] receiver error:', err))
   receiver.start('0.0.0.0')
-  console.log('[engine] Art-Net receiver (UDP 6454) + Syphon "LED STAGE IMAGER" started')
+  console.log('[engine] Art-Net receiver (UDP 6454) + Syphon/NDI "LED STAGE IMAGER" started')
 }
 
 function stopEngine(): void {
   receiver.stop()
   publisher.stop()
+  stopNdiBridge()
+  stopNdiDirect()
 }
 
 /** Fullscreen output preview on a second display (mirrors the editor's chart, no re-publish). */
@@ -172,7 +191,11 @@ app.whenReady().then(() => {
   ipcMain.on(
     'syphon:frame',
     (_e, payload: { width: number; height: number; buffer: Uint8Array | Uint8ClampedArray }) => {
-      publisher.publishRGBA(payload.width, payload.height, payload.buffer)
+      publisher.publishRGBA(payload.width, payload.height, payload.buffer) // Mac: Syphon（Winはno-op）
+      // Windows 等: 同じ RGBA を直接 NDI 送信（Mac は Syphon→ブリッジ経路を使うので送らない）
+      if (process.platform !== 'darwin') {
+        sendNdiFrame(payload.width, payload.height, payload.buffer)
+      }
     }
   )
 
@@ -208,11 +231,17 @@ app.whenReady().then(() => {
     receiver.start(ip || '0.0.0.0')
     return true
   })
-  ipcMain.handle('engine:status', () => ({
-    hasClients: publisher.hasClients,
-    syphonAvailable: publisher.available,
-    platform: process.platform
-  }))
+  ipcMain.handle('engine:status', () => {
+    // Mac は Syphon→ブリッジ経路、Windows 等は直送(ndi-direct)から状態を取る。
+    const ndi = process.platform === 'darwin' ? getNdiStatus() : getNdiDirectStatus()
+    return {
+      hasClients: publisher.hasClients,
+      syphonAvailable: publisher.available,
+      platform: process.platform,
+      ndiActive: ndi.active, // NDI 配信中（ブリッジ or 直送が稼働）
+      ndiRx: ndi.rx // 受け手(Resolume 等)の接続数
+    }
+  })
 
   // Chart save / open + Syphon source rename.
   ipcMain.handle('chart:save', async (_e, json: string, name: string) => {
@@ -322,6 +351,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('syphon:rename', (_e, name: string) => {
     publisher.start(name || 'LED STAGE IMAGER')
+    restartNdiBridge(name || 'LED STAGE IMAGER')
     return true
   })
 

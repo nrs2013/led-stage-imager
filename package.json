@@ -37,6 +37,7 @@
     "@fontsource/sacramento": "^5.2.8",
     "@fontsource/tilt-neon": "^5.2.10",
     "jszip": "^3.10.1",
+    "koffi": "^2.16.2",
     "zustand": "^5.0.14"
   },
   "optionalDependencies": {

@@ -5,7 +5,13 @@ import { C, F } from '../ui/tokens'
 interface NetApi {
   listInterfaces?: () => Promise<{ name: string; address: string }[]>
   setBind?: (ip: string) => Promise<boolean>
-  getStatus?: () => Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }>
+  getStatus?: () => Promise<{
+    hasClients: boolean
+    syphonAvailable: boolean
+    platform: string
+    ndiActive?: boolean
+    ndiRx?: number
+  }>
 }
 const netApi = (): NetApi | undefined => (window as unknown as { api?: NetApi }).api
 
@@ -14,9 +20,9 @@ export function StatusBar(): React.JSX.Element {
   const [now, setNow] = useState(() => Date.now())
   const [nics, setNics] = useState<{ name: string; address: string }[]>([])
   const [nic, setNic] = useState('0.0.0.0')
-  const [syphon, setSyphon] = useState(false)
   const [platform, setPlatform] = useState<string>('darwin')
-  const [syphonAvailable, setSyphonAvailable] = useState(true)
+  const [ndiActive, setNdiActive] = useState(false)
+  const [ndiRx, setNdiRx] = useState(0)
 
   useEffect(() => {
     netApi()
@@ -28,9 +34,9 @@ export function StatusBar(): React.JSX.Element {
       netApi()
         ?.getStatus?.()
         .then((r) => {
-          setSyphon(r.hasClients)
-          setSyphonAvailable(r.syphonAvailable)
           setPlatform(r.platform)
+          setNdiActive(!!r.ndiActive)
+          setNdiRx(typeof r.ndiRx === 'number' ? r.ndiRx : 0)
         })
         .catch(() => {})
     }, 1000)
@@ -63,19 +69,24 @@ export function StatusBar(): React.JSX.Element {
       )}
 
       <div style={sep} />
-      {syphonAvailable ? (
-        <span
-          style={{
-            ...chip,
-            color: syphon ? C.green : C.faint,
-            borderColor: syphon ? C.green : C.border
-          }}
-        >
-          Syphon Out {syphon ? '● Linked' : '○ —'}
-        </span>
+      {ndiActive ? (
+        <>
+          <span style={{ ...chip, color: C.green, borderColor: C.green }}>NDI OUT ● LIVE</span>
+          {ndiRx >= 0 && (
+            <span
+              style={{
+                ...chip,
+                color: ndiRx > 0 ? C.green : C.faint,
+                borderColor: ndiRx > 0 ? C.green : C.border
+              }}
+            >
+              RX {ndiRx > 0 ? '●' : '○'} {ndiRx}
+            </span>
+          )}
+        </>
       ) : (
         <span style={{ ...chip, color: C.faint, borderColor: C.border }}>
-          {platform === 'win32' ? 'Spout Out ○ 準備中' : 'Output ○ —'}
+          {platform === 'win32' ? 'NDI OUT ○ No Runtime' : 'NDI OUT ○ —'}
         </span>
       )}
 

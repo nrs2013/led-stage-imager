@@ -6,7 +6,7 @@
  * frame を Syphon へ publish しつつ画面にも表示する。光の式は出荷済みUPLIGHTと同系
  * （screen混色・アルベド乗算・色比保持トーン・パン非対称・Smoke連動）。
  */
-import { WHITE, COLORS, sameRgb, type RGB3 } from './colors'
+import { WHITE, COLORS, sameRgb, hexToRgb, type RGB3 } from './colors'
 import {
   chaseK,
   breathK,
@@ -37,6 +37,8 @@ import {
   drawPixelPattCellLit,
   drawPixelPattFrame
 } from '../render/fixtures'
+import { drawStarsLit } from '../render/stars'
+import { drawFestoonWireLit, drawFestoonBulbLit, festoonBulbs } from '../render/festoon'
 import type { Shape } from '../model/types'
 
 /** 写真×光の合成方式。
@@ -93,13 +95,24 @@ export interface Beam {
   _tn?: number
   _cn?: RGB3
   _zp?: number
-  // モチーフ（街灯・シャンデリア・マーキー・電球・PAR・PAT・ミニブル・ピクセルPAT）
-  motif?: 'streetlamp' | 'chandelier' | 'marquee' | 'bulb' | 'parlight' | 'patt' | 'blinder' | 'pixelpatt'
+  // モチーフ（街灯・シャンデリア・マーキー・電球・PAR・PAT・ミニブル・ピクセルPAT・星・垂れ幕）
+  motif?:
+    | 'streetlamp'
+    | 'chandelier'
+    | 'marquee'
+    | 'bulb'
+    | 'parlight'
+    | 'patt'
+    | 'blinder'
+    | 'pixelpatt'
+    | 'stars'
+    | 'festoon'
   motifDiam?: number
   motifText?: string
   motifLetterColors?: string[]
   motifSpeed?: number
   motifReverse?: boolean // マーキー逆方向チェイス
+  motifSeed?: number // 星の散布レイアウトを固定（移動しても再シャッフルしない）
 }
 
 /** シーンに保存されるFXの点き具合（master/smoke は含めない＝呼び出しても親フェーダーは動かない）。 */
@@ -199,6 +212,14 @@ export interface RigPayload {
   chasePalette?: RGB3[]
   paramMidi?: Record<string, number>
   masterMidi?: number | null
+  fxMidi?: Partial<Record<FxKey, number>>
+  fxKey?: Partial<Record<FxKey, string>>
+  falloffPow?: number
+  outCap?: number
+  colorMidi?: Record<string, number>
+  colorKey?: Record<string, string>
+  sceneFadeMode?: 'cut' | 'fade'
+  sceneFadeMs?: number
 }
 /** 公演ファイル（show.json）のシーン1件。メディアは media/ 配下のファイル名で参照。 */
 export interface ShowSceneMeta {
@@ -364,6 +385,25 @@ export class ImageLightEngine {
   // FXツマミ等の MIDI CC 割当（paramId→CC番号・保存対象）。learnParam がLEARN待ちの対象。
   paramMidi: Record<string, number> = {}
   learnParam: string | null = null
+  // エフェクト(FX)のトリガー割当：MIDIノート/キーで FX を ON/OFF（保存対象）。
+  fxMidi: Partial<Record<FxKey, number>> = {}
+  fxKey: Partial<Record<FxKey, string>> = {}
+  /** FX LEARN 待機中の FX キー。null=非待機。 */
+  learnFx: FxKey | null = null
+  /** ビームの落ち込みの強さ（指数）。プリセット ソフト1.5 / 標準2.5 / きつめ4。保存対象。 */
+  falloffPow = 2.5
+  /** 出力(Syphon/NDI)の上限解像度の長辺px。なめらか1920 / バランス2560 / 高精細3840。
+   *  低いほど毎フレームの吸い出し(getImageData)が軽く＝動きが滑らか。保存対象。 */
+  outCap = 3840
+  /** プリセット色のトリガー割当（hex→MIDIノート/キー）。色LEARN(◎)で設定。保存対象。 */
+  colorMidi: Record<string, number> = {}
+  colorKey: Record<string, string> = {}
+  /** 色LEARN待機中の色(hex)。null=非待機。 */
+  learnColor: string | null = null
+  /** 本番(PLAY)のシーン(明かり)切替方式と時間。cut=即／fade=時間補間。保存対象。 */
+  sceneFadeMode: 'cut' | 'fade' = 'cut'
+  sceneFadeMs = 1500
+  private sceneFadeSeq = 0
   // paramId → 「0..1 を実値へ反映する関数」。UI(fxdefs)が登録（非保存）。
   private paramApply = new Map<string, (v01: number) => void>()
 
@@ -562,7 +602,7 @@ export class ImageLightEngine {
     this.activeIsVideo() ||
     this.fading ||
     this.motifChase ||
-    this.beams.some((b) => b.motif === 'marquee')
+    this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars')
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
 
@@ -630,7 +670,9 @@ export class ImageLightEngine {
       const gr = g.createLinearGradient(0, geo.y, 0, geo.y - L)
       for (let s = 0; s <= 28; s++) {
         const t = s / 28
-        const v = Math.pow(Math.pow(1 - t, 2), 1 / 2.2)
+        // 落ち込み: 光源(t=0)で最大、先(t=1)で0。指数 this.falloffPow で強さを切替（プリセット
+        // ソフト1.5 / 標準2.5 / きつめ4）。大きいほど手前が明るく先がかなり暗いメリハリ。
+        const v = Math.pow(1 - t, this.falloffPow)
         gr.addColorStop(t, rgs(col, v))
       }
       g.fillStyle = gr
@@ -733,6 +775,25 @@ export class ImageLightEngine {
       const shape = { points: [{ x: b.x, y: b.y }], diameter: d } as unknown as Shape
       for (let i = 0; i < 7; i++) drawPixelPattCellLit(g, shape, rgb, i)
       drawPixelPattFrame(g, shape, Array(7).fill(rgb))
+    } else if (b.motif === 'stars') {
+      // 星空: d×d の箱に散布。points[0]/[末尾]が箱の対角（render/stars の starBox 仕様）。
+      const shape = {
+        points: [
+          { x: b.x - d / 2, y: b.y - d / 2 },
+          { x: b.x + d / 2, y: b.y + d / 2 }
+        ],
+        starSeed: b.motifSeed ?? 1
+      } as unknown as Shape
+      drawStarsLit(g, shape, rgb, 0, ms) // 白い星
+      drawStarsLit(g, shape, rgb, 1, ms) // 青い星
+    } else if (b.motif === 'festoon') {
+      // 垂れ幕（連なって垂れる電飾）: 幅 d の水平ワイヤが自重で垂れ、電球が並ぶ。
+      const shape = { points: [{ x: b.x - d / 2, y: b.y }, { x: b.x + d / 2, y: b.y }] } as unknown as Shape
+      const n = festoonBulbs(shape).length
+      if (n <= 0) return
+      const rgbs = Array(n).fill(rgb)
+      drawFestoonWireLit(g, shape, rgbs)
+      for (let i = 0; i < n; i++) drawFestoonBulbLit(g, shape, rgb, i)
     }
   }
 
@@ -934,20 +995,44 @@ export class ImageLightEngine {
   /** 出力(outCv)を「写真の部分だけ・写真の解像度・余白なし」で合成する。写真(mat)はフル解像度、
    *  ソフトな光は lightCv の box 領域を引き伸ばす（写真だけシャープに保つ）。編集画面とは別物。 */
   private composeOutput(maxI: number): void {
-    const OUT_CAP = 3840 // 出力上限幅（巨大写真でも安全に）
-    // 光だけ出力モード: 写真を使わず光マップ(lightCv)をそのまま出力。Arena側で 映像×光(Multiply)。
+    const OUT_CAP = this.outCap // 出力上限幅（可変：なめらか1920/バランス2560/高精細3840）
+    // 光だけ出力モード: 写真を使わず光マップ(lightCv)を出力。Arena側で 映像×光(Multiply)。
+    // 出力サイズも光の枠取りも「写真モードと完全に同じ」にする（写真を描かない・切り抜かない
+    // だけの違い）。これで光だけに切り替えても解像度・位置が一切変わらず、Arena の映像×光が
+    // ピッタリ重なる。チャート(mat)が無い時だけ光マップ素のサイズにフォールバック。
     if (this.lightOnly) {
-      const ow = IW
-      const oh = IH
+      if (!this.mat || !this.box) {
+        const ow = IW
+        const oh = IH
+        if (this.outCv.width !== ow) this.outCv.width = ow
+        if (this.outCv.height !== oh) this.outCv.height = oh
+        this.outW = ow
+        this.outH = oh
+        const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+        oc.setTransform(1, 0, 0, 1, 0, 0)
+        oc.globalCompositeOperation = 'source-over'
+        oc.clearRect(0, 0, ow, oh)
+        oc.drawImage(this.lightCv, 0, 0, ow, oh)
+        return
+      }
+      const mw = this.mat.width
+      const mh = this.mat.height
+      const ow = Math.min(mw, OUT_CAP) // 写真モードと同一の出力サイズ
+      const oh = Math.max(1, Math.round((mh * ow) / mw))
       if (this.outCv.width !== ow) this.outCv.width = ow
       if (this.outCv.height !== oh) this.outCv.height = oh
       this.outW = ow
       this.outH = oh
       const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+      const lb = this.box
+      const lbx = lb.x * Q
+      const lby = lb.y * Q
+      const lbw = lb.w * Q
+      const lbh = lb.h * Q
       oc.setTransform(1, 0, 0, 1, 0, 0)
       oc.globalCompositeOperation = 'source-over'
       oc.clearRect(0, 0, ow, oh)
-      oc.drawImage(this.lightCv, 0, 0)
+      oc.drawImage(this.lightCv, lbx, lby, lbw, lbh, 0, 0, ow, oh) // 光の box 領域→出力（写真モードと同じ枠取り）
       return
     }
     if (!this.mat || !this.box || maxI <= 0.004) {
@@ -1122,7 +1207,19 @@ export class ImageLightEngine {
     if (x > 1480) x = 140 + ((this.beams.length * 137) % 1200)
     this.addFixtureAt(x, 840)
   }
-  addMotifAuto(type: 'streetlamp' | 'chandelier' | 'marquee' | 'bulb' | 'parlight' | 'patt' | 'blinder' | 'pixelpatt'): void {
+  addMotifAuto(
+    type:
+      | 'streetlamp'
+      | 'chandelier'
+      | 'marquee'
+      | 'bulb'
+      | 'parlight'
+      | 'patt'
+      | 'blinder'
+      | 'pixelpatt'
+      | 'stars'
+      | 'festoon'
+  ): void {
     if (this.beams.length >= MAX_BEAMS) return
     // 同種モチーフの最後の位置から右にずらす、なければ中央上寄りに配置
     const same = this.beams.filter((b) => b.motif === type)
@@ -1154,8 +1251,11 @@ export class ImageLightEngine {
         type === 'parlight' ? 8 :      // 20cm
         type === 'bulb' ? 6 :          // 15cm
         type === 'patt' ? 20 :         // 50cm
-        type === 'pixelpatt' ? 28 : 200, // 70cm
-      ...(type === 'marquee' ? { motifText: 'LIVE', motifSpeed: 8 } : {})
+        type === 'pixelpatt' ? 28 :    // 70cm
+        type === 'stars' ? 400 :       // 星空フィールド 10m角
+        type === 'festoon' ? 240 : 200, // 垂れ幕 6m幅
+      ...(type === 'marquee' ? { motifText: 'LIVE', motifSpeed: 8 } : {}),
+      ...(type === 'stars' ? { motifSeed: Math.floor(this.rnd() * 1e6) + 1 } : {})
     })
     this.selected = [this.beams.length - 1]
     this.bump()
@@ -1341,6 +1441,50 @@ export class ImageLightEngine {
   /** 光だけ出力モードの切替（写真なしで光マップだけを出力する）。 */
   setLightOnly(v: boolean): void {
     this.lightOnly = v
+    this.bump()
+  }
+  /** ビームの落ち込みの強さ（指数）を切替。ソフト1.5 / 標準2.5 / きつめ4。 */
+  setFalloff(pow: number): void {
+    this.falloffPow = pow
+    this.bump()
+  }
+  /** 出力上限解像度を切替。なめらか1920 / バランス2560 / 高精細3840。低いほど滑らか。 */
+  setOutCap(px: number): void {
+    this.outCap = px
+    this.bump()
+  }
+  /** 色を「次のMIDIノート/キー」で呼べるようにする LEARN 待機。null=中止。 */
+  setLearnColor(hex: string | null): void {
+    this.learnColor = hex
+    if (hex != null) {
+      this.learnPattern = null
+      this.learnScene = null
+      this.masterLearn = false
+      this.learnParam = null
+      this.learnFx = null
+      this.initMidi()
+    }
+    this.bump(false)
+  }
+  /** プリセット色にショートカット（キー/MIDIノート）を割当。両方nullで解除。 */
+  assignColorShortcut(hex: string, code: string | null, midi: number | null): void {
+    if (code != null) this.colorKey[hex] = code
+    if (midi != null) this.colorMidi[hex] = midi
+    this.learnColor = null
+    this.bump()
+  }
+  clearColorShortcut(hex: string): void {
+    delete this.colorKey[hex]
+    delete this.colorMidi[hex]
+    this.bump()
+  }
+  /** 本番シーン切替の方式（cut/fade）と時間(ms)を設定。 */
+  setSceneFadeMode(mode: 'cut' | 'fade'): void {
+    this.sceneFadeMode = mode
+    this.bump()
+  }
+  setSceneFadeMs(ms: number): void {
+    this.sceneFadeMs = Math.max(0, ms)
     this.bump()
   }
 
@@ -2073,8 +2217,74 @@ export class ImageLightEngine {
     this.pushHistory()
     this.wake()
     this.activePattern = i
-    this.applyLook(p.look)
+    this.sceneFadeSeq++ // 進行中のフェードがあれば止める（カット/別シーンで割込み）
+    if (this.sceneFadeMode === 'fade' && this.sceneFadeMs > 0 && this.beams.length) {
+      this.startSceneFade(p.look)
+    } else {
+      this.applyLook(p.look)
+    }
     this.bump()
+  }
+  /** シーン(明かり)切替をフェードする。各灯の gauge/色/pan/tilt/zoom を sceneFadeMs かけて
+   *  現在値→目標値へ補間。FX(真偽)は即適用（補間不可）。panicFade と同じ rAF 方式。 */
+  private startSceneFade(L: Look): void {
+    if (!L) return
+    const from = this.beams.map((b) => ({
+      gauge: b.gauge,
+      color: b.color.slice() as RGB3,
+      pan: b.pan,
+      tilt: b.tilt,
+      zoom: b.zoom
+    }))
+    // FX/fxp/chasePalette は即適用（旧シーン互換で全FX一旦OFF→記録を反映）
+    const s = this.st
+    s.chase = s.search = s.searchRandom = s.colorChase = false
+    s.strobe = 'off'
+    s.breath = s.fire = s.wave = s.bolt = s.rainbow = s.zoompulse = false
+    Object.assign(s, L.fxst)
+    if (L.fxp) this.fxp = JSON.parse(JSON.stringify(L.fxp))
+    this.chasePalette = (L.chasePalette ?? []).map((c) => c.slice() as RGB3)
+    this.t0 = performance.now()
+    const dur = this.sceneFadeMs
+    const seq = this.sceneFadeSeq
+    const t0 = performance.now()
+    this.fading = true
+    const lerp = (a: number, b: number, k: number): number => a + (b - a) * k
+    const step = (now: number): void => {
+      if (this.sceneFadeSeq !== seq || !this.fading) return // 割込み/暗転で中断
+      const k = dur > 0 ? Math.min(1, (now - t0) / dur) : 1
+      const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2 // easeInOut
+      this.beams.forEach((b, i) => {
+        const f = from[i]
+        const t = L.lights[i]
+        if (!f || !t) return
+        b.gauge = lerp(f.gauge, t.gauge, e)
+        b.color = [
+          Math.round(lerp(f.color[0], t.color[0], e)),
+          Math.round(lerp(f.color[1], t.color[1], e)),
+          Math.round(lerp(f.color[2], t.color[2], e))
+        ] as RGB3
+        b.pan = lerp(f.pan, t.pan, e)
+        b.tilt = lerp(f.tilt, t.tilt, e)
+        b.zoom = lerp(f.zoom, t.zoom, e)
+      })
+      this.bump(false)
+      if (k < 1) requestAnimationFrame(step)
+      else {
+        L.lights.forEach((t, i) => {
+          const b = this.beams[i]
+          if (!b) return
+          b.gauge = t.gauge
+          b.color = t.color.slice() as RGB3
+          b.pan = t.pan
+          b.tilt = t.tilt
+          b.zoom = t.zoom
+        })
+        this.fading = false
+        this.bump(false)
+      }
+    }
+    requestAnimationFrame(step)
   }
   renamePattern(i: number, name: string): void {
     const p = this.patterns[i]
@@ -2085,7 +2295,11 @@ export class ImageLightEngine {
   }
   setLearnPattern(i: number | null): void {
     this.learnPattern = i
-    if (i !== null) this.learnScene = null // 排他：シーン Learn を消す
+    if (i !== null) {
+      this.learnScene = null // 排他：シーン Learn を消す
+      this.learnFx = null
+      this.learnColor = null
+    }
     this.bump(false)
   }
   assignShortcut(i: number, key: string | null, midi: number | null): void {
@@ -2119,6 +2333,8 @@ export class ImageLightEngine {
       this.learnPattern = null
       this.masterLearn = false
       this.learnParam = null
+      this.learnFx = null
+      this.learnColor = null
     }
     this.bump(false)
   }
@@ -2343,6 +2559,8 @@ export class ImageLightEngine {
     this.masterLearn = on
     if (on) {
       this.learnParam = null // 同時に2つ待たない
+      this.learnFx = null
+      this.learnColor = null
       this.initMidi()
     }
     this.bump(false)
@@ -2352,9 +2570,37 @@ export class ImageLightEngine {
     this.learnParam = id
     if (id != null) {
       this.masterLearn = false
+      this.learnFx = null
+      this.learnColor = null
       this.initMidi()
     }
     this.bump(false)
+  }
+  /** FX を「次のMIDIノート / キー」で呼べるようにする LEARN 待機。null=中止。 */
+  setLearnFx(key: FxKey | null): void {
+    this.learnFx = key
+    if (key != null) {
+      this.learnPattern = null
+      this.learnScene = null
+      this.masterLearn = false
+      this.learnParam = null
+      this.learnColor = null
+      this.initMidi()
+    }
+    this.bump(false)
+  }
+  /** FX にショートカット（キー/MIDIノート）を割り当てる。両方nullで解除。 */
+  assignFxShortcut(fx: FxKey, code: string | null, midi: number | null): void {
+    if (code != null) this.fxKey[fx] = code
+    if (midi != null) this.fxMidi[fx] = midi
+    this.learnFx = null
+    this.bump()
+  }
+  /** FX の割当を解除（キー・MIDI両方）。 */
+  clearFxShortcut(fx: FxKey): void {
+    delete this.fxKey[fx]
+    delete this.fxMidi[fx]
+    this.bump()
   }
   /** UI(fxdefs)が「paramId→0..1を実値へ反映する関数」を登録する。 */
   setParamApply(map: Map<string, (v01: number) => void>): void {
@@ -2373,14 +2619,22 @@ export class ImageLightEngine {
             if (!data) return
             const [stt, note, vel] = data
             if ((stt & 0xf0) === 0x90 && vel > 0) {
-              if (this.learnPattern != null) this.assignShortcut(this.learnPattern, null, note)
+              if (this.learnFx != null) this.assignFxShortcut(this.learnFx, null, note)
+              else if (this.learnColor != null) this.assignColorShortcut(this.learnColor, null, note)
+              else if (this.learnPattern != null) this.assignShortcut(this.learnPattern, null, note)
               else if (this.learnScene != null) this.assignSceneMidi(this.learnScene, note)
               else {
-                const pi = this.patterns.findIndex((p) => p && p.midi === note)
-                if (pi >= 0) this.applyPattern(pi)
+                const fk = (Object.keys(this.fxMidi) as FxKey[]).find((k) => this.fxMidi[k] === note)
+                const ck = Object.keys(this.colorMidi).find((h) => this.colorMidi[h] === note)
+                if (fk) this.fxToggle(fk)
+                else if (ck) this.setColor(hexToRgb(ck))
                 else {
-                  const si = this.scenes.findIndex((s) => s.midiNote === note)
-                  if (si >= 0) this.selectScene(si)
+                  const pi = this.patterns.findIndex((p) => p && p.midi === note)
+                  if (pi >= 0) this.applyPattern(pi)
+                  else {
+                    const si = this.scenes.findIndex((s) => s.midiNote === note)
+                    if (si >= 0) this.selectScene(si)
+                  }
                 }
               }
             } else if ((stt & 0xf0) === 0xb0) {
@@ -2435,7 +2689,15 @@ export class ImageLightEngine {
       userColors: this.userColors,
       chasePalette: this.chasePalette,
       paramMidi: this.paramMidi,
-      masterMidi: this.masterMidi
+      masterMidi: this.masterMidi,
+      fxMidi: this.fxMidi,
+      fxKey: this.fxKey,
+      falloffPow: this.falloffPow,
+      outCap: this.outCap,
+      colorMidi: this.colorMidi,
+      colorKey: this.colorKey,
+      sceneFadeMode: this.sceneFadeMode,
+      sceneFadeMs: this.sceneFadeMs
     }
   }
   // rigData を取り込む（localStorage / 公演読込 共通）。灯体配置は読み込まない。
@@ -2451,6 +2713,14 @@ export class ImageLightEngine {
     if (Array.isArray(d.chasePalette)) this.chasePalette = d.chasePalette
     if (d.paramMidi && typeof d.paramMidi === 'object') this.paramMidi = d.paramMidi
     if (typeof d.masterMidi === 'number') this.masterMidi = d.masterMidi
+    if (d.fxMidi && typeof d.fxMidi === 'object') this.fxMidi = d.fxMidi
+    if (d.fxKey && typeof d.fxKey === 'object') this.fxKey = d.fxKey
+    if (typeof d.falloffPow === 'number') this.falloffPow = d.falloffPow
+    if (typeof d.outCap === 'number') this.outCap = d.outCap
+    if (d.colorMidi && typeof d.colorMidi === 'object') this.colorMidi = d.colorMidi
+    if (d.colorKey && typeof d.colorKey === 'object') this.colorKey = d.colorKey
+    if (d.sceneFadeMode === 'cut' || d.sceneFadeMode === 'fade') this.sceneFadeMode = d.sceneFadeMode
+    if (typeof d.sceneFadeMs === 'number') this.sceneFadeMs = d.sceneFadeMs
   }
   private saveRig(): void {
     try {

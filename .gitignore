@@ -11,3 +11,14 @@ dist.nosync
 # 引き継ぎ書は公演機密を含む可能性があるため公開リポに上げない
 LED-STAGE-IMAGER-引き継ぎ-*.md
 DECOR-STUDIO-引き継ぎ-*.md
+
+# NDI 部品（市販バイナリ＋自前ビルドのブリッジ）は公開リポに入れない。
+# 入手・再生成の手順は resources/ndi/README.md を参照。
+resources/ndi/Processing.NDI.Lib.x64.dll
+resources/ndi/libndi.dylib
+resources/ndi/syphon2ndi
+# tools: コンパイル済みバイナリ・検証用スクリプト（.m ソースから再生成可）
+tools/syphon-ndi-bridge/syphon2ndi
+tools/syphon-ndi-bridge/ndifind
+tools/syphon-ndi-bridge/ndirecv_test
+tools/syphon-ndi-bridge/koffi_ndi_test.cjs

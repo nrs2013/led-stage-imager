@@ -19,8 +19,6 @@ interface DecorApi {
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
-const FPS = 30
-
 // ショートカットは「物理キー(e.code)」基準＝IME(日本語入力)や配列に左右されず、A〜Z・記号・
 // スペース等どのキーでも割り当て・呼び出しできる。修飾キー単体（Shift等）は無視する。
 const MOD_CODE = /^(Shift|Control|Alt|Meta|OS|Fn)/
@@ -176,8 +174,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     if (!cv) return
     const ctx = cv.getContext('2d')!
     const api = getApi()
-    const tick = (): void => {
-      // 静止画は描き直さない＝カクつき防止。FX/動画/フェード中、ラバーバンド中、状態変化、
+    let raf = 0
+    let lastPublish = 0
+    // 出力(Syphon/NDI)の重い読み出し(getImageData)は、連続アニメ中は最大このfpsに間引く。
+    // 表示(frame描画)は毎フレームやるので、Search等の動きは滑らかなまま。
+    const PUBLISH_MIN_MS = 1000 / 30
+    const tick = (now: number): void => {
+      raf = requestAnimationFrame(tick)
+      // 静止画は描き直さない＝無駄処理を省く。FX/動画/フェード中、ラバーバンド中、状態変化、
       // または強制フラグ（初回・リサイズ・モード切替）の時だけ描く。
       const v = engine.getVersion()
       const animating =
@@ -187,15 +191,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       if (!animating && v === lastVRef.current && !forceRenderRef.current) return
       forceRenderRef.current = false
       lastVRef.current = v
-      const now = performance.now()
       engine.renderFrame(now)
-      // Syphon出力は outCv（写真＋光＋モチーフ）。画面表示は余白ありの frame。
-      // クライアント未接続の確証があるときだけ readOutputRGBA()(重い getImageData) を省いて
-      // 無駄な IPC を減らす。それ以外は必ず送る（フェイルオープン）。
-      if (syphonReadyRef.current && api?.publishFrame) {
-        api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
-      }
-      // 画面へ
+      // まず画面へ（軽い・毎フレーム）。重い出力読み出しは後で間引いて行う。
       const { scale, ox, oy } = viewRef.current
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.fillStyle = '#000'
@@ -237,10 +234,17 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         }
         drawSnapGuides(ctx, engine, scale)
       }
+      // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更は即送る）。
+      // フェイルオープン：未接続が確証できる時だけ省く。
+      if (syphonReadyRef.current && api?.publishFrame) {
+        if (!animating || now - lastPublish >= PUBLISH_MIN_MS) {
+          lastPublish = now
+          api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
+        }
+      }
     }
-    const iv = setInterval(tick, 1000 / FPS)
-    tick()
-    return () => clearInterval(iv)
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
   }, [engine])
 
   // ---- デモ画像は入れない（空で始める）。素材はのむさんがドロップ／＋から読み込む
@@ -308,6 +312,32 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         }
         return
       }
+      // FX LEARN 待機中：Esc で中止、それ以外のキーでそのFXに割当
+      if (engine.learnFx != null) {
+        if (e.key === 'Escape') {
+          engine.setLearnFx(null)
+          e.preventDefault()
+          return
+        }
+        const lc = shortcutCode(e)
+        if (!lc) return // 修飾キー単体は無視
+        engine.assignFxShortcut(engine.learnFx, lc, null)
+        e.preventDefault()
+        return
+      }
+      // 色 LEARN 待機中：Esc で中止、それ以外のキーでその色に割当
+      if (engine.learnColor != null) {
+        if (e.key === 'Escape') {
+          engine.setLearnColor(null)
+          e.preventDefault()
+          return
+        }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignColorShortcut(engine.learnColor, lc, null)
+        e.preventDefault()
+        return
+      }
       const code = shortcutCode(e)
       // BUILD: ピース選択中の Delete はピース削除（灯体より優先）
       if (
@@ -339,6 +369,22 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const pi = code ? engine.patterns.findIndex((p) => p && p.key === code) : -1
       if (pi >= 0) {
         engine.applyPattern(pi)
+        e.preventDefault()
+        return
+      }
+      // 割り当て済みのキーで FX を ON/OFF
+      const fk = code
+        ? (Object.keys(engine.fxKey) as FxKey[]).find((k) => engine.fxKey[k] === code)
+        : undefined
+      if (fk) {
+        engine.fxToggle(fk)
+        e.preventDefault()
+        return
+      }
+      // 割り当て済みのキーでプリセット色を適用
+      const ck = code ? Object.keys(engine.colorKey).find((h) => engine.colorKey[h] === code) : undefined
+      if (ck) {
+        engine.setColor(hexToRgb(ck))
         e.preventDefault()
         return
       }
@@ -782,11 +828,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       engine.setLearnScene(engine.learnScene === i ? null : i)
                     }}
                   >
-                    {engine.learnScene === i
-                      ? '待機…'
-                      : s.midiNote != null
-                      ? `♪${s.midiNote}`
-                      : 'LEARN'}
+                    {engine.learnScene === i ? '◎' : s.midiNote != null ? `♪${s.midiNote}` : '◎'}
                   </span>
                 </button>
                 {editingNameIdx === i ? (
@@ -851,6 +893,46 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 明かり作りへ →
               </button>
             </div>
+            <div className="il-toggles">
+              <button
+                className={'il-toggle' + (engine.lightOnly ? ' on' : '')}
+                onClick={() => engine.setLightOnly(!engine.lightOnly)}
+                title="ON=写真を使わず光だけをSyphon出力（Arena側で 映像×光）。OFF=写真照らし"
+              >
+                光だけ出力
+              </button>
+            </div>
+            <div className="il-toggles">
+              <span className="il-falloff-lbl">切替</span>
+              <button
+                className={'il-toggle' + (engine.sceneFadeMode === 'cut' ? ' on' : '')}
+                onClick={() => engine.setSceneFadeMode('cut')}
+                title="シーンを即座に切替（カット）"
+              >
+                カット
+              </button>
+              <button
+                className={'il-toggle' + (engine.sceneFadeMode === 'fade' ? ' on' : '')}
+                onClick={() => engine.setSceneFadeMode('fade')}
+                title="シーンをフェードで切替（時間は下のスライダー）"
+              >
+                フェード
+              </button>
+            </div>
+            {engine.sceneFadeMode === 'fade' && (
+              <div className="il-frow">
+                <span className="il-falloff-lbl">時間</span>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={5}
+                  step={0.1}
+                  value={engine.sceneFadeMs / 1000}
+                  onChange={(e) => engine.setSceneFadeMs(Math.round(+e.target.value * 1000))}
+                />
+                <div className="il-val">{(engine.sceneFadeMs / 1000).toFixed(1)}秒</div>
+              </div>
+            )}
             <div className="il-playpats">
               {engine.patterns.map((p, i) => (
                 <button
@@ -873,7 +955,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               ))}
             </div>
             <div className="il-lbl">
-              MASTER<em>— 親フェーダー（LEARNでMIDI割当・↑↓キーでも）</em>
+              MASTER
             </div>
             <div className="il-frow">
               <input
@@ -888,23 +970,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 className={'il-mini' + (engine.masterLearn ? ' learnon' : '')}
                 onClick={() => engine.setMasterLearn(!engine.masterLearn)}
               >
-                {engine.masterLearn
-                  ? 'CC待ち…'
-                  : engine.masterMidi != null
-                    ? 'CC' + engine.masterMidi
-                    : 'LEARN'}
+                {engine.masterLearn ? '◎' : engine.masterMidi != null ? 'CC' + engine.masterMidi : '◎'}
               </button>
-            </div>
-            <div className="il-note">
-              <b>ESC</b>＝全部ふわっと消す（1.5秒）／<b>0</b>＝即暗転／<b>F</b>＝全灯フル／<b>↑↓</b>
-              ＝マスター／<b>← →</b>＝写真送り。
-              <br />
-              写真は下の棚をクリック。明かりはシーンを押すだけ。
             </div>
             {engine.beams.some((b) => b.motif) && (
               <>
                 <hr />
-                <div className="il-lbl">MOTIF<em>— 個別調整（ゲージ・ミュート）</em></div>
+                <div className="il-lbl">MOTIF</div>
                 <div className="il-frow" style={{ gap: 4, marginBottom: 6 }}>
                   <span style={{ width: 64, fontSize: 11, color: 'var(--il-txt)', flexShrink: 0 }}>
                     チェイス
@@ -921,7 +993,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   if (!b.motif) return null
                   const label: Record<string, string> = {
                     streetlamp: '街灯', chandelier: 'シャンデリア', marquee: 'マーキー',
-                    bulb: 'ボール球', parlight: 'PAR', blinder: 'ミニブル', patt: 'PAT', pixelpatt: 'PixelPAT'
+                    bulb: 'ボール球', parlight: 'PAR', blinder: 'ミニブル', patt: 'PAT', pixelpatt: 'PixelPAT',
+                    stars: '星', festoon: '垂れ幕'
                   }
                   return (
                     <div key={i} className="il-frow" style={{ gap: 4, marginBottom: 3 }}>
@@ -962,85 +1035,89 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               </button>
             </div>
 
-            <button
-              className={'il-mini' + (engine.lightOnly ? ' learnon' : '')}
-              style={{ alignSelf: 'flex-start', marginBottom: 2 }}
-              onClick={() => engine.setLightOnly(!engine.lightOnly)}
-              title="ON=写真を使わず光だけをSyphon出力（Arena側で 映像×光 を Multiply）。OFF=従来の写真照らし"
-            >
-              {engine.lightOnly
-                ? '💡 光だけ出力：ON（Arena乗算用）'
-                : '光だけ出力：OFF（写真照らし）'}
-            </button>
-            <div
-              style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 0, flexWrap: 'wrap' }}
-              title="アルファ付き画像を入れると、BUILD のときだけステージ上に境界線をシアンで表示します"
-            >
+            <div className="il-toggles">
               <button
-                className={'il-mini' + (engine.maskImage ? ' learnon' : '')}
-                onClick={() => maskInputRef.current?.click()}
+                className={'il-toggle' + (engine.lightOnly ? ' on' : '')}
+                onClick={() => engine.setLightOnly(!engine.lightOnly)}
+                title="ON=写真を使わず光だけをSyphon出力（Arena側で 映像×光）。OFF=写真照らし"
               >
-                {engine.maskImage ? '🎭 マスク：差し替え' : '🎭 マスク取り込み（境界線）'}
+                光だけ出力
+              </button>
+              <button
+                className={'il-toggle' + (engine.maskImage ? ' on' : '')}
+                onClick={() => maskInputRef.current?.click()}
+                title="アルファ付き画像で境界線を表示（BUILD中のみ・公演ファイルにのみ保存）"
+              >
+                マスク
+              </button>
+              <button
+                className={'il-toggle' + (engine.pieceCreating ? ' on' : '')}
+                onClick={() => engine.setPieceCreating(!engine.pieceCreating)}
+                title="写真の上をドラッグしてピースを切り出し"
+              >
+                ピース
               </button>
               {engine.maskImage && (
-                <button
-                  className="il-mini"
-                  onClick={() => {
-                    engine.setMaskFromDataUrl(null)
-                  }}
-                  title="マスクを外す"
-                >
-                  ×解除
+                <button className="il-mini" onClick={() => engine.setMaskFromDataUrl(null)} title="マスクを外す">
+                  ×
                 </button>
               )}
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                color: 'var(--il-dim)',
-                marginBottom: 4,
-                lineHeight: 1.3,
-                maxWidth: 280
-              }}
-            >
-              ※マスクは「公演ファイル（保存／開く）」にだけ残ります。再起動するとリセット。
-            </div>
-            <div
-              style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 2, flexWrap: 'wrap' }}
-              title="BUILD で写真の枠（4 辺中央のハンドル）を引っ張ると、マスクの線に合わせて伸ばせる"
-            >
-              <span style={{ fontSize: 10, color: 'var(--il-dim)' }}>
-                📐 写真の枠：4 辺ハンドルでマスクに合わせる
-              </span>
               {engine.isActiveSceneWarped() && (
                 <button
                   className="il-mini"
                   onClick={() => engine.setActiveSceneWarpBox(null)}
-                  title="この写真のワープをリセット（contain fit へ）"
+                  title="写真のワープをリセット"
                 >
-                  ↺ リセット
+                  ↺
                 </button>
               )}
-            </div>
-            <div
-              style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 2, flexWrap: 'wrap' }}
-              title="写真の上で四角ドラッグして「ピース」を切り出し → 4 隅をマスクに合わせて引っ張る"
-            >
-              <button
-                className={'il-mini' + (engine.pieceCreating ? ' learnon' : '')}
-                onClick={() => engine.setPieceCreating(!engine.pieceCreating)}
-              >
-                {engine.pieceCreating ? '✂️ ピース：写真の上をドラッグ…（Esc 中止）' : '✂️ ピース作成'}
-              </button>
               {engine.selectedPieceId && (
                 <button
                   className="il-mini"
                   onClick={() => engine.removeSelectedPiece()}
-                  title="選択中のピースを削除（Delete キーでも）"
+                  title="選択中のピースを削除（Deleteでも）"
                 >
-                  × 削除
+                  × ピース
                 </button>
               )}
+            </div>
+            <div className="il-toggles">
+              <span className="il-falloff-lbl">落ち込み</span>
+              {(
+                [
+                  { label: 'ソフト', pow: 1.5 },
+                  { label: '標準', pow: 2.5 },
+                  { label: 'きつめ', pow: 4 }
+                ] as const
+              ).map(({ label, pow }) => (
+                <button
+                  key={label}
+                  className={'il-toggle' + (engine.falloffPow === pow ? ' on' : '')}
+                  onClick={() => engine.setFalloff(pow)}
+                  title="ビームの落ち込みの強さ（手前を明るく・奥を暗く）"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="il-toggles">
+              <span className="il-falloff-lbl">出力</span>
+              {(
+                [
+                  { label: 'なめらか', px: 1920 },
+                  { label: 'バランス', px: 2560 },
+                  { label: '高精細', px: 3840 }
+                ] as const
+              ).map(({ label, px }) => (
+                <button
+                  key={label}
+                  className={'il-toggle' + (engine.outCap === px ? ' on' : '')}
+                  onClick={() => engine.setOutCap(px)}
+                  title="NDI/Syphon出力の解像度。低いほど動きが滑らか・高いほど精細（本番=高精細／動き重視=なめらか）"
+                >
+                  {label}
+                </button>
+              ))}
             </div>
             <input
               ref={maskInputRef}
@@ -1187,10 +1264,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               </div>
             </details>
 
-            <div className="il-lbl">
-              MOTIF — モチーフを置く
-              <em>— 電飾・照明オブジェクトを追加（⌘＋ドラッグで移動）</em>
-            </div>
+            <div className="il-lbl">MOTIF</div>
             <div className="il-frow" style={{ gap: 4, flexWrap: 'wrap' }}>
               {([
                 { type: 'streetlamp' as const, label: '街灯' },
@@ -1201,6 +1275,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 { type: 'blinder' as const, label: 'ミニブル' },
                 { type: 'patt' as const, label: 'PAT' },
                 { type: 'pixelpatt' as const, label: 'PixelPAT' },
+                { type: 'stars' as const, label: '星' },
+                { type: 'festoon' as const, label: '垂れ幕' },
               ]).map(({ type, label }) => (
                 <button
                   key={type}
@@ -1215,7 +1291,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             {ref?.motif && (
               <>
                 <div className="il-lbl">
-                  MOTIF SIZE<em>— モチーフの大きさ</em>
+                  MOTIF SIZE
                 </div>
                 <div className="il-frow">
                   <input
@@ -1230,7 +1306,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 {ref.motif === 'marquee' && (
                   <>
                     <div className="il-lbl">
-                      TEXT<em>— マーキーの文字</em>
+                      TEXT
                     </div>
                     <div className="il-frow">
                       <input
@@ -1242,7 +1318,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       />
                     </div>
                     <div className="il-lbl">
-                      CHASE SPEED<em>— 流れる速さ（球/秒）</em>
+                      CHASE SPEED
                     </div>
                     <div className="il-frow">
                       <input
@@ -1273,7 +1349,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             )}
 
             <div className="il-lbl">
-              GAUGE<em>— 明るさ</em>
+              GAUGE
             </div>
             <div className="il-frow">
               <input
@@ -1286,30 +1362,48 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <div className="il-val big">{Math.round((ref?.gauge ?? 0) * 100)}%</div>
             </div>
 
-            <div className="il-lbl">
-              COLOR
-              <em>
-                {colorLocked
-                  ? '— 虹/カラーチェイス中（色はドラッグで「流す色」へ）'
-                  : '— 固定色／ピッカー／★で保存（ドラッグで流す色へ）'}
-              </em>
-            </div>
+            <div className="il-lbl">COLOR</div>
             <div className="il-swatches" style={{ opacity: colorLocked ? 0.6 : 1 }}>
-              {COLORS.map((cc) => (
-                <button
-                  key={cc.hex}
-                  className={ref && sameRgb(ref.color, cc.rgb) ? 'on' : ''}
-                  style={{ background: cc.hex }}
-                  draggable
-                  onDragStart={(e) =>
-                    e.dataTransfer.setData('application/x-il-color', JSON.stringify(cc.rgb))
-                  }
-                  onClick={() => {
-                    if (!colorLocked) engine.setColor(cc.rgb.slice() as RGB3)
-                  }}
-                  title="クリックで適用／ドラッグでカラフルチェイスの「流す色」へ"
-                />
-              ))}
+              {COLORS.map((cc) => {
+                const learning = engine.learnColor === cc.hex
+                const assigned = engine.colorMidi[cc.hex] != null || engine.colorKey[cc.hex] != null
+                return (
+                  <span key={cc.hex} className="il-sw-cell">
+                    <button
+                      className={ref && sameRgb(ref.color, cc.rgb) ? 'on' : ''}
+                      style={{ background: cc.hex }}
+                      draggable
+                      onDragStart={(e) =>
+                        e.dataTransfer.setData('application/x-il-color', JSON.stringify(cc.rgb))
+                      }
+                      onClick={() => {
+                        if (!colorLocked) engine.setColor(cc.rgb.slice() as RGB3)
+                      }}
+                      title="クリックで適用／ドラッグで流す色へ"
+                    />
+                    <button
+                      className={'il-sw-learn' + (learning ? ' on' : assigned ? ' assigned' : '')}
+                      title={
+                        learning
+                          ? '待機中… MIDIノートかキーを入力（Escで中止）'
+                          : assigned
+                            ? '割当済み（クリックで再割当・右クリックで解除）'
+                            : 'この色をMIDI/キーに割当'
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        engine.setLearnColor(learning ? null : cc.hex)
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        engine.clearColorShortcut(cc.hex)
+                      }}
+                    >
+                      ◎
+                    </button>
+                  </span>
+                )
+              })}
             </div>
             <div
               className="il-frow"
@@ -1360,7 +1454,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             </div>
 
             <div className="il-lbl">
-              PAN / TILT / ZOOM<em>— ZOOM＝広さ（扇の開き）。長さは変えない</em>
+              PAN / TILT / ZOOM
             </div>
             <PoseRow
               label="PAN"
@@ -1392,19 +1486,40 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               </button>
             </div>
 
-            <div className="il-lbl">
-              FX — エフェクト<em>— クリックで点/消／各ツマミの ◎ でMIDIつまみ割当</em>
-            </div>
+            <div className="il-lbl">FX</div>
             <div className="il-fxgrid">
-              {FX_BUTTONS.map((b) => (
-                <button
-                  key={b.key}
-                  className={engine.fxState(b.key) ? 'on' : ''}
-                  onClick={() => engine.fxToggle(b.key)}
-                >
-                  {b.label}
-                </button>
-              ))}
+              {FX_BUTTONS.map((b) => {
+                const learning = engine.learnFx === b.key
+                const assigned = engine.fxMidi[b.key] != null || engine.fxKey[b.key] != null
+                return (
+                  <div key={b.key} className={'il-fxcell' + (engine.fxState(b.key) ? ' on' : '')}>
+                    <span className="il-fx-led" aria-hidden="true" />
+                    <button className="il-fxbtn" onClick={() => engine.fxToggle(b.key)}>
+                      {b.label}
+                    </button>
+                    <button
+                      className={'il-fx-learn' + (learning ? ' on' : assigned ? ' assigned' : '')}
+                      title={
+                        learning
+                          ? '待機中… MIDIノートかキーを入力（Escで中止）'
+                          : assigned
+                            ? '割当済み（クリックで再割当・右クリックで解除）'
+                            : 'MIDI/キーを割当'
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        engine.setLearnFx(learning ? null : b.key)
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        engine.clearFxShortcut(b.key)
+                      }}
+                    >
+                      ◎
+                    </button>
+                  </div>
+                )
+              })}
             </div>
             <div className="il-fxparams">
               {activeFx.map((b) => (
@@ -1414,10 +1529,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             </div>
 
             <hr />
-            <div className="il-lbl">
-              SCENES — シーン
-              <em>— ＋で好きなだけ追加（10個目以降はクリック/MIDI/LEARNで呼ぶ）</em>
-            </div>
+            <div className="il-lbl">SCENES</div>
             <button
               className="il-mini"
               style={{
@@ -1484,7 +1596,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       engine.setLearnPattern(engine.learnPattern === i ? null : i)
                     }}
                   >
-                    {engine.learnPattern === i ? 'キー待ち…' : 'LEARN'}
+                    {engine.learnPattern === i ? '◎' : '◎'}
                   </button>
                   <button
                     className="il-ic"
@@ -1871,21 +1983,21 @@ function viewFromEngine(ctx: CanvasRenderingContext2D): { ox: number; oy: number
 }
 
 const IL_CSS = `
-.il-root{--il-bg:#191715;--il-panel:#221f1c;--il-line:#3a3530;--il-inset:#15130f;--il-txt:#e8e2da;--il-dim:#9a917f;--il-faint:#6b6457;--il-amber:#fbbf24;--il-green:#a8e878;--il-cyan:#22d3ee;--il-red:#e0726a;
+.il-root{--il-bg:#0a0a0a;--il-panel:#0c0b0a;--il-line:#2c2a27;--il-inset:#131211;--il-txt:#e8e2da;--il-dim:#9a917f;--il-faint:#6b6457;--il-amber:#fbbf24;--il-green:#a8e878;--il-cyan:#22d3ee;--il-red:#e0726a;
   height:100%;display:flex;flex-direction:column;background:var(--il-bg);color:var(--il-txt);font-family:'Noto Sans JP',sans-serif;overflow:hidden;}
 .il-root *{box-sizing:border-box;}
 .il-header{display:flex;align-items:baseline;gap:14px;padding:10px 16px 8px;}
 .il-header h1{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:2px;font-weight:400;}
 .il-header small{font-size:12px;color:var(--il-dim);}
 .il-main{flex:1;min-height:0;display:flex;}
-.il-stage{flex:1;min-width:0;position:relative;background:#000;border-top:1px solid var(--il-line);}
+.il-stage{flex:1;min-width:0;position:relative;background:#000;border-top:0.5px solid var(--il-line);}
 .il-cv{width:100%;height:100%;display:block;}
 .il-empty{position:absolute;top:0;left:0;right:0;bottom:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;pointer-events:auto;}
 .il-empty-big{font-size:20px;color:var(--il-dim);font-weight:700;letter-spacing:1px;border:1.5px dashed var(--il-line);border-radius:10px;padding:26px 40px;}
 .il-empty-sub{font-size:12px;color:var(--il-faint);}
 .il-hint{position:absolute;top:10px;left:14px;font-size:11.5px;color:rgba(255,255,255,0.4);pointer-events:none;line-height:1.8;}
 .il-hint b{color:rgba(255,255,255,0.66);font-weight:500;}
-.il-scenes{position:absolute;left:0;right:0;bottom:0;display:flex;gap:8px;align-items:flex-end;padding:8px 12px;background:rgba(10,9,8,0.74);border-top:1px solid var(--il-line);overflow-x:auto;}
+.il-scenes{position:absolute;left:0;right:0;bottom:0;display:flex;gap:8px;align-items:flex-end;padding:8px 12px;background:rgba(10,9,8,0.74);border-top:0.5px solid var(--il-line);overflow-x:auto;}
 .il-sc-wrap{flex:0 0 auto;display:flex;flex-direction:column;align-items:stretch;gap:4px;}
 .il-sc{flex:0 0 auto;width:96px;cursor:pointer;border:2px solid var(--il-line);border-radius:6px;background:#000;padding:0;position:relative;}
 .il-sc.on{border-color:var(--il-amber);}
@@ -1914,14 +2026,17 @@ const IL_CSS = `
 .il-learn-hint{font-size:11px;color:var(--il-dim);margin-bottom:16px;letter-spacing:0.04em;}
 .il-learn-cancel{background:transparent;border:1px solid var(--il-dim);color:var(--il-dim);padding:7px 22px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:13px;}
 .il-learn-cancel:hover{border-color:var(--il-amber);color:var(--il-amber);}
-.il-panel{width:330px;flex-shrink:0;background:var(--il-panel);border-top:1px solid var(--il-line);border-left:1px solid var(--il-line);padding:9px 12px 10px;display:flex;flex-direction:column;gap:7px;overflow-y:auto;}
+.il-panel{width:330px;flex-shrink:0;background:var(--il-panel);border-top:0.5px solid var(--il-line);border-left:0.5px solid var(--il-line);padding:9px 12px 10px;display:flex;flex-direction:column;gap:7px;overflow-y:auto;}
 .il-deskhead{display:flex;align-items:baseline;gap:8px;}
 .il-deskhead b{font-size:16px;font-weight:700;letter-spacing:1px;}
 .il-deskhead span{font-size:10px;color:var(--il-dim);}
-.il-lbl{font-size:9.5px;letter-spacing:1.4px;color:var(--il-dim);font-family:'JetBrains Mono',monospace;}
-.il-lbl em{font-style:normal;color:var(--il-faint);letter-spacing:0;margin-left:6px;}
+.il-lbl{font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:0.16em;color:var(--il-dim);border-bottom:0.5px solid var(--il-line);padding-bottom:3px;margin-top:1px;}
+.il-lbl em{font-style:normal;color:var(--il-faint);letter-spacing:0;margin-left:6px;font-family:'Noto Sans JP',sans-serif;font-size:9.5px;}
+/* CONSOLE: 機能をまとめる細枠ベイ */
+.il-bay{border:0.5px solid var(--il-line);border-radius:6px;background:rgba(255,255,255,0.012);padding:8px 10px;display:flex;flex-direction:column;gap:7px;}
+.il-bay .il-lbl{border-bottom:none;padding-bottom:0;margin-top:0;}
 .il-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;}
-.il-strip button{background:var(--il-inset);border:1px solid var(--il-line);border-radius:6px;color:var(--il-txt);padding:4px 2px 3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:42px;justify-content:center;}
+.il-strip button{background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;color:var(--il-txt);padding:4px 2px 3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:42px;justify-content:center;}
 .il-strip button.on{border-color:var(--il-green);box-shadow:0 0 0 1px rgba(168,232,120,0.35) inset;}
 .il-strip button.addfx{border-style:dashed;color:var(--il-dim);}
 .il-strip .nm{font-family:'Bebas Neue',sans-serif;font-size:15px;line-height:1;}
@@ -1943,46 +2058,62 @@ const IL_CSS = `
 .il-swatches{display:flex;gap:6px;flex-wrap:wrap;}
 .il-swatches button{width:22px;height:22px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0;}
 .il-swatches button.on{border-color:#fff;}
-.il-colorpick{width:42px;height:26px;padding:0;border:1px solid var(--il-line);border-radius:6px;background:none;cursor:pointer;}
+.il-sw-cell{position:relative;display:inline-block;line-height:0;}
+.il-sw-learn{position:absolute;top:-4px;right:-4px;width:13px;height:13px;line-height:11px;text-align:center;font-size:9px;border-radius:50%;background:#0a0a0a;color:var(--il-faint);border:0.5px solid var(--il-line);cursor:pointer;padding:0;user-select:none;}
+.il-sw-learn:hover{color:var(--il-txt);border-color:var(--il-dim);}
+.il-sw-learn.assigned{color:var(--il-cyan);border-color:var(--il-cyan);}
+.il-sw-learn.on{color:#111;background:var(--il-amber);border-color:var(--il-amber);animation:il-learn-blink 0.7s infinite;}
+.il-colorpick{width:42px;height:26px;padding:0;border:0.5px solid var(--il-line);border-radius:6px;background:none;cursor:pointer;}
 .il-hex{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--il-dim);flex:1;}
 .il-fxgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;}
-.il-fxgrid button{background:var(--il-inset);border:1px solid var(--il-line);color:var(--il-txt);padding:7px 0 6px;border-radius:6px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:1px;}
-.il-fxgrid button.on{border-color:var(--il-green);color:var(--il-green);box-shadow:0 0 0 1px rgba(168,232,120,0.3) inset;}
+.il-fxcell{position:relative;}
+.il-fxcell .il-fxbtn{width:100%;background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-txt);padding:7px 0 6px;border-radius:5px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:1px;}
+.il-fxcell.on .il-fxbtn{border-color:var(--il-green);color:var(--il-green);box-shadow:0 0 0 1px rgba(168,232,120,0.3) inset;}
+.il-fx-led{position:absolute;top:4px;left:5px;width:5px;height:5px;border-radius:50%;background:var(--il-line);pointer-events:none;}
+.il-fxcell.on .il-fx-led{background:var(--il-green);}
+.il-fx-learn{position:absolute;top:2px;right:3px;width:15px;height:15px;line-height:13px;text-align:center;font-size:11px;border-radius:50%;background:rgba(20,16,14,0.7);color:var(--il-faint);border:0.5px solid var(--il-line);cursor:pointer;padding:0;user-select:none;}
+.il-fx-learn:hover{color:var(--il-txt);border-color:var(--il-dim);}
+.il-fx-learn.assigned{color:var(--il-cyan);border-color:var(--il-cyan);}
+.il-fx-learn.on{color:#111;background:var(--il-amber);border-color:var(--il-amber);animation:il-learn-blink 0.7s infinite;}
+.il-toggles{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:6px;}
+.il-toggle{background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-dim);padding:5px 11px;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit;letter-spacing:0.02em;}
+.il-toggle.on{border-color:var(--il-green);color:var(--il-green);}
+.il-falloff-lbl{font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:0.12em;color:var(--il-dim);align-self:center;margin-right:2px;}
 .il-fxparams{display:flex;flex-direction:column;gap:5px;}
 .il-fxh{font-size:8.5px;color:var(--il-green);font-family:'JetBrains Mono',monospace;letter-spacing:1.2px;margin-top:1px;}
 .il-chasepal{display:flex;flex-direction:column;gap:4px;margin-top:2px;}
 .il-chasepal-h{display:flex;align-items:center;gap:8px;font-size:8.5px;color:var(--il-green);font-family:'JetBrains Mono',monospace;letter-spacing:1px;}
-.il-chasepal-clear{margin-left:auto;background:none;border:1px solid var(--il-line);color:var(--il-dim);border-radius:4px;font-size:9px;padding:1px 6px;cursor:pointer;font-family:inherit;}
+.il-chasepal-clear{margin-left:auto;background:none;border:0.5px solid var(--il-line);color:var(--il-dim);border-radius:4px;font-size:9px;padding:1px 6px;cursor:pointer;font-family:inherit;}
 .il-chasepal-drop{display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-height:30px;padding:6px;border:1.5px dashed var(--il-line);border-radius:6px;background:var(--il-inset);}
 .il-chasepal-drop.over{border-color:var(--il-green);background:rgba(168,232,120,0.08);}
 .il-chasepal-empty{font-size:10px;color:var(--il-faint);}
 .il-chasepal-chip{width:20px;height:20px;border-radius:5px;cursor:pointer;border:1px solid rgba(0,0,0,0.3);box-shadow:0 1px 2px rgba(0,0,0,0.4);}
 .il-chasepal-chip:hover{outline:2px solid var(--il-red);outline-offset:1px;}
 .il-playpats{display:flex;flex-direction:column;gap:6px;}
-.il-patbig{display:flex;align-items:center;gap:8px;background:var(--il-inset);border:1px solid var(--il-line);border-radius:7px;padding:11px 10px;cursor:pointer;color:var(--il-txt);text-align:left;}
+.il-patbig{display:flex;align-items:center;gap:8px;background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:7px;padding:11px 10px;cursor:pointer;color:var(--il-txt);text-align:left;}
 .il-patbig.on{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,.25) inset;}
 .il-patbig.empty{opacity:0.3;cursor:default;}
 .il-patbig .pn{font-family:'Bebas Neue',sans-serif;font-size:15px;color:var(--il-dim);width:14px;}
 .il-patbig .pname{flex:1;font-size:13.5px;font-weight:700;}
 .il-patbig .pkey{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--il-cyan);}
 .il-buildpats{display:flex;flex-direction:column;gap:4px;}
-.il-patrow{display:flex;align-items:center;gap:6px;background:var(--il-inset);border:1px solid var(--il-line);border-radius:6px;padding:4px 8px;cursor:pointer;}
+.il-patrow{display:flex;align-items:center;gap:6px;background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;padding:4px 8px;cursor:pointer;}
 .il-patrow.armed{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,.3) inset;}
 .il-patrow .pn{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--il-dim);width:12px;}
 .il-patrow .pname{flex:1;font-size:11.5px;}
-.il-patrow .pname input{width:100%;background:#15130f;border:1px solid var(--il-line);color:var(--il-txt);font-size:11.5px;border-radius:4px;padding:2px 4px;font-family:inherit;}
+.il-patrow .pname input{width:100%;background:#15130f;border:0.5px solid var(--il-line);color:var(--il-txt);font-size:11.5px;border-radius:4px;padding:2px 4px;font-family:inherit;}
 .il-patrow .pkey{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--il-cyan);min-width:26px;text-align:right;}
-.il-ic{background:none;border:1px solid var(--il-line);color:var(--il-dim);border-radius:4px;font-size:10px;padding:2px 6px;cursor:pointer;font-family:inherit;}
+.il-ic{background:none;border:0.5px solid var(--il-line);color:var(--il-dim);border-radius:4px;font-size:10px;padding:2px 6px;cursor:pointer;font-family:inherit;}
 .il-ic.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
-.il-cc{flex-shrink:0;background:var(--il-inset);border:1px solid var(--il-line);color:var(--il-dim);border-radius:4px;font-size:9px;padding:1px 5px;cursor:pointer;font-family:'JetBrains Mono',monospace;line-height:1.5;}
+.il-cc{flex-shrink:0;background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-dim);border-radius:4px;font-size:9px;padding:1px 5px;cursor:pointer;font-family:'JetBrains Mono',monospace;line-height:1.5;}
 .il-cc.set{border-color:var(--il-amber);color:var(--il-amber);}
 .il-cc.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
-.il-mini{background:var(--il-inset);border:1px solid var(--il-line);color:var(--il-dim);padding:3px 8px;border-radius:5px;cursor:pointer;font-size:10.5px;font-family:inherit;}
+.il-mini{background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-dim);padding:3px 8px;border-radius:5px;cursor:pointer;font-size:10.5px;font-family:inherit;}
 .il-mini.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
-.il-root hr{border:none;border-top:1px solid var(--il-line);margin:0;}
+.il-root hr{border:none;border-top:0.5px solid var(--il-line);margin:0;}
 .il-note{font-size:10.5px;color:var(--il-faint);line-height:1.7;}
 .il-note b{color:var(--il-dim);font-weight:500;}
 .il-note summary{cursor:pointer;color:var(--il-dim);font-size:10.5px;}
-.il-fxall{background:var(--il-inset);border:1px solid var(--il-line);border-radius:6px;color:var(--il-txt);cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:42px;}
+.il-fxall{background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;color:var(--il-txt);cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:42px;}
 .il-fxall.on{border-color:var(--il-green);box-shadow:0 0 0 1px rgba(168,232,120,0.35) inset;}
 `

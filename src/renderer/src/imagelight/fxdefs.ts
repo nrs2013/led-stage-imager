@@ -138,6 +138,14 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       get: (e) => e.fxp.rndstrobe.dens,
       set: (e, v) => e.setFxp('rndstrobe', 'dens', v),
       fmt: (v) => v + '%'
+    },
+    {
+      lbl: '流れ',
+      min: 0,
+      max: 100,
+      get: (e) => e.fxp.rndstrobe.flow ?? 40,
+      set: (e, v) => e.setFxp('rndstrobe', 'flow', v),
+      fmt: (v) => v + '%'
     }
   ],
   colorchase: [

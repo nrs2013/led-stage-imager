@@ -8,7 +8,7 @@ export interface FxParams {
   rndsearch: { vari: number }
   chase: { speed: number; soft: number }
   strobe: { speed: number; duty: number }
-  rndstrobe: { speed: number; dens: number }
+  rndstrobe: { speed: number; dens: number; flow: number }
   colorchase: { speed: number; blend: number }
   breath: { speed: number; depth: number }
   fire: { speed: number; amount: number }
@@ -23,7 +23,7 @@ export const defaultFxp = (): FxParams => ({
   rndsearch: { vari: 60 },
   chase: { speed: 1.0, soft: 70 },
   strobe: { speed: 6, duty: 30 },
-  rndstrobe: { speed: 10, dens: 28 },
+  rndstrobe: { speed: 10, dens: 28, flow: 40 },
   colorchase: { speed: 1.5, blend: 0 },
   breath: { speed: 0.22, depth: 80 },
   fire: { speed: 1.0, amount: 60 },
@@ -54,10 +54,15 @@ export function strobeAllK(P: FxParams['strobe'], ms: number): number {
   return frac((ms / 1000) * P.speed) < P.duty / 100 ? 1 : 0
 }
 
-/** ストロボ rnd: 各灯バラバラ明滅（速さ・密度=雰囲気）。 */
+/** ストロボ rnd: 規則的ローリング。全灯が一定リズム(speed Hz・点灯率 dens%)で点滅し、
+ *  位相を灯ごとに少しずつずらして順に流れる。flow=ずらし幅（0＝全灯一斉でカチッ＝STROBE相当、
+ *  大＝灯ごとに位相がずれて整った連続閃光が流れる）。乱数の不揃いクランプは無し＝素直。
+ *  古い保存データに flow が無ければ 40 扱い。 */
 export function strobeRndK(P: FxParams['rndstrobe'], ms: number, i: number): number {
-  const slot = Math.floor((ms / 1000) * P.speed)
-  return frac(Math.sin(slot * 12.9898 + i * 78.233) * 43758.5453) < P.dens / 100 ? 1 : 0
+  const flow = (P.flow ?? 40) / 100
+  // 灯ごとの位相オフセット（最大 0.5 周期/灯）。frac で 0..1 に巻き取り、点灯率で on/off。
+  const phase = frac((ms / 1000) * P.speed - i * flow * 0.5)
+  return phase < P.dens / 100 ? 1 : 0
 }
 
 /** 呼吸: 全灯ゆっくり膨らみ沈む（深さ%まで沈む）。 */
