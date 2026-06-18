@@ -52,6 +52,15 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
   const fixtures = chart.fixtures
   const count = fixtures.length
 
+  // Esc で閉じる（FillDialog / Setup / Keys と作法を揃える）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   // Quick Light targets: every patched fixture / this song's page / canvas selection
   const homeLayer = chart.layers[0]?.id
   const layerShapeIds = new Set(

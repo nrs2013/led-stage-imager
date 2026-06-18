@@ -11,6 +11,7 @@ interface NetApi {
     platform: string
     ndiActive?: boolean
     ndiRx?: number
+    midiIn?: number
   }>
 }
 const netApi = (): NetApi | undefined => (window as unknown as { api?: NetApi }).api
@@ -23,11 +24,22 @@ export function StatusBar(): React.JSX.Element {
   const [platform, setPlatform] = useState<string>('darwin')
   const [ndiActive, setNdiActive] = useState(false)
   const [ndiRx, setNdiRx] = useState(0)
+  const [midiIn, setMidiIn] = useState(0)
 
   useEffect(() => {
     netApi()
       ?.listInterfaces?.()
-      .then(setNics)
+      .then((list) => {
+        setNics(list)
+        // 表示同期: 現在選択中の nic が一覧に無ければ、表示だけを実態に寄せる。
+        // bind の実呼び出し(setBind)はユーザー操作時のみのままにし、通信ロジックは変えない。
+        setNic((prev) => {
+          if (list.length === 0) return prev
+          if (list.some((n) => n.address === prev)) return prev
+          const allAny = list.find((n) => n.address === '0.0.0.0')
+          return allAny ? allAny.address : list[0].address
+        })
+      })
       .catch(() => {})
     const tick = setInterval(() => setNow(Date.now()), 500)
     const poll = setInterval(() => {
@@ -37,6 +49,7 @@ export function StatusBar(): React.JSX.Element {
           setPlatform(r.platform)
           setNdiActive(!!r.ndiActive)
           setNdiRx(typeof r.ndiRx === 'number' ? r.ndiRx : 0)
+          setMidiIn(typeof r.midiIn === 'number' ? r.midiIn : 0)
         })
         .catch(() => {})
     }, 1000)
@@ -67,6 +80,18 @@ export function StatusBar(): React.JSX.Element {
           )
         })
       )}
+
+      <div style={sep} />
+      <span style={lbl}>MIDI In</span>
+      <span
+        style={{
+          ...chip,
+          color: midiIn > 0 ? C.green : C.faint,
+          borderColor: midiIn > 0 ? C.green : C.border
+        }}
+      >
+        {midiIn > 0 ? `● ${midiIn}` : '○ —'}
+      </span>
 
       <div style={sep} />
       {ndiActive ? (
@@ -145,7 +170,9 @@ const sel: React.CSSProperties = {
   border: `0.5px solid ${C.border}`,
   color: C.white,
   borderRadius: 4,
-  padding: '4px 8px',
+  padding: '7px 10px',
+  minHeight: 28,
+  cursor: 'pointer',
   fontSize: 11,
   fontFamily: F.ui,
   outline: 'none'

@@ -138,7 +138,15 @@ export interface St extends FxFlags {
 export interface Look {
   fxst: FxFlags
   fxp: FxParams
-  lights: { gauge: number; color: RGB3; pan: number; tilt: number; zoom: number }[]
+  lights: {
+    gauge: number
+    color: RGB3
+    pan: number
+    tilt: number
+    zoom: number
+    mute?: boolean
+    solo?: boolean
+  }[]
   /** カラフルチェイスで流す色並び（空=固定8色ぜんぶ）。シーンごとに保存。 */
   chasePalette?: RGB3[]
 }
@@ -220,6 +228,8 @@ export interface RigPayload {
   colorKey?: Record<string, string>
   sceneFadeMode?: 'cut' | 'fade'
   sceneFadeMs?: number
+  strobeMidi?: number | null
+  strobeRate?: number
 }
 /** 公演ファイル（show.json）のシーン1件。メディアは media/ 配下のファイル名で参照。 */
 export interface ShowSceneMeta {
@@ -241,6 +251,8 @@ export interface ShowFile {
   version: number
   rig: RigPayload
   scenes: ShowSceneMeta[]
+  /** 灯体配置（位置・向き・モチーフ等）。これが無いと開いても配置がまっさらになる。 */
+  beams?: Beam[]
   /** マスク用アルファ画像（あれば media/ 配下のファイル名で参照）。 */
   mask?: { file: string } | null
 }
@@ -303,6 +315,15 @@ export function albedoFitSize(nw: number, nh: number, max = ALBEDO_MAX): { w: nu
 
 const rgs = (c: RGB3 | number[], a: number): string =>
   `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${Math.max(0, Math.min(1, a)).toFixed(3)})`
+
+// ---- ビームのリアル化チューニング値（のむさんと見た目を追い込む用・ここを変えて調整） ----
+const BEAM_SPREAD_MIN = 1.5 // 出口から最低この倍に広がる円すい
+const BEAM_BLUR = 0 // ★灯体ごとのblurは廃止（重いので）。やわらかさは全画面blur(縞退治)に集約＝下のBEAM_SOFTで調整
+const BEAM_SOFT = 2.4 // ★全体のやわらかさ(px係数)。灯体blur廃止の代わり。大きいほどぼける(GPUで1回・軽い)
+const BEAM_ROOT_BOOST = 0.6 // ★出口付近の明るさを足す 0..1（根元をもう少し明るく）
+const CONTACT_HOT = 0.85 // 接触面の焼け（白飛び）0..1（据え置き）
+const CONTACT_HOT_FROM = 0.3 // ★この明るさ(ゲージ)未満では白く焼けない。0..1。大きいほど「明るい時だけ白飛び」＝暗い時に白くならずリアル
+const CONTACT_NIJIMI = 0.45 // 根元のにじみ 0..1（色つき＝明るさに比例で自然に暗くなる）
 
 /** 固定シードの擬似乱数（毎回同じ「ランダム」個性）。 */
 function makeSearchParams(rnd: () => number): SearchParams {
@@ -400,6 +421,16 @@ export class ImageLightEngine {
   colorKey: Record<string, string> = {}
   /** 色LEARN待機中の色(hex)。null=非待機。 */
   learnColor: string | null = null
+  // ---- マスター・ランダムストロボ（特別ボタン）：今の出力を非破壊で全体点滅させるトグル。
+  //  1回押し=ON / もう1回=元のシーンに戻る。MIDIラーン対応。strobeRate=速さ0..1。
+  /** 特別ストロボ ON 中か（非保存：ライブのトグル）。 */
+  strobeOverride = false
+  /** 特別ストロボの MIDI ノート割当（保存対象）。 */
+  strobeMidi: number | null = null
+  /** 特別ストロボ LEARN 待機中か。 */
+  learnStrobe = false
+  /** 特別ストロボの速さ 0..1（大きいほど速い・保存対象）。 */
+  strobeRate = 0.55
   /** 本番(PLAY)のシーン(明かり)切替方式と時間。cut=即／fade=時間補間。保存対象。 */
   sceneFadeMode: 'cut' | 'fade' = 'cut'
   sceneFadeMs = 1500
@@ -598,6 +629,7 @@ export class ImageLightEngine {
   /** 毎フレーム描き直しが必要か（FX中・動画・パニックフェード中）。これが false かつ
    *  状態変化も無ければ、描画ループは1フレーム描いて止まってよい＝静止画は無負荷。 */
   isAnimating = (): boolean =>
+    this.strobeOverride ||
     this.anyFx() ||
     this.activeIsVideo() ||
     this.fading ||
@@ -617,6 +649,11 @@ export class ImageLightEngine {
     if (s.bolt) v *= boltK(this.fxp.bolt, ms)
     if (s.strobe === 'all') v *= strobeAllK(this.fxp.strobe, ms)
     else if (s.strobe === 'rnd') v *= strobeRndK(this.fxp.rndstrobe, ms, i)
+    // 特別ボタン（ランダムストロボ）：今の look の上から、灯体ごとにバラける本物のランダム
+    // ストロボ(strobeRndK)を非破壊で重ねる。strobeRate(0..1)で速さ。OFFで元の look に戻る。
+    if (this.strobeOverride) {
+      v *= strobeRndK({ speed: 2 + this.strobeRate * 20, dens: 28, flow: 40 }, ms, i)
+    }
     // モチーフ専用チェイス：モチーフだけを「モチーフ内の並び順」で順番に点滅
     // （通常灯体が間に挟まっても等間隔になるよう、モチーフ内の順位で位相をずらす）。
     if (b.motif && this.motifChase) {
@@ -661,6 +698,7 @@ export class ImageLightEngine {
   private drawBeamCore(g: CanvasRenderingContext2D, geo: Beam, col: number[], ampl: number): void {
     g.save()
     g.globalCompositeOperation = 'screen'
+    if (BEAM_BLUR > 0) g.filter = `blur(${BEAM_BLUR}px)` // ビーム全体をやわらかくぼかす（線/照明のぼやけ）
     const NL = 12
     for (let k = 0; k < NL; k++) {
       const u = k / (NL - 1)
@@ -672,7 +710,9 @@ export class ImageLightEngine {
         const t = s / 28
         // 落ち込み: 光源(t=0)で最大、先(t=1)で0。指数 this.falloffPow で強さを切替（プリセット
         // ソフト1.5 / 標準2.5 / きつめ4）。大きいほど手前が明るく先がかなり暗いメリハリ。
-        const v = Math.pow(1 - t, this.falloffPow)
+        // ＋出口付近(t<0.3)をちょっとだけ強く（BEAM_ROOT_BOOST）。
+        const boost = 1 + BEAM_ROOT_BOOST * Math.max(0, 1 - t / 0.3)
+        const v = Math.pow(1 - t, this.falloffPow) * boost
         gr.addColorStop(t, rgs(col, v))
       }
       g.fillStyle = gr
@@ -680,6 +720,7 @@ export class ImageLightEngine {
       this.trap(g, geo, wf, geo.y, geo.y - L)
       g.fill()
     }
+    g.filter = 'none'
     g.globalAlpha = 1
     g.restore()
   }
@@ -702,9 +743,14 @@ export class ImageLightEngine {
     const col = this.beamColOf(b, I).map((v) => v * wallK)
     const drive = I > 0.55 ? (I - 0.55) / 0.45 : 0
     const z = (b.zoom || 1) * (b._zp || 1)
-    const geo: Beam = { ...b, w1: b.w1 * z }
+    // リアル化チューニング（後で値を追い込む）：
+    //  出口(w0)は最小値を保証して“線”にならないように、先端(w1)は必ず出口より広い円すいに。
+    const w0e = b.w0 // 出口は素の太さ（“出口幅”の特別扱いはやめ、ぼやけ＝blur で柔らかくする）
+    const w1e = Math.max(b.w1 * z, w0e * BEAM_SPREAD_MIN)
+    const geo: Beam = { ...b, w0: w0e, w1: w1e }
     this.withTilt(g, b, T, () => {
       this.drawBeamCore(g, geo, col, 2.0 * (1 + 0.55 * drive))
+      this.drawContactHot(g, geo, I, col, b.w0) // 焼け＋にじみ（サイズは元の太さ基準＝据え置き）
       if (drive > 0) {
         g.save()
         g.globalCompositeOperation = 'screen'
@@ -718,6 +764,52 @@ export class ImageLightEngine {
         g.restore()
       }
     })
+  }
+  /** セット接触面（根元）の焼け＝白飛びホットスポット＋出口の際のにじみ。screen 合成。 */
+  private drawContactHot(
+    g: CanvasRenderingContext2D,
+    geo: Beam,
+    I: number,
+    col: number[],
+    burnW: number
+  ): void {
+    if (I <= 0.02) return
+    const cx = geo.x
+    const cy = geo.y
+    const w0 = burnW / 2 // 焼け/にじみのサイズは元の太さ基準（出口を細くしても焼けは縮めない）
+    g.save()
+    g.globalCompositeOperation = 'screen'
+    // 出ている方向（上）だけに焼け/にじみを出す。根元より手前(下)へは広げない＝放射状の不自然さを消す。
+    g.beginPath()
+    g.rect(cx - 4000, cy - 4000, 8000, 4000) // y ≤ cy（光が進む側）だけ描く
+    g.clip()
+    // にじみ：根元のすぐ際に色つきのソフトな横広がり
+    if (CONTACT_NIJIMI > 0) {
+      const nR = w0 * 2.4
+      const ng = g.createRadialGradient(cx, cy - w0 * 0.3, 1, cx, cy - w0 * 0.3, nR)
+      ng.addColorStop(0, rgs(col, CONTACT_NIJIMI * I))
+      ng.addColorStop(1, rgs(col, 0))
+      g.fillStyle = ng
+      g.beginPath()
+      g.ellipse(cx, cy - w0 * 0.3, nR, nR * 0.78, 0, 0, Math.PI * 2)
+      g.fill()
+    }
+    // 焼け：接触面の白飛びの芯。白い焼けは「明るい時だけ」出す——暗いゲージ(CONTACT_HOT_FROM未満)では
+    // 0にして、暗いのに根元が白く焼ける不自然さを消す。二乗で立ち上がりを遅くし、低～中ゲージでは控えめ。
+    const hot = Math.max(0, (I - CONTACT_HOT_FROM) / (1 - CONTACT_HOT_FROM))
+    const wv = hot * hot * CONTACT_HOT
+    if (CONTACT_HOT > 0 && wv > 0.004) {
+      const hR = w0 * 1.5
+      const hg = g.createRadialGradient(cx, cy, 1, cx, cy, hR)
+      hg.addColorStop(0, `rgba(255,255,255,${(0.95 * wv).toFixed(3)})`)
+      hg.addColorStop(0.45, `rgba(255,250,238,${(0.45 * wv).toFixed(3)})`)
+      hg.addColorStop(1, 'rgba(255,245,225,0)')
+      g.fillStyle = hg
+      g.beginPath()
+      g.arc(cx, cy, hR, 0, Math.PI * 2)
+      g.fill()
+    }
+    g.restore()
   }
   private drawAirBeam(g: CanvasRenderingContext2D, b: Beam, I: number, T: number): void {
     const phi = ((b.pan || 0) * Math.PI) / 180
@@ -836,7 +928,7 @@ export class ImageLightEngine {
       // 縞退治のブラー書き戻し
       const sc = this.smoothCv.getContext('2d')!
       sc.clearRect(0, 0, QW, QH)
-      sc.filter = `blur(${1.6 * Q}px)`
+      sc.filter = `blur(${BEAM_SOFT * Q}px)`
       sc.drawImage(this.lightCv, 0, 0)
       sc.filter = 'none'
       lc.clearRect(0, 0, QW, QH)
@@ -1178,6 +1270,26 @@ export class ImageLightEngine {
     b.solo = !b.solo
     this.bump(false)
   }
+  /** すべての灯体の M(ミュート)・S(ソロ)を一括解除＝本番で誤って入れた S/M を一発で戻す。 */
+  clearAllMuteSolo(): void {
+    if (!this.beams.some((b) => b.mute || b.solo)) return
+    this.pushHistory()
+    this.beams.forEach((b) => {
+      b.mute = false
+      b.solo = false
+    })
+    this.bump(false)
+  }
+  /** 今どれかが M / S 中か（UI の注意表示・全解除ボタン表示の判定用）。 */
+  muteSoloCount(): { mute: number; solo: number } {
+    let mute = 0
+    let solo = 0
+    for (const b of this.beams) {
+      if (b.mute) mute++
+      if (b.solo) solo++
+    }
+    return { mute, solo }
+  }
   addFixtureAt(x: number, y: number): void {
     if (this.beams.length >= MAX_BEAMS) return
     this.pushHistory()
@@ -1466,8 +1578,30 @@ export class ImageLightEngine {
     }
     this.bump(false)
   }
-  /** プリセット色にショートカット（キー/MIDIノート）を割当。両方nullで解除。 */
+  /** 同じキー(e.code)を持つ他カテゴリ(pattern/FX/color)から外す＝「1キー1役」。 */
+  private clearKeyEverywhere(code: string): void {
+    this.patterns.forEach((p) => {
+      if (p && p.key === code) p.key = null
+    })
+    for (const k of Object.keys(this.fxKey) as FxKey[]) if (this.fxKey[k] === code) delete this.fxKey[k]
+    for (const h of Object.keys(this.colorKey)) if (this.colorKey[h] === code) delete this.colorKey[h]
+  }
+  /** 同じ MIDI ノートを持つ他カテゴリ(strobe/FX/color/pattern/scene)から外す＝「1ノート1役」。 */
+  private clearMidiNoteEverywhere(note: number): void {
+    if (this.strobeMidi === note) this.strobeMidi = null
+    for (const k of Object.keys(this.fxMidi) as FxKey[]) if (this.fxMidi[k] === note) delete this.fxMidi[k]
+    for (const h of Object.keys(this.colorMidi)) if (this.colorMidi[h] === note) delete this.colorMidi[h]
+    this.patterns.forEach((p) => {
+      if (p && p.midi === note) p.midi = null
+    })
+    this.scenes.forEach((s) => {
+      if (s.midiNote === note) s.midiNote = null
+    })
+  }
+  /** プリセット色にショートカット（キー/MIDIノート）を割当。両方nullで解除。1キー/1ノート1役。 */
   assignColorShortcut(hex: string, code: string | null, midi: number | null): void {
+    if (code != null) this.clearKeyEverywhere(code)
+    if (midi != null) this.clearMidiNoteEverywhere(midi)
     if (code != null) this.colorKey[hex] = code
     if (midi != null) this.colorMidi[hex] = midi
     this.learnColor = null
@@ -1633,7 +1767,11 @@ export class ImageLightEngine {
     ;(this.fxp[key] as Record<string, number>)[field as string] = value
     this.bump()
   }
-  stopAllFx(): void {
+  /** すべての FX を消す。pushHist=true（既定＝外部から単独で呼ぶ場合）は直前の look を履歴へ
+   *  積み、⌘Z で戻せるようにする。blackout/panicFade は開始時に自前で 1 回積むので、内部からは
+   *  pushHist=false で呼んで二重に積まないようにする。 */
+  stopAllFx(pushHist = true): void {
+    if (pushHist) this.pushHistory()
     const s = this.st
     s.chase = false
     s.search = false
@@ -1641,6 +1779,7 @@ export class ImageLightEngine {
     s.strobe = 'off'
     s.colorChase = false
     s.breath = s.fire = s.wave = s.bolt = s.rainbow = s.zoompulse = false
+    this.strobeOverride = false // 特別ストロボ(灯体ごとランダム)も止める＝暗転/パニック後に持ち越さない
     this.bump()
   }
 
@@ -1936,6 +2075,8 @@ export class ImageLightEngine {
     if (!scene || !scene.pieces) return
     const piece = scene.pieces.find((p) => p.id === id)
     if (!piece) return
+    // Undo 対象に（'piece-move' タグで連続ドラッグは1手にまとまる＝灯体の move と同方式）
+    this.pushHistory('piece-move')
     piece.corners[cornerIdx] = { x: dst.x, y: dst.y }
     this.bump()
   }
@@ -1946,6 +2087,8 @@ export class ImageLightEngine {
     if (!scene || !scene.pieces) return
     const piece = scene.pieces.find((p) => p.id === id)
     if (!piece) return
+    // Undo 対象に（'piece-move' タグで連続ドラッグは1手にまとまる＝灯体の move と同方式）
+    this.pushHistory('piece-move')
     for (let i = 0; i < 4; i++) {
       piece.corners[i] = { x: piece.corners[i].x + dx, y: piece.corners[i].y + dy }
     }
@@ -2147,7 +2290,9 @@ export class ImageLightEngine {
         color: b.color.slice() as RGB3,
         pan: b.pan,
         tilt: b.tilt,
-        zoom: b.zoom
+        zoom: b.zoom,
+        mute: !!b.mute,
+        solo: !!b.solo
       })),
       chasePalette: this.chasePalette.map((c) => c.slice() as RGB3)
     }
@@ -2169,6 +2314,8 @@ export class ImageLightEngine {
       b.pan = f.pan
       b.tilt = f.tilt
       b.zoom = f.zoom
+      b.mute = !!f.mute // 旧パターン(未保存)は false=ミュート無し
+      b.solo = !!f.solo
     })
     // 旧シーン互換: chasePalette が無ければ空（=8色ぜんぶ）に
     this.chasePalette = (L.chasePalette ?? []).map((c) => c.slice() as RGB3)
@@ -2244,6 +2391,14 @@ export class ImageLightEngine {
     Object.assign(s, L.fxst)
     if (L.fxp) this.fxp = JSON.parse(JSON.stringify(L.fxp))
     this.chasePalette = (L.chasePalette ?? []).map((c) => c.slice() as RGB3)
+    // mute/solo は真偽値＝フェード不可。明かり切替と同時に即反映する。
+    this.beams.forEach((b, i) => {
+      const t = L.lights[i]
+      if (t) {
+        b.mute = !!t.mute
+        b.solo = !!t.solo
+      }
+    })
     this.t0 = performance.now()
     const dur = this.sceneFadeMs
     const seq = this.sceneFadeSeq
@@ -2293,6 +2448,14 @@ export class ImageLightEngine {
     p.name = name.trim() || 'シーン' + (i + 1)
     this.bump()
   }
+  /** スロット i の明かりを消す＝空きにする（位置・他スロットのショートカットは保持。Undoで戻せる）。 */
+  clearPattern(i: number): void {
+    if (i < 0 || i >= this.patterns.length || !this.patterns[i]) return
+    this.pushHistory()
+    this.patterns[i] = null
+    if (this.activePattern === i) this.activePattern = -1
+    this.bump()
+  }
   setLearnPattern(i: number | null): void {
     this.learnPattern = i
     if (i !== null) {
@@ -2304,11 +2467,8 @@ export class ImageLightEngine {
   }
   assignShortcut(i: number, key: string | null, midi: number | null): void {
     this.pushHistory()
-    this.patterns.forEach((p) => {
-      if (!p) return
-      if (key != null && p.key === key) p.key = null
-      if (midi != null && p.midi === midi) p.midi = null
-    })
+    if (key != null) this.clearKeyEverywhere(key) // 1キー1役（pattern内の同キーもここで外れる）
+    if (midi != null) this.clearMidiNoteEverywhere(midi) // 1ノート1役
     const p = this.patterns[i]
     if (p) {
       if (key != null) p.key = key
@@ -2338,15 +2498,11 @@ export class ImageLightEngine {
     }
     this.bump(false)
   }
-  /** シーンに MIDI Note を割当（同じ Note を持つ他シーンからは外す）。null でクリア。 */
+  /** シーンに MIDI Note を割当。同じ Note は他シーン＋他カテゴリからも外す＝1ノート1役。null でクリア。 */
   assignSceneMidi(i: number, note: number | null): void {
     if (i < 0 || i >= this.scenes.length) return
     this.pushHistory()
-    if (note !== null) {
-      this.scenes.forEach((s, k) => {
-        if (k !== i && s.midiNote === note) s.midiNote = null
-      })
-    }
+    if (note !== null) this.clearMidiNoteEverywhere(note)
     this.scenes[i].midiNote = note
     this.learnScene = null
     this.bump()
@@ -2483,10 +2639,13 @@ export class ImageLightEngine {
     this.fading = false
   }
   blackout(): void {
+    // 暗転の直前の look（FX・明るさ）を履歴へ積む → ⌘Z で直前へ戻せる。stopAllFx は
+    // 内部呼びなので二重に積まない（pushHist=false）。
+    this.pushHistory()
     this.panicSeq++
     this.panicGain = 0
     this.fading = false
-    this.stopAllFx()
+    this.stopAllFx(false)
     this.activePattern = -1
     this.bump(false)
   }
@@ -2498,6 +2657,9 @@ export class ImageLightEngine {
   }
   /** ESC: 1.5秒で全部ふわっと闇へ。途中で明かりを触ると中止。 */
   panicFade(): void {
+    // パニック開始時に直前の look（FX・明るさ）を履歴へ積む → フェード完了後でも ⌘Z で一発で
+    // 直前へ戻せる。完了時の stopAllFx は内部呼びなので二重に積まない（pushHist=false）。
+    this.pushHistory()
     const my = ++this.panicSeq
     const t1 = performance.now()
     const from = this.panicGain
@@ -2512,7 +2674,7 @@ export class ImageLightEngine {
       if (k < 1) requestAnimationFrame(step)
       else {
         this.fading = false
-        this.stopAllFx()
+        this.stopAllFx(false)
         this.activePattern = -1
         this.bump(false)
       }
@@ -2555,6 +2717,10 @@ export class ImageLightEngine {
 
   // ---------- MIDI ----------
   private midiTried = false
+  /** 検出した MIDI 入力ポート名（ステータス表示用）。 */
+  midiInputs: string[] = []
+  /** MIDI 入力構成が変わったとき呼ばれる（UI 側がメインへ通知するのに使う）。 */
+  onMidiInputs: ((names: string[]) => void) | null = null
   setMasterLearn(on: boolean): void {
     this.masterLearn = on
     if (on) {
@@ -2591,6 +2757,8 @@ export class ImageLightEngine {
   }
   /** FX にショートカット（キー/MIDIノート）を割り当てる。両方nullで解除。 */
   assignFxShortcut(fx: FxKey, code: string | null, midi: number | null): void {
+    if (code != null) this.clearKeyEverywhere(code) // 1キー1役
+    if (midi != null) this.clearMidiNoteEverywhere(midi) // 1ノート1役
     if (code != null) this.fxKey[fx] = code
     if (midi != null) this.fxMidi[fx] = midi
     this.learnFx = null
@@ -2606,63 +2774,117 @@ export class ImageLightEngine {
   setParamApply(map: Map<string, (v01: number) => void>): void {
     this.paramApply = map
   }
+  /** 特別ストロボのON/OFF（1回目=今の出力を全体点滅／2回目=元のシーンに戻る・非破壊）。 */
+  toggleStrobeOverride(): void {
+    this.strobeOverride = !this.strobeOverride
+    this.bump(false)
+  }
+  /** 特別ストロボの MIDI LEARN 待機の ON/OFF（他の LEARN は解除）。 */
+  setLearnStrobe(on: boolean): void {
+    this.learnStrobe = on
+    if (on) {
+      this.learnFx = null
+      this.learnColor = null
+      this.learnPattern = null
+      this.learnScene = null
+    }
+    this.bump(false)
+  }
+  /** 特別ストロボの MIDI 割当を解除。 */
+  clearStrobeShortcut(): void {
+    this.strobeMidi = null
+    this.bump()
+  }
+  /** 特別ストロボの速さ 0..1。 */
+  setStrobeRate(v01: number): void {
+    this.strobeRate = Math.max(0, Math.min(1, v01))
+    this.bump()
+  }
+  /** MIDI メッセージ1件を処理（ネイティブ midiread / Web MIDI 共通の入口）。
+   *  stt=ステータス, note=データ1(ノート/CC番号), vel=データ2(ベロシティ/値)。 */
+  handleMidiMessage(stt: number, note: number, vel: number): void {
+    if ((stt & 0xf0) === 0x90 && vel > 0) {
+      // ノートON：LEARN中なら割当、そうでなければ割当済みを発火
+      if (this.learnFx != null) this.assignFxShortcut(this.learnFx, null, note)
+      else if (this.learnColor != null) this.assignColorShortcut(this.learnColor, null, note)
+      else if (this.learnPattern != null) this.assignShortcut(this.learnPattern, null, note)
+      else if (this.learnScene != null) this.assignSceneMidi(this.learnScene, note)
+      else if (this.learnStrobe) {
+        this.clearMidiNoteEverywhere(note) // 1ノート1役
+        this.strobeMidi = note
+        this.learnStrobe = false
+        this.bump()
+      } else if (this.strobeMidi != null && note === this.strobeMidi) {
+        this.toggleStrobeOverride()
+      } else {
+        const fk = (Object.keys(this.fxMidi) as FxKey[]).find((k) => this.fxMidi[k] === note)
+        const ck = Object.keys(this.colorMidi).find((h) => this.colorMidi[h] === note)
+        if (fk) this.fxToggle(fk)
+        else if (ck) this.setColor(hexToRgb(ck))
+        else {
+          const pi = this.patterns.findIndex((p) => p && p.midi === note)
+          if (pi >= 0) this.applyPattern(pi)
+          else {
+            const si = this.scenes.findIndex((s) => s.midiNote === note)
+            if (si >= 0) this.selectScene(si)
+          }
+        }
+      }
+    } else if ((stt & 0xf0) === 0xb0) {
+      // CC = 物理つまみ/フェーダー
+      if (this.masterLearn) {
+        this.masterMidi = note
+        this.masterLearn = false
+        this.bump()
+      } else if (this.learnParam != null) {
+        this.paramMidi[this.learnParam] = note // FXツマミ等にCC割当
+        this.learnParam = null
+        this.bump()
+      } else {
+        if (this.masterMidi === note) this.setMaster(vel / 127)
+        for (const pid in this.paramMidi) {
+          if (this.paramMidi[pid] === note) this.paramApply.get(pid)?.(vel / 127)
+        }
+      }
+    }
+  }
   initMidi(): void {
     const nav = navigator as Navigator & { requestMIDIAccess?: () => Promise<MIDIAccess> }
     if (this.midiTried || !nav.requestMIDIAccess) return
-    this.midiTried = true
+    // midiTried は「成功してから」立てる。requestMIDIAccess はユーザー操作(クリック)起点でないと
+    // 解決しないことがあり、ここで先に true にすると mount時の失敗が以降の再試行を永久ブロックする。
     nav
       .requestMIDIAccess()
       .then((acc) => {
+        if (this.midiTried) return // 別の呼び出しが先に成功済みなら二重初期化しない
+        this.midiTried = true
+        const refreshInputs = (): void => {
+          const names: string[] = []
+          acc.inputs.forEach((inp) => names.push(inp.name || 'MIDI'))
+          this.midiInputs = names
+          console.log('[midi] アクセス許可。入力ポート:', names.length ? names.join(', ') : '(なし)')
+          this.onMidiInputs?.(names)
+          this.bump()
+        }
         const hook = (inp: MIDIInput): void => {
           inp.onmidimessage = (m: MIDIMessageEvent): void => {
             const data = m.data
             if (!data) return
-            const [stt, note, vel] = data
-            if ((stt & 0xf0) === 0x90 && vel > 0) {
-              if (this.learnFx != null) this.assignFxShortcut(this.learnFx, null, note)
-              else if (this.learnColor != null) this.assignColorShortcut(this.learnColor, null, note)
-              else if (this.learnPattern != null) this.assignShortcut(this.learnPattern, null, note)
-              else if (this.learnScene != null) this.assignSceneMidi(this.learnScene, note)
-              else {
-                const fk = (Object.keys(this.fxMidi) as FxKey[]).find((k) => this.fxMidi[k] === note)
-                const ck = Object.keys(this.colorMidi).find((h) => this.colorMidi[h] === note)
-                if (fk) this.fxToggle(fk)
-                else if (ck) this.setColor(hexToRgb(ck))
-                else {
-                  const pi = this.patterns.findIndex((p) => p && p.midi === note)
-                  if (pi >= 0) this.applyPattern(pi)
-                  else {
-                    const si = this.scenes.findIndex((s) => s.midiNote === note)
-                    if (si >= 0) this.selectScene(si)
-                  }
-                }
-              }
-            } else if ((stt & 0xf0) === 0xb0) {
-              // CC = 物理つまみ/フェーダー
-              if (this.masterLearn) {
-                this.masterMidi = note
-                this.masterLearn = false
-                this.bump()
-              } else if (this.learnParam != null) {
-                this.paramMidi[this.learnParam] = note // FXツマミ等にCC割当
-                this.learnParam = null
-                this.bump()
-              } else {
-                if (this.masterMidi === note) this.setMaster(vel / 127)
-                for (const pid in this.paramMidi) {
-                  if (this.paramMidi[pid] === note) this.paramApply.get(pid)?.(vel / 127)
-                }
-              }
-            }
+            this.handleMidiMessage(data[0], data[1] ?? 0, data[2] ?? 0)
           }
         }
         acc.inputs.forEach(hook)
+        refreshInputs()
         acc.onstatechange = (e): void => {
           const port = e.port
           if (port && port.type === 'input' && port.state === 'connected') hook(port as MIDIInput)
+          refreshInputs()
         }
       })
-      .catch(() => {})
+      .catch((e) => {
+        // 失敗はログのみ。midiTried は立てない＝次のクリック(操作起点)で再試行できる。
+        console.warn('[midi] requestMIDIAccess 失敗:', e)
+      })
   }
 
   // ---------- 永続化（リグ＋シーン棚＋色プリセット。写真は重いので保存しない） ----------
@@ -2697,7 +2919,9 @@ export class ImageLightEngine {
       colorMidi: this.colorMidi,
       colorKey: this.colorKey,
       sceneFadeMode: this.sceneFadeMode,
-      sceneFadeMs: this.sceneFadeMs
+      sceneFadeMs: this.sceneFadeMs,
+      strobeMidi: this.strobeMidi,
+      strobeRate: this.strobeRate
     }
   }
   // rigData を取り込む（localStorage / 公演読込 共通）。灯体配置は読み込まない。
@@ -2721,6 +2945,8 @@ export class ImageLightEngine {
     if (d.colorKey && typeof d.colorKey === 'object') this.colorKey = d.colorKey
     if (d.sceneFadeMode === 'cut' || d.sceneFadeMode === 'fade') this.sceneFadeMode = d.sceneFadeMode
     if (typeof d.sceneFadeMs === 'number') this.sceneFadeMs = d.sceneFadeMs
+    if (typeof d.strobeMidi === 'number') this.strobeMidi = d.strobeMidi
+    if (typeof d.strobeRate === 'number') this.strobeRate = d.strobeRate
   }
   private saveRig(): void {
     try {
@@ -2781,6 +3007,8 @@ export class ImageLightEngine {
       kind: 'imagelight-show',
       version: 1,
       rig: this.rigData(),
+      // 灯体配置を丸ごと保存（runtime 専用の _tn/_cn/_zp は復元時に再計算されるので含めてOK）。
+      beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp } })),
       scenes: scenesMeta,
       mask: maskMeta
     }
@@ -2848,6 +3076,21 @@ export class ImageLightEngine {
         }
       }
     }
+    // 灯体配置を復元（無い古いファイルは空＝従来どおり）。
+    this.beams = (show.beams ?? []).map((b) => ({
+      ...b,
+      color: b.color.slice() as RGB3,
+      sp: { ...b.sp }
+    }))
+    // 復元した灯体配置は「ユーザーが置いた配置」そのもの。これを立てないと selectScene →
+    // placeRigAtPhotoBottom が全灯体の縦位置を写真下端に潰してしまう（位置が全部リセットされるバグ）。
+    // 件数に関わらず必ず立てる：外部から配置を入れた経路では自動吸着を必ず止める（空配置でも
+    // 後から灯体を足す前に selectScene が走ると吸着が暴発するため、件数条件を撤廃）。
+    this.rigCustomized = true
+    // 灯体があれば先頭を選択しておく（初期化直後と同じ＝selected=[0]）。空のままだと
+    // 復元直後に GAUGE/COLOR/PTZ を動かしても targets() が空で何も効かず「直したのに効かない」
+    // 見え方になるため、初期状態と挙動を揃える。
+    this.selected = this.beams.length ? [0] : []
     this.selectScene(this.scenes.length ? 0 : -1)
     this.bump()
     return true

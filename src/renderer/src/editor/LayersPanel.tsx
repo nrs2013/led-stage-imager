@@ -3,7 +3,7 @@ import { useStore } from '../state/store'
 import { pickImage } from '../io/image-pick'
 import { C, F, buttonStyle } from '../ui/tokens'
 
-const smallBtn = { ...buttonStyle({}), padding: '4px 8px', fontSize: 10 }
+const smallBtn = { ...buttonStyle({}), padding: '6px 8px', fontSize: 10, minHeight: 24 }
 
 /** Song pages. One layer = one chart image + its decorations. The console "calls up"
  *  a song by raising that song's addresses — the output always carries every layer,
@@ -38,7 +38,7 @@ export function LayersPanel(): React.JSX.Element {
     <div style={panel}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <span style={title}>Layers</span>
-        <span style={{ fontSize: 9, color: C.faint, fontFamily: F.ui }}>1曲=1枚</span>
+        <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1曲=1枚</span>
         <div style={{ flex: 1 }} />
         <button style={smallBtn} onClick={addWithImage} title="チャート画像を選んで新しい曲ページを追加">
           + Image
@@ -113,12 +113,23 @@ export function LayersPanel(): React.JSX.Element {
                   {l.name}
                 </span>
               )}
-              <span style={{ fontSize: 9, color: C.faint, fontFamily: F.mono }}>{count}</span>
+              <span
+                style={{ fontSize: 10, color: C.faint, fontFamily: F.mono }}
+                title="このページの電飾の数"
+              >
+                {count}
+              </span>
               <button
                 style={{
                   ...smallBtn,
-                  padding: '2px 6px',
+                  padding: '6px 8px',
                   fontSize: 9,
+                  minHeight: 24,
+                  minWidth: 40,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  lineHeight: 1,
                   ...(l.visible
                     ? { background: 'transparent', border: `0.5px solid ${C.border}`, color: C.label }
                     : { background: 'transparent', border: `0.5px solid ${C.borderFaint}`, color: C.faint })
@@ -135,8 +146,14 @@ export function LayersPanel(): React.JSX.Element {
               <button
                 style={{
                   ...smallBtn,
-                  padding: '2px 6px',
+                  padding: '6px 8px',
                   fontSize: 10,
+                  minWidth: 24,
+                  minHeight: 24,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  lineHeight: 1,
                   color: layers.length <= 1 ? C.faint : C.text
                 }}
                 disabled={layers.length <= 1}

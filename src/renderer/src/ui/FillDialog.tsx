@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../state/store'
 import type { ChannelMode } from '../model/types'
 import { channelCount } from '../dmx/channel-math'
 import { addressAt, formatDmx } from '../dmx/address'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
+import { NumberField } from './NumberField'
 
 const CAP = 4000
 const MODES: { id: ChannelMode; label: string }[] = [
@@ -26,6 +27,16 @@ export function FillDialog({ onClose }: { onClose: () => void }): React.JSX.Elem
   const [mode, setMode] = useState<ChannelMode>('rgb')
   const [step, setStep] = useState(channelCount('rgb'))
   const [done, setDone] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false) // 実行直後の二度押しを一拍ふさぐ
+
+  // Esc closes the dialog (matches HelpPanel / StartScreen).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.code === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const estimate = useMemo(() => {
     if (!mask) return 0
@@ -44,7 +55,10 @@ export function FillDialog({ onClose }: { onClose: () => void }): React.JSX.Elem
   const lastAddr = capped > 0 ? addressAt(universe, start, mode, step, capped - 1) : null
 
   const generate = (): void => {
+    if (busy) return // 二度押し防止＝同じ場所に重ねて置くのを防ぐ
+    setBusy(true)
     setDone(autoFill({ pitchX, pitchY, cellW, cellH, universe, start, mode, step }))
+    window.setTimeout(() => setBusy(false), 600)
   }
 
   return (
@@ -55,7 +69,7 @@ export function FillDialog({ onClose }: { onClose: () => void }): React.JSX.Elem
             Fill Mask
           </div>
           <div style={{ flex: 1 }} />
-          <button style={{ ...buttonStyle({}), padding: '4px 10px' }} onClick={onClose}>
+          <button style={{ ...buttonStyle({}), padding: '8px 12px', minWidth: 56 }} onClick={onClose}>
             Close
           </button>
         </div>
@@ -68,32 +82,32 @@ export function FillDialog({ onClose }: { onClose: () => void }): React.JSX.Elem
           <>
             <div style={{ display: 'flex', gap: 10 }}>
               <Field label="Pitch X">
-                <input type="number" min={1} value={pitchX} style={inputStyle}
-                  onChange={(e) => setPitchX(Math.max(1, Number(e.target.value)))} />
+                <NumberField value={pitchX} min={1}
+                  onChange={(v) => { setDone(null); setPitchX(Math.max(1, v)) }} />
               </Field>
               <Field label="Pitch Y">
-                <input type="number" min={1} value={pitchY} style={inputStyle}
-                  onChange={(e) => setPitchY(Math.max(1, Number(e.target.value)))} />
+                <NumberField value={pitchY} min={1}
+                  onChange={(v) => { setDone(null); setPitchY(Math.max(1, v)) }} />
               </Field>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <Field label="Cell W">
-                <input type="number" min={1} value={cellW} style={inputStyle}
-                  onChange={(e) => setCellW(Math.max(1, Number(e.target.value)))} />
+                <NumberField value={cellW} min={1}
+                  onChange={(v) => { setDone(null); setCellW(Math.max(1, v)) }} />
               </Field>
               <Field label="Cell H">
-                <input type="number" min={1} value={cellH} style={inputStyle}
-                  onChange={(e) => setCellH(Math.max(1, Number(e.target.value)))} />
+                <NumberField value={cellH} min={1}
+                  onChange={(v) => { setDone(null); setCellH(Math.max(1, v)) }} />
               </Field>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <Field label="Universe">
-                <input type="number" min={0} value={universe} style={inputStyle}
-                  onChange={(e) => setUniverse(Math.max(0, Number(e.target.value)))} />
+                <NumberField value={universe} min={0}
+                  onChange={(v) => { setDone(null); setUniverse(Math.max(0, v)) }} />
               </Field>
               <Field label="DMX Addr">
-                <input type="number" min={1} max={512} value={start} style={inputStyle}
-                  onChange={(e) => setStart(Math.min(512, Math.max(1, Number(e.target.value))))} />
+                <NumberField value={start} min={1} max={512}
+                  onChange={(v) => { setDone(null); setStart(Math.min(512, Math.max(1, v))) }} />
               </Field>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
@@ -101,6 +115,7 @@ export function FillDialog({ onClose }: { onClose: () => void }): React.JSX.Elem
                 <select value={mode} style={{ ...inputStyle, fontFamily: F.ui }}
                   onChange={(e) => {
                     const m = e.target.value as ChannelMode
+                    setDone(null)
                     setMode(m)
                     setStep(channelCount(m))
                   }}>
@@ -110,8 +125,8 @@ export function FillDialog({ onClose }: { onClose: () => void }): React.JSX.Elem
                 </select>
               </Field>
               <Field label="Offset">
-                <input type="number" min={1} value={step} style={inputStyle}
-                  onChange={(e) => setStep(Math.max(1, Number(e.target.value)))} />
+                <NumberField value={step} min={1}
+                  onChange={(v) => { setDone(null); setStep(Math.max(1, v)) }} />
               </Field>
             </div>
 
@@ -131,8 +146,12 @@ export function FillDialog({ onClose }: { onClose: () => void }): React.JSX.Elem
               </div>
             )}
 
-            <button style={{ ...buttonStyle({}), width: '100%' }} onClick={generate}>
-              Fill + Patch
+            <button
+              style={{ ...buttonStyle({}), width: '100%', opacity: busy ? 0.5 : 1 }}
+              disabled={busy}
+              onClick={generate}
+            >
+              {done !== null ? 'もう一度 Fill（追加で置きます）' : 'Fill + Patch'}
             </button>
           </>
         )}

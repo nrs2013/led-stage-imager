@@ -455,8 +455,13 @@ export function PartsPalette(): React.JSX.Element {
                 color: C.text,
                 fontFamily: F.ui,
                 marginTop: 4,
-                whiteSpace: 'nowrap'
+                whiteSpace: 'nowrap',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                textAlign: 'center'
               }}
+              title={c.label}
             >
               {c.label}
             </div>
@@ -465,7 +470,7 @@ export function PartsPalette(): React.JSX.Element {
         ))}
       </div>
       <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 8, lineHeight: 1.5 }}>
-        ドラッグ＆ドロップで設置 · 2個目からは ⌘C → クリック → ⌘V
+        ドラッグ＆ドロップで設置（中心がドロップ地点に乗ります） · 2個目からは ⌘C → クリック → ⌘V
       </div>
     </div>
   )

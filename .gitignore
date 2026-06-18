@@ -17,6 +17,8 @@ DECOR-STUDIO-引き継ぎ-*.md
 resources/ndi/Processing.NDI.Lib.x64.dll
 resources/ndi/libndi.dylib
 resources/ndi/syphon2ndi
+resources/midi/midiread
+tools/midi-bridge/midiread
 # tools: コンパイル済みバイナリ・検証用スクリプト（.m ソースから再生成可）
 tools/syphon-ndi-bridge/syphon2ndi
 tools/syphon-ndi-bridge/ndifind

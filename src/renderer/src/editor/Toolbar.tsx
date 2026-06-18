@@ -226,6 +226,7 @@ export function Toolbar({
       <button
         style={buttonStyle({ active: testOpen, accent: C.fuchsia, accentRGB: '193,134,200' })}
         onClick={onToggleTest}
+        title="卓やArt-Net無しでも、選んだ電飾に色を手で当てて確認できます（テスト用フェーダー）"
       >
         Programmer
       </button>

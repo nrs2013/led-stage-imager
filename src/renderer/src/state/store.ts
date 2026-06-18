@@ -696,8 +696,12 @@ export const useStore = create<AppState>()((set, get) => ({
       return { manualByFixture: m }
     }),
 
-  setCanvasSize: (w, h) => set((s) => ({ chart: { ...s.chart, canvas: { w, h } } })),
-  setStageWidthMeters: (m) =>
+  setCanvasSize: (w, h) => {
+    get().beginHistory('canvas-size') // ⌘Zでサイズを戻せるように（連続変更は600msでまとめる）
+    set((s) => ({ chart: { ...s.chart, canvas: { w, h } } }))
+  },
+  setStageWidthMeters: (m) => {
+    get().beginHistory('stage-width')
     set((s) => ({
       chart: {
         ...s.chart,
@@ -706,7 +710,8 @@ export const useStore = create<AppState>()((set, get) => ({
           stageWidthMm: m > 0 && isFinite(m) ? Math.round(m * 1000) : undefined
         }
       }
-    })),
+    }))
+  },
   fitFixturesToScale: () => {
     const k = mmPerPx(get().chart)
     if (!k) return

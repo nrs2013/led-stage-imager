@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../state/store'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
+import { NumberField } from './NumberField'
 import { mmPerPx, stageWidthMeters, countFittableFixtures } from '../model/scale'
 
 const MAX_W = 4096
@@ -29,6 +30,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const fitCount = countFittableFixtures(chart.shapes) // 実寸に直せる灯体の数
   const [fitArmed, setFitArmed] = useState(false) // 2回押しで実行（誤爆防止）
 
+  // Esc closes the dialog (matches HelpPanel / StartScreen).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.code === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
     <div style={backdrop} onClick={onClose}>
       <div style={modal} onClick={(e) => e.stopPropagation()}>
@@ -37,7 +47,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             Setup
           </div>
           <div style={{ flex: 1 }} />
-          <button style={{ ...buttonStyle({}), padding: '4px 10px' }} onClick={onClose}>
+          <button style={{ ...buttonStyle({}), padding: '8px 12px', minWidth: 56 }} onClick={onClose}>
             Close
           </button>
         </div>
@@ -60,7 +70,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             value={widthM}
             placeholder="未設定"
             style={inputStyle}
-            onChange={(e) => setStageWidthMeters(Number(e.target.value))}
+            onChange={(e) => {
+              const v = Number(e.target.value)
+              // 正の有限値のみ採用。0/空/NaN は未設定扱い（0でゼロ割・無限大になるのを防ぐ）
+              setStageWidthMeters(Number.isFinite(v) && v > 0 ? v : 0)
+            }}
           />
         </Field>
         {mmpp != null ? (
@@ -98,23 +112,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
 
         <div style={{ display: 'flex', gap: 10 }}>
           <Field label="Canvas W">
-            <input
-              type="number"
+            <NumberField
+              value={chart.canvas.w}
               min={16}
               max={MAX_W}
-              value={chart.canvas.w}
-              style={inputStyle}
-              onChange={(e) => setCanvasSize(Math.max(16, Number(e.target.value)), chart.canvas.h)}
+              onChange={(v) => setCanvasSize(Math.max(16, v), chart.canvas.h)}
             />
           </Field>
           <Field label="Canvas H">
-            <input
-              type="number"
+            <NumberField
+              value={chart.canvas.h}
               min={16}
               max={MAX_H}
-              value={chart.canvas.h}
-              style={inputStyle}
-              onChange={(e) => setCanvasSize(chart.canvas.w, Math.max(16, Number(e.target.value)))}
+              onChange={(v) => setCanvasSize(chart.canvas.w, Math.max(16, v))}
             />
           </Field>
         </div>
@@ -128,10 +138,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
           <input
             type="text"
             value={chart.syphon.name}
+            placeholder="LED STAGE IMAGER"
             style={{ ...inputStyle, fontFamily: F.ui }}
             onChange={(e) => {
-              setSyphonName(e.target.value)
-              syphonApi()?.renameSyphon?.(e.target.value)
+              const v = e.target.value
+              setSyphonName(v)
+              // 空名のまま rename すると Resolume の Sources で見失うので、中身がある時だけ送る
+              if (v.trim() !== '') syphonApi()?.renameSyphon?.(v)
             }}
           />
         </Field>

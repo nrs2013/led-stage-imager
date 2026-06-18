@@ -33,6 +33,8 @@ win:
     # Mac 用の NDI 部品（dylib / arm64 ブリッジ）は Windows では使わない。
     - '!resources/ndi/libndi.dylib'
     - '!resources/ndi/syphon2ndi'
+    # Mac 用の CoreMIDI リーダーも Windows では使わない。
+    - '!resources/midi/midiread'
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

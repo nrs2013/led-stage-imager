@@ -82,20 +82,20 @@ export function PatchTable(): React.JSX.Element {
         )}
         <div style={{ flex: 1 }} />
         <button
-          style={{ ...buttonStyle({ active: showIds }), padding: '5px 10px' }}
+          style={{ ...buttonStyle({ active: showIds }), padding: '7px 12px', minHeight: 30 }}
           onClick={() => setShowIds(!showIds)}
           title="キャンバスに #番号 ラベルを表示（下の札と同じ番号）"
         >
           IDs
         </button>
         <button
-          style={{ ...buttonStyle({}), padding: '5px 12px' }}
+          style={{ ...buttonStyle({}), padding: '7px 12px', minHeight: 30 }}
           onClick={exportMvr}
           title="grandMA3 用の MVR（パッチ＋配置＋DECOR Cell の GDTF 同梱）を書き出す"
         >
           Export MVR
         </button>
-        <button style={{ ...buttonStyle({}), padding: '5px 12px' }} onClick={exportCsv}>
+        <button style={{ ...buttonStyle({}), padding: '7px 12px', minHeight: 30 }} onClick={exportCsv}>
           Export CSV
         </button>
       </div>
@@ -103,6 +103,8 @@ export function PatchTable(): React.JSX.Element {
       <div ref={listRef} style={{ overflow: 'auto', flex: 1 }}>
         {chart.fixtures.length === 0 && (
           <div style={{ color: C.faint, fontFamily: F.ui, fontSize: 12, padding: '8px 2px' }}>
+            まだパッチがありません。電飾を選んで Inspector でパッチしてください。
+            <br />
             No fixtures patched yet — select a fixture and patch it in the Inspector.
           </div>
         )}
@@ -129,7 +131,8 @@ export function PatchTable(): React.JSX.Element {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 5,
-                  padding: '3px 7px',
+                  padding: '7px 8px',
+                  minHeight: 30,
                   borderRadius: 3,
                   cursor: 'pointer',
                   fontFamily: F.mono,

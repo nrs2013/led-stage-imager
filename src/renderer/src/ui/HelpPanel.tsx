@@ -26,7 +26,7 @@ export function HelpPanel(): React.JSX.Element {
             ? キーでいつでも開閉
           </span>
           <div style={{ flex: 1 }} />
-          <button style={{ ...buttonStyle({}), padding: '4px 10px' }} onClick={() => setHelpOpen(false)}>
+          <button style={{ ...buttonStyle({}), padding: '8px 12px' }} onClick={() => setHelpOpen(false)}>
             Close
           </button>
         </div>

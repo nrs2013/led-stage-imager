@@ -1,6 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, screen, Menu } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, screen, Menu, session } from 'electron'
 import { join, extname } from 'path'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync, unlinkSync } from 'fs'
 import { networkInterfaces } from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -15,6 +15,7 @@ import {
   getNdiDirectStatus,
   resolveNdiLibPath
 } from './output/ndi-direct'
+import { startMidiInput, stopMidiInput, getMidiPorts } from './midi/midi-input'
 
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
@@ -23,6 +24,7 @@ const publisher = new OutputPublisher()
 let mainWindow: BrowserWindow | null = null
 let previewWindow: BrowserWindow | null = null
 let lastChart: unknown = null
+let midiInputs: string[] = [] // renderer が検出した MIDI 入力ポート名（ステータスバー表示用）
 
 function startEngine(): void {
   publisher.start('LED STAGE IMAGER')
@@ -39,6 +41,10 @@ function startEngine(): void {
     const msg = { universe: pkt.universe, sequence: pkt.sequence, data: pkt.data }
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('artnet:dmx', msg)
   })
+  // CoreMIDI 直読みの MIDI 入力（Web MIDI が効かないため）。受信を renderer(engine) へ転送。
+  startMidiInput((s, d1, d2) => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('midi:message', [s, d1, d2])
+  })
   receiver.on('error', (err) => console.error('[artnet] receiver error:', err))
   receiver.start('0.0.0.0')
   console.log('[engine] Art-Net receiver (UDP 6454) + Syphon/NDI "LED STAGE IMAGER" started')
@@ -49,6 +55,7 @@ function stopEngine(): void {
   publisher.stop()
   stopNdiBridge()
   stopNdiDirect()
+  stopMidiInput()
 }
 
 /** Fullscreen output preview on a second display (mirrors the editor's chart, no re-publish). */
@@ -162,6 +169,15 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.decor.studio')
   buildMenu()
 
+  // Web MIDI を許可する。Electron は既定で midi 権限を付与しないため、これが無いと
+  // renderer の navigator.requestMIDIAccess() が拒否され、MIDI 入力が一切来ない（LEARN も効かない）。
+  // ローカルの自前アプリなので全許可で問題ない。
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === 'midi' || permission === 'midiSysex') console.log('[midi] 権限要求:', permission)
+    callback(true)
+  })
+  session.defaultSession.setPermissionCheckHandler(() => true)
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
@@ -185,6 +201,12 @@ app.whenReady().then(() => {
   })
   ipcMain.on('edit:native-paste', () => {
     BrowserWindow.getFocusedWindow()?.webContents.paste()
+  })
+
+  // renderer が検出した MIDI 入力ポート一覧を受け取る（ステータスバー表示＋疎通ログ）。
+  ipcMain.on('midi:inputs', (_e, names: string[]) => {
+    midiInputs = Array.isArray(names) ? names : []
+    console.log('[midi] 検出した入力:', midiInputs.length ? midiInputs.join(', ') : '(なし)')
   })
 
   // Live frames from the renderer -> Syphon.
@@ -239,7 +261,8 @@ app.whenReady().then(() => {
       syphonAvailable: publisher.available,
       platform: process.platform,
       ndiActive: ndi.active, // NDI 配信中（ブリッジ or 直送が稼働）
-      ndiRx: ndi.rx // 受け手(Resolume 等)の接続数
+      ndiRx: ndi.rx, // 受け手(Resolume 等)の接続数
+      midiIn: getMidiPorts().length // CoreMIDI で検出した入力ポート数
     }
   })
 
@@ -334,6 +357,62 @@ app.whenReady().then(() => {
   ipcMain.handle('chart:autosave-read', () => {
     try {
       return readFileSync(autosavePath(), 'utf8')
+    } catch {
+      return null
+    }
+  })
+
+  // 画像照明モードの「全自動保存」: アプリで作ったもの（シーン・配置・明かり・設定）を丸ごと
+  // userData に常時書き出し、起動時に自動で戻す。これで再起動しても何も失わない。
+  // serializeShow の json+media をそのまま使う（公演保存と同じ中身＝全部入り）。
+  const ilAutoDir = (): string => join(app.getPath('userData'), 'il-autosave')
+  ipcMain.handle(
+    'imagelight:autosave-write',
+    (_e, json: string, media: { file: string; dataUrl: string }[]) => {
+      try {
+        const dir = ilAutoDir()
+        mkdirSync(join(dir, 'media'), { recursive: true })
+        writeFileSync(join(dir, 'show.json'), json, 'utf8')
+        const keep = new Set((media ?? []).map((m) => m.file.replace(/^media\//, '')))
+        try {
+          for (const f of readdirSync(join(dir, 'media'))) {
+            if (!keep.has(f)) unlinkSync(join(dir, 'media', f)) // 使われなくなった素材を掃除
+          }
+        } catch {
+          /* noop */
+        }
+        for (const m of media ?? []) {
+          const b64 = m.dataUrl.slice(m.dataUrl.indexOf(',') + 1)
+          const buf = Buffer.from(b64, 'base64')
+          const p = join(dir, m.file)
+          // 同名・同サイズなら書き直さない（写真の無駄な再書き込み＝ディスク負荷を避ける）
+          try {
+            if (existsSync(p) && statSync(p).size === buf.length) continue
+          } catch {
+            /* noop */
+          }
+          writeFileSync(p, buf)
+        }
+        return true
+      } catch {
+        return false
+      }
+    }
+  )
+  ipcMain.handle('imagelight:autosave-read', () => {
+    try {
+      const dir = ilAutoDir()
+      const json = readFileSync(join(dir, 'show.json'), 'utf8')
+      const media: Record<string, string> = {}
+      try {
+        for (const f of readdirSync(join(dir, 'media'))) {
+          const buf = readFileSync(join(dir, 'media', f))
+          media['media/' + f] = `data:${mimeFromExt(f)};base64,${buf.toString('base64')}`
+        }
+      } catch {
+        /* media が無くても json だけ返す */
+      }
+      return { json, media }
     } catch {
       return null
     }

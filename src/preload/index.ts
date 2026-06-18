@@ -25,6 +25,12 @@ const api = {
   setBind: (ip: string): Promise<boolean> => ipcRenderer.invoke('net:bind', ip),
   getStatus: (): Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }> =>
     ipcRenderer.invoke('engine:status'),
+  // renderer が検出した MIDI 入力ポート名をメインへ通知（ステータスバー表示用・Web MIDI 用の名残）
+  reportMidiInputs: (names: string[]): void => ipcRenderer.send('midi:inputs', names),
+  // CoreMIDI(ネイティブ)からの MIDI メッセージ受信 [status, data1, data2]
+  onMidiMessage: (cb: (msg: [number, number, number]) => void): void => {
+    ipcRenderer.on('midi:message', (_e, msg) => cb(msg))
+  },
   // Edit menu (Cmd+Z/C/V routed from the app menu so the canvas gets them)
   onEditUndo: (cb: () => void): void => {
     ipcRenderer.on('edit:undo', () => cb())
@@ -58,7 +64,14 @@ const api = {
   ): Promise<string | null> => ipcRenderer.invoke('imagelight:save-show', json, media, name),
   openImageLightShow: (): Promise<
     { json: string; media: Record<string, string> } | { error: string } | null
-  > => ipcRenderer.invoke('imagelight:open-show')
+  > => ipcRenderer.invoke('imagelight:open-show'),
+  // 全自動保存（シーン・配置・明かり・設定を丸ごと userData に常時保存／起動時に復元）
+  autosaveImageLightWrite: (
+    json: string,
+    media: { file: string; dataUrl: string }[]
+  ): Promise<boolean> => ipcRenderer.invoke('imagelight:autosave-write', json, media),
+  autosaveImageLightRead: (): Promise<{ json: string; media: Record<string, string> } | null> =>
+    ipcRenderer.invoke('imagelight:autosave-read')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

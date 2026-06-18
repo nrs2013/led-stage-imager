@@ -111,6 +111,10 @@ export function Inspector(): React.JSX.Element {
     if (selectedIds.length > 1) {
       const ids = selectedIds
       const fxs = chart.fixtures.filter((f) => ids.includes(f.shapeId))
+      // toggle lock for the whole selection: only "unlock" when every selected shape
+      // is already locked, otherwise "lock" (mirrors the single-panel button)
+      const selShapes = chart.shapes.filter((sh) => ids.includes(sh.id))
+      const allLocked = selShapes.length > 0 && selShapes.every((sh) => !!sh.locked)
       const common = <K extends 'universe' | 'start'>(k: K, fallback: number): number => {
         if (!fxs.length) return fallback
         return fxs[0][k]
@@ -127,7 +131,7 @@ export function Inspector(): React.JSX.Element {
             ここでの変更は選択中の全部にまとめて効きます（未パッチの物には新しくパッチ）。1本に結合は ⌘G。
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="Universe">
+            <Field label="Universe" flex={1}>
               <NumberField
                 value={common('universe', 0)}
                 min={0}
@@ -135,7 +139,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => bulkPatch(ids, { universe: v })}
               />
             </Field>
-            <Field label="DMX Addr">
+            <Field label="DMX Addr" flex={1}>
               <NumberField
                 value={common('start', 1)}
                 min={1}
@@ -162,11 +166,17 @@ export function Inspector(): React.JSX.Element {
           </div>
           <div style={{ flex: 1 }} />
           <button
-            style={{ ...buttonStyle({}), width: '100%', marginTop: rowGap }}
-            onClick={() => setLocked(ids, true)}
-            title="まとめてロック（キャンバスから掴めなくする・⌘L）"
+            style={{ ...buttonStyle({ active: allLocked }), width: '100%', marginTop: rowGap }}
+            onClick={() => setLocked(ids, !allLocked)}
+            title={
+              allLocked
+                ? 'まとめてロック解除（キャンバスから掴めるように戻す・⌘L）'
+                : 'まとめてロック（キャンバスから掴めなくする・⌘L）'
+            }
           >
-            🔒 Lock {ids.length}
+            {allLocked
+              ? `ロック解除 ${ids.length}`
+              : `ロック ${ids.length}（キャンバスから掴めなくする）`}
           </button>
           <button
             style={{
@@ -174,7 +184,14 @@ export function Inspector(): React.JSX.Element {
               width: '100%',
               marginTop: 8
             }}
-            onClick={() => removeShapes(ids)}
+            onClick={() => {
+              if (
+                ids.length >= 5 &&
+                !window.confirm(`電飾 ${ids.length} 個を削除しますか？（⌘Zで戻せます）`)
+              )
+                return
+              removeShapes(ids)
+            }}
           >
             Delete {ids.length}
           </button>
@@ -184,8 +201,10 @@ export function Inspector(): React.JSX.Element {
     return (
       <aside style={asideStyle}>
         <SectionTitle>Fixture</SectionTitle>
-        <div style={{ color: C.faint, fontSize: 12, fontFamily: F.ui, marginTop: 8 }}>
-          Select a fixture to edit its shape and DMX patch.
+        <div style={{ color: C.faint, fontSize: 12, fontFamily: F.ui, marginTop: 8, lineHeight: 1.7 }}>
+          電飾を選ぶと、ここで形と DMX 番地を編集できます。
+          <br />
+          まず左上の Parts から部品をキャンバスへドラッグ、または P キーでなぞって描いてください。
         </div>
       </aside>
     )
@@ -236,7 +255,7 @@ export function Inspector(): React.JSX.Element {
                   style={{
                     ...buttonStyle({ active: (shape.bulbStyle ?? BULB_DEFAULT_STYLE) === m.id }),
                     flex: 1,
-                    padding: '6px 0'
+                    padding: '8px 0'
                   }}
                   onClick={() => updateShape(shape.id, { bulbStyle: m.id })}
                 >
@@ -269,7 +288,7 @@ export function Inspector(): React.JSX.Element {
                     key={f.id}
                     style={{
                       ...buttonStyle({ active }),
-                      padding: '6px 4px 4px',
+                      padding: '8px 8px 6px',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
@@ -299,7 +318,7 @@ export function Inspector(): React.JSX.Element {
             </div>
           </Field>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="文字サイズ (px)">
+            <Field label="文字サイズ (px)" flex={1}>
               <NumberField
                 value={neonSize(shape)}
                 min={6}
@@ -307,7 +326,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { fontSize: v })}
               />
             </Field>
-            <Field label="グロウ (%)">
+            <Field label="グロウ (%)" flex={1}>
               <NumberField
                 value={neonGlowAmount(shape)}
                 min={0}
@@ -332,7 +351,7 @@ export function Inspector(): React.JSX.Element {
             />
           </Field>
           <Field label="書体">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               {MARQUEE_FONTS.map((f) => {
                 const active = marqueeFontDef(shape).id === f.id
                 return (
@@ -340,7 +359,7 @@ export function Inspector(): React.JSX.Element {
                     key={f.id}
                     style={{
                       ...buttonStyle({ active }),
-                      padding: '6px 4px 4px',
+                      padding: '8px 6px 6px',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
@@ -368,7 +387,7 @@ export function Inspector(): React.JSX.Element {
             </div>
           </Field>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="文字サイズ (px)">
+            <Field label="文字サイズ (px)" flex={1}>
               <NumberField
                 value={marqueeSize(shape)}
                 min={20}
@@ -376,7 +395,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { fontSize: v })}
               />
             </Field>
-            <Field label="電球の間隔 (px)">
+            <Field label="電球の間隔 (px)" flex={1}>
               <NumberField
                 value={marqueePitch(shape)}
                 min={5}
@@ -392,7 +411,15 @@ export function Inspector(): React.JSX.Element {
                 return (
                   <label
                     key={i}
-                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 2,
+                      padding: '4px 4px 0',
+                      minWidth: 38,
+                      cursor: 'pointer'
+                    }}
                   >
                     <input
                       type="color"
@@ -435,7 +462,7 @@ export function Inspector(): React.JSX.Element {
             />
           </Field>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="白の割合 (%)">
+            <Field label="白の割合 (%)" flex={1}>
               <NumberField
                 value={starsWhiteRatio(shape)}
                 min={0}
@@ -443,7 +470,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { starWhiteRatio: v })}
               />
             </Field>
-            <Field label="粒の大きさ (px)">
+            <Field label="粒の大きさ (px)" flex={1}>
               <NumberField
                 value={starsSize(shape)}
                 min={0.5}
@@ -479,7 +506,7 @@ export function Inspector(): React.JSX.Element {
             />
           </Field>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="球の間隔 (px)">
+            <Field label="球の間隔 (px)" flex={1}>
               <NumberField
                 value={festoonPitch(shape)}
                 min={4}
@@ -487,7 +514,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { bulbPitch: v })}
               />
             </Field>
-            <Field label="径（ドット）">
+            <Field label="径（ドット）" flex={1}>
               <NumberField
                 value={festoonDiameter(shape)}
                 min={1}
@@ -518,7 +545,7 @@ export function Inspector(): React.JSX.Element {
                   style={{
                     ...buttonStyle({ active: (shape.bulbStyle ?? BULB_DEFAULT_STYLE) === m.id }),
                     flex: 1,
-                    padding: '6px 0'
+                    padding: '8px 0'
                   }}
                   onClick={() => updateShape(shape.id, { bulbStyle: m.id })}
                 >
@@ -575,7 +602,7 @@ export function Inspector(): React.JSX.Element {
       {shape.type === 'uplight' && (
         <>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="出口の幅 (px)">
+            <Field label="出口の幅 (px)" flex={1}>
               <NumberField
                 value={shape.beamW0 ?? 14}
                 min={2}
@@ -583,7 +610,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { beamW0: v })}
               />
             </Field>
-            <Field label="広がり (px)">
+            <Field label="広がり (px)" flex={1}>
               <NumberField
                 value={shape.beamW1 ?? 90}
                 min={4}
@@ -656,7 +683,7 @@ export function Inspector(): React.JSX.Element {
             {DISPLAY_MODES.map((m) => (
               <button
                 key={m}
-                style={{ ...buttonStyle({ active: shape.display === m }), flex: 1, padding: '6px 0' }}
+                style={{ ...buttonStyle({ active: shape.display === m }), flex: 1, padding: '8px 0' }}
                 onClick={() => updateShape(shape.id, { display: m })}
               >
                 {m === 'stroke' ? 'Stroke' : m === 'fill' ? 'Fill' : 'Both'}
@@ -745,7 +772,7 @@ export function Inspector(): React.JSX.Element {
       ) : (
         <>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <Field label="Universe">
+            <Field label="Universe" flex={1}>
               <NumberField
                 value={fixture.universe}
                 min={0}
@@ -753,7 +780,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => upsertFixture(shape.id, { universe: v })}
               />
             </Field>
-            <Field label="DMX Addr">
+            <Field label="DMX Addr" flex={1}>
               <NumberField
                 value={fixture.start}
                 min={1}
@@ -885,9 +912,19 @@ function SectionTitle({ children }: { children: React.ReactNode }): React.JSX.El
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
+function Field({
+  label,
+  children,
+  flex
+}: {
+  label: string
+  children: React.ReactNode
+  /** Only set inside horizontal (display:flex) rows so paired fields split evenly.
+   *  Standalone fields leave this unset so they don't stretch in the column aside. */
+  flex?: number
+}): React.JSX.Element {
   return (
-    <div style={{ marginBottom: rowGap, flex: 1 }}>
+    <div style={{ marginBottom: rowGap, flex }}>
       <label style={fieldLabel}>{label}</label>
       {children}
     </div>

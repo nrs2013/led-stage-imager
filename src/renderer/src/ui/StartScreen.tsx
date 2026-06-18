@@ -163,25 +163,25 @@ export function StartScreen(): React.JSX.Element {
 
       <div style={row}>
         <button style={buttonStyle({})} onClick={openImage}>
-          Open Image…
+          画像を開く…
         </button>
         <button style={buttonStyle({})} onClick={loadSaved}>
-          Load…
+          保存ファイルを開く…
         </button>
         <div style={{ width: '0.5px', height: 22, background: C.border, margin: '0 6px' }} />
         <button
           style={smallBtn}
           onClick={() => startBlank(1920, 1080)}
-          title="チャート無しの素のキャンバス"
+          title="チャート無しの素のキャンバス（FHD＝フルHD・1920×1080）"
         >
-          Blank 1920×1080
+          Blank 1920×1080 (FHD)
         </button>
         <button
           style={smallBtn}
           onClick={() => startBlank(3840, 2160)}
-          title="チャート無しの素のキャンバス"
+          title="チャート無しの素のキャンバス（4K UHD＝3840×2160）"
         >
-          Blank 3840×2160
+          Blank 3840×2160 (4K UHD)
         </button>
       </div>
 
@@ -215,7 +215,8 @@ export function StartScreen(): React.JSX.Element {
             fontSize: 11,
             fontFamily: F.ui,
             cursor: 'pointer',
-            padding: 0
+            padding: '6px 8px',
+            textAlign: 'left'
           }}
           onClick={() => setNdiOpen(!ndiOpen)}
         >
@@ -243,21 +244,21 @@ export function StartScreen(): React.JSX.Element {
             <ol style={{ margin: '4px 0', paddingLeft: 20 }}>
               <li>
                 このMacに NDISyphon を入れる →{' '}
-                <a
+                <ExtLink
                   href="https://www.vidvox.net/download/NDISyphon_r4.dmg"
                   onClick={ext('https://www.vidvox.net/download/NDISyphon_r4.dmg')}
-                  style={{ color: C.accent }}
+                  pad="4px 2px"
                 >
                   ダウンロード（無料・Vidvox公式）
-                </a>{' '}
+                </ExtLink>{' '}
                 /{' '}
-                <a
+                <ExtLink
                   href="https://docs.vidvox.net/ndisyphon/"
                   onClick={ext('https://docs.vidvox.net/ndisyphon/')}
-                  style={{ color: C.accent }}
+                  pad="4px 4px"
                 >
                   説明ページ
-                </a>
+                </ExtLink>
               </li>
               <li>
                 LED STAGE IMAGER を起動したまま NDISyphon を開き、下段のリストで「LED STAGE
@@ -274,6 +275,45 @@ export function StartScreen(): React.JSX.Element {
         )}
       </div>
     </main>
+  )
+}
+
+/** 外部リンク：押した実感が出るよう hover で下線・active で軽く明るくする。 */
+function ExtLink({
+  href,
+  onClick,
+  pad,
+  children
+}: {
+  href: string
+  onClick: (e: React.MouseEvent) => void
+  pad: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  const [hover, setHover] = useState(false)
+  const [down, setDown] = useState(false)
+  return (
+    <a
+      href={href}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false)
+        setDown(false)
+      }}
+      onMouseDown={() => setDown(true)}
+      onMouseUp={() => setDown(false)}
+      style={{
+        color: C.accent,
+        display: 'inline-block',
+        padding: pad,
+        textDecoration: hover ? 'underline' : 'none',
+        opacity: down ? 0.7 : 1,
+        cursor: 'pointer'
+      }}
+    >
+      {children}
+    </a>
   )
 }
 
@@ -318,7 +358,7 @@ const dropZone: React.CSSProperties = {
 const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8 }
 const smallBtn: React.CSSProperties = {
   ...buttonStyle({}),
-  padding: '6px 11px',
+  padding: '8px 13px',
   fontSize: 11,
   fontWeight: 500,
   color: C.label

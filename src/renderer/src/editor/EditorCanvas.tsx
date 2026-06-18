@@ -1032,6 +1032,13 @@ export function EditorCanvas(): React.JSX.Element {
         return
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && st.selectedIds.length > 1) {
+        if (
+          st.selectedIds.length >= 5 &&
+          !window.confirm(`電飾 ${st.selectedIds.length} 個を削除しますか？（⌘Zで戻せます）`)
+        ) {
+          e.preventDefault()
+          return
+        }
         st.removeShapes(st.selectedIds) // group delete = one undo step
         e.preventDefault()
         return
@@ -1264,6 +1271,10 @@ export function EditorCanvas(): React.JSX.Element {
 
   const onPointerDown = (e: RPointerEvent<HTMLCanvasElement>): void => {
     if (ctxMenu) setCtxMenu(null)
+    // canvas を触ったら Inspector 等の入力欄に残ったフォーカスを外す。残っていると、図形を選んでも
+    // その後の Delete / 矢印キーが「入力欄を編集中」と見なされて飲み込まれ、選択した線が消せなくなる。
+    const ae = document.activeElement as HTMLElement | null
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) ae.blur()
     if (spaceHeld.current || e.button === 1) {
       panning.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty }
       canvasRef.current?.setPointerCapture(e.pointerId)
@@ -1951,6 +1962,7 @@ export function EditorCanvas(): React.JSX.Element {
     const PARTS = [
       'bulb',
       'neon',
+      'marquee',
       'stars',
       'festoon',
       'parlight',
@@ -1958,7 +1970,10 @@ export function EditorCanvas(): React.JSX.Element {
       'patt',
       'pixelpatt',
       'image',
-      'uplight'
+      'uplight',
+      'roomlamp',
+      'streetlamp',
+      'chandelier'
     ]
     if (!PARTS.includes(part)) return
     e.preventDefault()
@@ -2295,7 +2310,7 @@ const zoomBtn: React.CSSProperties = {
   background: 'rgba(123,197,232,0.15)',
   border: `0.5px solid ${C.accent}`,
   color: C.white,
-  padding: '4px 10px',
+  padding: '7px 12px',
   borderRadius: 4,
   fontSize: 11,
   fontFamily: "'Bebas Neue', sans-serif",
@@ -2322,7 +2337,7 @@ const menuBtn: React.CSSProperties = {
   border: 'none',
   color: C.text,
   textAlign: 'left',
-  padding: '7px 10px',
+  padding: '9px 12px',
   borderRadius: 3,
   fontSize: 12,
   fontFamily: F.ui,

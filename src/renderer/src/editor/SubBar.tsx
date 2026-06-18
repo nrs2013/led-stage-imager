@@ -7,7 +7,7 @@ import { SettingsDialog } from '../ui/SettingsDialog'
 import { FillDialog } from '../ui/FillDialog'
 import { C, F, buttonStyle } from '../ui/tokens'
 
-const fileBtn = { ...buttonStyle({}), padding: '6px 11px', fontSize: 11 }
+const fileBtn = { ...buttonStyle({}), padding: '8px 11px', fontSize: 11 }
 
 export function SubBar(): React.JSX.Element {
   const chart = useStore((s) => s.chart)
@@ -78,17 +78,17 @@ export function SubBar(): React.JSX.Element {
   return (
     <div style={subBar}>
       <button style={fileBtn} onClick={newChart}>
-        New
+        新規
       </button>
       <button style={fileBtn} onClick={openChart}>
-        Load
+        開く
       </button>
       <button style={fileBtn} onClick={saveChart} title="ファイルに保存（⌘S）">
-        Save
+        保存
       </button>
       {savedFlash && (
         <span style={{ fontSize: 11, color: C.green, fontFamily: F.mono, whiteSpace: 'nowrap' }}>
-          Saved: {savedFlash}
+          保存しました: {savedFlash}
         </span>
       )}
       <button style={fileBtn} onClick={duplicate}>
@@ -103,7 +103,7 @@ export function SubBar(): React.JSX.Element {
       <button
         style={{
           ...buttonStyle({ active: stepPatch, accent: C.green, accentRGB: '168,232,120' }),
-          padding: '6px 12px'
+          padding: '8px 12px'
         }}
         onClick={() => setStepPatch(!stepPatch)}
         title="ステップアップモード：描く（置く・スタンプする）たびに、次の空き番地へ自動でパッチされます"
@@ -114,7 +114,7 @@ export function SubBar(): React.JSX.Element {
       <div style={sep} />
 
       <button
-        style={{ ...buttonStyle({}), padding: '6px 12px' }}
+        style={{ ...buttonStyle({}), padding: '8px 12px' }}
         onClick={loadUnderlay}
         title="チャート画像を読み込む（キャンバスは画像のピクセル数に合わせ直されます）"
       >
@@ -132,18 +132,18 @@ export function SubBar(): React.JSX.Element {
             style={{ width: 110, accentColor: C.accent }}
             onChange={(e) => setUnderlayOpacity(Number(e.target.value) / 100)}
           />
-          <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+          <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', padding: '4px 2px' }}>
             <input
               type="checkbox"
               checked={u.visible}
-              style={{ accentColor: C.accent }}
+              style={{ accentColor: C.accent, width: 16, height: 16 }}
               onChange={(e) => setUnderlayVisible(e.target.checked)}
             />
             Show
           </label>
           <div style={sep} />
           <button
-            style={{ ...buttonStyle({ active: u.mask?.enabled ?? false }), padding: '5px 10px' }}
+            style={{ ...buttonStyle({ active: u.mask?.enabled ?? false }), padding: '8px 10px' }}
             onClick={() => setUnderlayMask({ enabled: !(u.mask?.enabled ?? false) })}
             title="チャートの透明にくり抜かれた所だけ描けるようにする（はみ出し禁止）"
           >
@@ -151,7 +151,7 @@ export function SubBar(): React.JSX.Element {
           </button>
           {u.mask?.enabled && (
             <button
-              style={{ ...buttonStyle({ active: u.mask?.invert ?? false }), padding: '5px 10px' }}
+              style={{ ...buttonStyle({ active: u.mask?.invert ?? false }), padding: '8px 10px' }}
               onClick={() => setUnderlayMask({ invert: !(u.mask?.invert ?? false) })}
               title="描画領域を反転（ONにすると絵がある所が描画領域になります）"
             >
@@ -160,7 +160,7 @@ export function SubBar(): React.JSX.Element {
           )}
           {u.mask?.enabled && (
             <button
-              style={{ ...buttonStyle({ accent: C.green, accentRGB: '168,232,120' }), padding: '5px 10px' }}
+              style={{ ...buttonStyle({ accent: C.green, accentRGB: '168,232,120' }), padding: '8px 10px' }}
               onClick={() => setFillOpen(true)}
               title="マスク内に棒/ドットを自動敷き詰め＋連番採番"
             >
@@ -168,7 +168,7 @@ export function SubBar(): React.JSX.Element {
             </button>
           )}
           <button
-            style={{ ...buttonStyle({ active: showDims }), padding: '5px 10px' }}
+            style={{ ...buttonStyle({ active: showDims }), padding: '8px 10px' }}
             onClick={() => setShowDims(!showDims)}
             title="くり抜きの寸法線（X/Yのピクセル数）を表示"
           >
@@ -181,7 +181,7 @@ export function SubBar(): React.JSX.Element {
           )}
           <div style={sep} />
           <button
-            style={{ ...buttonStyle({ accent: '#e0726a', accentRGB: '224,114,106' }), padding: '5px 10px' }}
+            style={{ ...buttonStyle({ accent: '#e0726a', accentRGB: '224,114,106' }), padding: '8px 10px' }}
             onClick={() => setUnderlay(null)}
           >
             Remove
