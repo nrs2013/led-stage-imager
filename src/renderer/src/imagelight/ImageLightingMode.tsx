@@ -1448,52 +1448,24 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <div className="il-val big">{Math.round((ref?.gauge ?? 0) * 100)}%</div>
             </div>
 
-            <div className="il-lbl">
-              COLOR <em>◎でこの色にキー/MIDIを割当</em>
-            </div>
+            <div className="il-lbl">COLOR</div>
             <div className="il-swatches" style={{ opacity: colorLocked ? 0.6 : 1 }}>
-              {COLORS.map((cc) => {
-                const learning = engine.learnColor === cc.hex
-                const assigned =
-                  engine.colorKey[cc.hex] != null || engine.colorMidi[cc.hex] != null
-                return (
-                  <span className="il-sw-cell" key={cc.hex}>
-                    <button
-                      className={ref && sameRgb(ref.color, cc.rgb) ? 'on' : ''}
-                      style={{ background: cc.hex }}
-                      draggable
-                      onDragStart={(e) =>
-                        e.dataTransfer.setData('application/x-il-color', JSON.stringify(cc.rgb))
-                      }
-                      onClick={() => {
-                        if (!colorLocked) engine.setColor(cc.rgb.slice() as RGB3)
-                      }}
-                      title="クリックで適用／ドラッグで流す色へ"
-                    />
-                    <button
-                      className={'il-sw-learn' + (learning ? ' on' : assigned ? ' assigned' : '')}
-                      title={
-                        learning
-                          ? '入力待ち中 — 鳴らしたい MIDI かキーを押す（Escで中止）'
-                          : assigned
-                            ? `割当済（${[
-                                codeLabel(engine.colorKey[cc.hex] ?? null),
-                                engine.colorMidi[cc.hex] != null ? 'N' + engine.colorMidi[cc.hex] : ''
-                              ]
-                                .filter(Boolean)
-                                .join(' ')}）クリックで再設定`
-                            : 'この色にキー/MIDIを覚えさせる'
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        engine.setLearnColor(learning ? null : cc.hex)
-                      }}
-                    >
-                      ◎
-                    </button>
-                  </span>
-                )
-              })}
+              {COLORS.map((cc) => (
+                <span className="il-sw-cell" key={cc.hex}>
+                  <button
+                    className={ref && sameRgb(ref.color, cc.rgb) ? 'on' : ''}
+                    style={{ background: cc.hex }}
+                    draggable
+                    onDragStart={(e) =>
+                      e.dataTransfer.setData('application/x-il-color', JSON.stringify(cc.rgb))
+                    }
+                    onClick={() => {
+                      if (!colorLocked) engine.setColor(cc.rgb.slice() as RGB3)
+                    }}
+                    title="クリックで適用／ドラッグで流す色へ"
+                  />
+                </span>
+              ))}
             </div>
             <div
               className="il-frow"
