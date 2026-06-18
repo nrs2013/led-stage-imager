@@ -461,6 +461,33 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
+      // 入力欄で文字編集中は奪わない（名前入力など）。
+      const tgt = e.target as HTMLElement | null
+      const typing =
+        !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)
+      // BUILD: ⌘A / Ctrl+A で灯体を全選択
+      if (!typing && uiModeRef.current === 'build' && (e.metaKey || e.ctrlKey) && e.code === 'KeyA') {
+        engine.selectAll()
+        e.preventDefault()
+        return
+      }
+      // BUILD: 矢印キーで選択中の灯体を微調整（Shiftで大きく＝10px）。
+      // PLAY では従来通り ↑↓=マスター明るさ / ←→=写真切替。
+      if (
+        !typing &&
+        uiModeRef.current === 'build' &&
+        (e.code === 'ArrowUp' ||
+          e.code === 'ArrowDown' ||
+          e.code === 'ArrowLeft' ||
+          e.code === 'ArrowRight')
+      ) {
+        const step = e.shiftKey ? 10 : 1
+        const dx = e.code === 'ArrowLeft' ? -step : e.code === 'ArrowRight' ? step : 0
+        const dy = e.code === 'ArrowUp' ? -step : e.code === 'ArrowDown' ? step : 0
+        engine.moveSelectedBy(dx, dy)
+        e.preventDefault()
+        return
+      }
       const pi = code ? engine.patterns.findIndex((p) => p && p.key === code) : -1
       if (pi >= 0) {
         engine.applyPattern(pi)
@@ -838,7 +865,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <tbody>
                 <tr>
                   <th>シーン切替</th>
-                  <td>サムネをクリック／覚えさせた MIDI／← →</td>
+                  <td>サムネをクリック／覚えさせた MIDI／← →（本番 PLAY）</td>
                 </tr>
                 <tr>
                   <th>明かり（番号）</th>
@@ -851,6 +878,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 <tr>
                   <th>複数選択</th>
                   <td>Shift＋クリック／空きを四角ドラッグで囲む</td>
+                </tr>
+                <tr>
+                  <th>全選択</th>
+                  <td>⌘A（明かり作り BUILD）</td>
+                </tr>
+                <tr>
+                  <th>微調整（位置）</th>
+                  <td>矢印キー／Shift＋矢印で大きく（BUILD・選択中）</td>
                 </tr>
                 <tr>
                   <th>削除</th>
@@ -874,7 +909,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 </tr>
                 <tr>
                   <th>マスター上下</th>
-                  <td>↑ ↓</td>
+                  <td>↑ ↓（本番 PLAY）</td>
                 </tr>
                 <tr>
                   <th>この一覧</th>
