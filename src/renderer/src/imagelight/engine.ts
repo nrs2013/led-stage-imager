@@ -557,10 +557,6 @@ export class ImageLightEngine {
     this.restore(next)
     this.histTag = null
   }
-  canUndo(): boolean {
-    return this.hist.length > 0
-  }
-
   // ---------- 初期化 ----------
   private buildNoiseTile(): HTMLCanvasElement {
     const n = mk(64, 64)
@@ -1607,11 +1603,6 @@ export class ImageLightEngine {
     this.learnColor = null
     this.bump()
   }
-  clearColorShortcut(hex: string): void {
-    delete this.colorKey[hex]
-    delete this.colorMidi[hex]
-    this.bump()
-  }
   /** 本番シーン切替の方式（cut/fade）と時間(ms)を設定。 */
   setSceneFadeMode(mode: 'cut' | 'fade'): void {
     this.sceneFadeMode = mode
@@ -1930,15 +1921,6 @@ export class ImageLightEngine {
     this.box = { x: (LW - iw) / 2, y: 40, w: iw, h: ih }
   }
 
-  /** デフォルト contain fit の box（warpBox 無視）。リセット時／ハンドル初期表示に使う。 */
-  defaultFitBox(): { x: number; y: number; w: number; h: number } | null {
-    if (!this.mat) return null
-    const sc = Math.min((LW - 80) / this.mat.width, (LH - 240) / this.mat.height)
-    const iw = this.mat.width * sc
-    const ih = this.mat.height * sc
-    return { x: (LW - iw) / 2, y: 40, w: iw, h: ih }
-  }
-
   /** active scene の warpBox を更新（LW×LH 座標系）。null でリセット。 */
   setActiveSceneWarpBox(box: { x: number; y: number; w: number; h: number } | null): void {
     const i = this.activeScene
@@ -2078,20 +2060,6 @@ export class ImageLightEngine {
     // Undo 対象に（'piece-move' タグで連続ドラッグは1手にまとまる＝灯体の move と同方式）
     this.pushHistory('piece-move')
     piece.corners[cornerIdx] = { x: dst.x, y: dst.y }
-    this.bump()
-  }
-
-  /** ピース全体を (dx, dy) だけ平行移動。 */
-  movePieceBy(id: string, dx: number, dy: number): void {
-    const scene = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
-    if (!scene || !scene.pieces) return
-    const piece = scene.pieces.find((p) => p.id === id)
-    if (!piece) return
-    // Undo 対象に（'piece-move' タグで連続ドラッグは1手にまとまる＝灯体の move と同方式）
-    this.pushHistory('piece-move')
-    for (let i = 0; i < 4; i++) {
-      piece.corners[i] = { x: piece.corners[i].x + dx, y: piece.corners[i].y + dy }
-    }
     this.bump()
   }
 

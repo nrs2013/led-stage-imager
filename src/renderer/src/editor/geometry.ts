@@ -53,8 +53,6 @@ export function cornerBounds(a: Point, b: Point): Bounds {
   }
 }
 
-export const pointsAttr = (points: Point[]): string => points.map((p) => `${p.x},${p.y}`).join(' ')
-
 /** Triangle inscribed in a two-corner box: apex top-center, base along the bottom. */
 export function trianglePoints(a: Point, b: Point): Point[] {
   const { x, y, w, h } = cornerBounds(a, b)

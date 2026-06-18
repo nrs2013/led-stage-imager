@@ -40,7 +40,6 @@ export interface SearchParams {
 }
 
 export const frac = (x: number): number => x - Math.floor(x)
-const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v)
 
 /** チェイス: 1灯ずつ山が流れる。soft=山のなだらかさ（カチッ↔ふわっ）。 */
 export function chaseK(P: FxParams['chase'], ms: number, i: number): number {
@@ -158,5 +157,3 @@ export function searchTilt(
   }
   return baseTilt + w * Math.sin(2 * Math.PI * spd * (ms / 1000) + ph)
 }
-
-export { clamp01 }

@@ -95,14 +95,6 @@ export function StartScreen(): React.JSX.Element {
     setStarted(true)
   }
 
-  const [ndiOpen, setNdiOpen] = useState(false)
-  const ext =
-    (url: string) =>
-    (e: React.MouseEvent): void => {
-      e.preventDefault()
-      window.open(url) // Electron: 外部ブラウザで開く / Web版: 新規タブ
-    }
-
   // Esc clears a stale error message.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -206,114 +198,7 @@ export function StartScreen(): React.JSX.Element {
         </div>
       )}
 
-      <div style={{ width: 'min(560px, 80vw)' }}>
-        <button
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: C.hint,
-            fontSize: 11,
-            fontFamily: F.ui,
-            cursor: 'pointer',
-            padding: '6px 8px',
-            textAlign: 'left'
-          }}
-          onClick={() => setNdiOpen(!ndiOpen)}
-        >
-          {ndiOpen ? '▾' : '▸'} 別のPC（Windows含む）の Resolume へ送るには — NDI の準備
-        </button>
-        {ndiOpen && (
-          <div
-            style={{
-              marginTop: 8,
-              padding: '12px 14px',
-              border: `0.5px solid ${C.border}`,
-              borderRadius: 6,
-              background: C.surface,
-              fontSize: 11.5,
-              lineHeight: 1.8,
-              color: C.label,
-              fontFamily: F.ui
-            }}
-          >
-            <div style={{ color: C.text, marginBottom: 4 }}>
-              同じMacの Resolume へは何も不要です（Sources に「LED STAGE IMAGER」が Syphon
-              として自動で出ます）。<b style={{ color: C.white }}>別のPCの Resolume</b>{' '}
-              へアルファ付きで送るには、無料アプリ「NDISyphon」を使います：
-            </div>
-            <ol style={{ margin: '4px 0', paddingLeft: 20 }}>
-              <li>
-                このMacに NDISyphon を入れる →{' '}
-                <ExtLink
-                  href="https://www.vidvox.net/download/NDISyphon_r4.dmg"
-                  onClick={ext('https://www.vidvox.net/download/NDISyphon_r4.dmg')}
-                  pad="4px 2px"
-                >
-                  ダウンロード（無料・Vidvox公式）
-                </ExtLink>{' '}
-                /{' '}
-                <ExtLink
-                  href="https://docs.vidvox.net/ndisyphon/"
-                  onClick={ext('https://docs.vidvox.net/ndisyphon/')}
-                  pad="4px 4px"
-                >
-                  説明ページ
-                </ExtLink>
-              </li>
-              <li>
-                LED STAGE IMAGER を起動したまま NDISyphon を開き、下段のリストで「LED STAGE
-                IMAGER」を選ぶ
-              </li>
-              <li>「ローカルネットワーク」の許可を求められたら必ず許可する</li>
-              <li>
-                受け側の Resolume Arena（Windows / Mac）→ Sources →{' '}
-                <b style={{ color: C.white }}>NDI</b>{' '}
-                に自動で現れる（アルファ付き・追加インストール不要）
-              </li>
-            </ol>
-          </div>
-        )}
-      </div>
     </main>
-  )
-}
-
-/** 外部リンク：押した実感が出るよう hover で下線・active で軽く明るくする。 */
-function ExtLink({
-  href,
-  onClick,
-  pad,
-  children
-}: {
-  href: string
-  onClick: (e: React.MouseEvent) => void
-  pad: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  const [hover, setHover] = useState(false)
-  const [down, setDown] = useState(false)
-  return (
-    <a
-      href={href}
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => {
-        setHover(false)
-        setDown(false)
-      }}
-      onMouseDown={() => setDown(true)}
-      onMouseUp={() => setDown(false)}
-      style={{
-        color: C.accent,
-        display: 'inline-block',
-        padding: pad,
-        textDecoration: hover ? 'underline' : 'none',
-        opacity: down ? 0.7 : 1,
-        cursor: 'pointer'
-      }}
-    >
-      {children}
-    </a>
   )
 }
 

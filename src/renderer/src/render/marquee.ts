@@ -124,15 +124,6 @@ function originOf(shape: Shape, L: MarqueeLayout): { x0: number; baseline: numbe
   return { x0: c.x - L.width / 2, baseline: c.y + L.height / 2 }
 }
 
-export function marqueeGlyphCenter(shape: Shape, i: number): { x: number; y: number } {
-  const L = layoutMarquee(shape)
-  const g = L.glyphs[i]
-  const c = shape.points[0] ?? { x: 0, y: 0 }
-  if (!g) return { x: c.x, y: c.y }
-  const { x0 } = originOf(shape, L)
-  return { x: x0 + g.x + g.w / 2, y: c.y }
-}
-
 /* ---- every bulb in world coordinates, in order — the single source of truth for
  *      addressing (1 bulb = 1 ch) and for rendering. ---- */
 export interface MarqueeBulb {
