@@ -214,6 +214,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // ヘッダの生存ランプ用：MIDI入力が来ているか・出力(Resolume等)が受け取っているか。
   const [live, setLive] = useState<{ midiIn: boolean; out: boolean }>({ midiIn: false, out: false })
   const [showKeys, setShowKeys] = useState(false) // 操作キー一覧オーバーレイ
+  const [presetOpen, setPresetOpen] = useState(false) // 設定コンソールの「設定（解像度/落ち込み）」を開くか
   const showKeysRef = useRef(showKeys)
   useEffect(() => {
     showKeysRef.current = showKeys
@@ -845,6 +846,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const colorLocked = engine.colorOwnedByFx()
   const activeFx = FX_BUTTONS.filter((b) => engine.fxState(b.key))
   const masterPct = Math.round(engine.st.master * 100)
+  const outCapLabel = engine.outCap >= 3840 ? '高精細' : engine.outCap >= 2560 ? 'バランス' : 'なめらか'
+  const falloffLabel = engine.falloffPow >= 4 ? 'きつめ' : engine.falloffPow >= 2.5 ? '標準' : 'ソフト'
   const ms = engine.muteSoloCount() // ソロ/ミュート中の台数（注意表示・全解除ボタン用）
 
   return (
@@ -1170,7 +1173,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <button
                 className={'il-toggle' + (engine.lightOnly ? ' on' : '')}
                 onClick={() => engine.setLightOnly(!engine.lightOnly)}
-                title="ON=写真を使わず光だけをSyphon出力（Arena側で 映像×光）。OFF=写真照らし"
+                title="ON=写真を使わず光だけを出力(Syphon/NDI)（Arena側で 映像×光）。OFF=写真照らし"
               >
                 光だけ出力
               </button>
@@ -1309,6 +1312,232 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <button className="il-mini" onClick={() => setUiMode('play')}>
                 ← 本番へ
               </button>
+            </div>
+
+            <div className="il2-console">
+              <div className="il2-sec">
+                <div className="il2-eb">
+                  <span className="il2-kind">量</span>
+                  <b>LEVELS</b>
+                </div>
+                <div className="il2-fader hero">
+                  <span className="il2-nm">明るさ</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={masterPct}
+                    onChange={(e) => engine.setMaster(+e.target.value / 100)}
+                  />
+                  <span className="il2-vv big">
+                    {masterPct}
+                    <i>%</i>
+                  </span>
+                </div>
+                <div className="il2-fader">
+                  <span className="il2-nm">スモーク</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={30}
+                    value={engine.st.smoke}
+                    onChange={(e) => engine.setSmoke(+e.target.value)}
+                  />
+                  <span className="il2-vv">{engine.st.smoke}</span>
+                </div>
+              </div>
+
+              <div className="il2-sec">
+                <div className="il2-eb">
+                  <span className="il2-kind">入 / 切</span>
+                  <b>OUTPUT</b>
+                </div>
+                <button
+                  className={'il2-switch' + (engine.lightOnly ? ' on' : '')}
+                  onClick={() => engine.setLightOnly(!engine.lightOnly)}
+                  title="ON=写真を使わず光だけを出力(Syphon/NDI)（Arena側で 映像×光）。OFF=写真照らし"
+                >
+                  <span className="il2-sw-track">
+                    <span className="il2-sw-knob" />
+                  </span>
+                  <span className="il2-sw-nm">光だけ出力</span>
+                  <span className="il2-sw-st">{engine.lightOnly ? '入' : '切'}</span>
+                </button>
+              </div>
+
+              <div className="il2-sec">
+                <div className="il2-eb">
+                  <span className="il2-kind">道具</span>
+                  <b>TOOLS</b>
+                </div>
+                <div className="il2-tiles">
+                  <button
+                    className={'il2-tile' + (engine.maskImage ? ' on' : '')}
+                    onClick={() => maskInputRef.current?.click()}
+                    title="アルファ付き画像で境界線を表示（BUILD中のみ・公演ファイルにのみ保存）"
+                  >
+                    マスク
+                  </button>
+                  <button
+                    className={'il2-tile' + (engine.pieceCreating ? ' on' : '')}
+                    onClick={() => engine.setPieceCreating(!engine.pieceCreating)}
+                    title="写真の上をドラッグしてピースを切り出し"
+                  >
+                    ピース
+                  </button>
+                </div>
+                {(engine.maskImage || engine.isActiveSceneWarped() || engine.selectedPieceId) && (
+                  <div className="il2-minirow">
+                    {engine.maskImage && (
+                      <button
+                        className="il-mini"
+                        onClick={() => engine.setMaskFromDataUrl(null)}
+                        title="マスクを外す"
+                      >
+                        マスクを外す
+                      </button>
+                    )}
+                    {engine.isActiveSceneWarped() && (
+                      <button
+                        className="il-mini"
+                        onClick={() => engine.setActiveSceneWarpBox(null)}
+                        title="写真のワープをリセット"
+                      >
+                        ワープ解除
+                      </button>
+                    )}
+                    {engine.selectedPieceId && (
+                      <button
+                        className="il-mini"
+                        onClick={() => engine.removeSelectedPiece()}
+                        title="選択中のピースを削除（Deleteでも）"
+                      >
+                        ピース削除
+                      </button>
+                    )}
+                  </div>
+                )}
+                <input
+                  ref={maskInputRef}
+                  type="file"
+                  accept="image/png,image/webp,image/*"
+                  style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = '' // 同じファイル再選択でも発火させる
+                    if (!file) return
+                    try {
+                      const dataUrl = await fileToDataUrl(file)
+                      await engine.setMaskFromDataUrl(dataUrl)
+                    } catch {
+                      /* 読込失敗は無視 */
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="il2-sec">
+                <div className="il2-eb">
+                  <span className="il2-kind">設定</span>
+                  <b>PRESET</b>
+                </div>
+                <button className="il2-preset" onClick={() => setPresetOpen(!presetOpen)}>
+                  <span className="il2-pi">
+                    <span className="il2-pk">解像度</span>
+                    <span className="il2-pv">{outCapLabel}</span>
+                  </span>
+                  <span className="il2-pi">
+                    <span className="il2-pk">落ち込み</span>
+                    <span className="il2-pv">{falloffLabel}</span>
+                  </span>
+                  <span className="il2-chev">{presetOpen ? '▾' : '▸'}</span>
+                </button>
+                {presetOpen && (
+                  <div className="il2-presetbody">
+                    <div className="il2-segrow">
+                      <span className="il2-seglbl">解像度</span>
+                      <div className="il2-seg">
+                        {(
+                          [
+                            { label: 'なめらか', px: 1920 },
+                            { label: 'バランス', px: 2560 },
+                            { label: '高精細', px: 3840 }
+                          ] as const
+                        ).map(({ label, px }) => (
+                          <button
+                            key={label}
+                            className={'il2-segbtn' + (engine.outCap === px ? ' on' : '')}
+                            onClick={() => engine.setOutCap(px)}
+                            title="NDI/Syphon出力の解像度。低いほど動きが滑らか・高いほど精細（本番=高精細／動き重視=なめらか）"
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="il2-segrow">
+                      <span className="il2-seglbl">落ち込み</span>
+                      <div className="il2-seg">
+                        {(
+                          [
+                            { label: 'ソフト', pow: 1.5 },
+                            { label: '標準', pow: 2.5 },
+                            { label: 'きつめ', pow: 4 }
+                          ] as const
+                        ).map(({ label, pow }) => (
+                          <button
+                            key={label}
+                            className={'il2-segbtn' + (engine.falloffPow === pow ? ' on' : '')}
+                            onClick={() => engine.setFalloff(pow)}
+                            title="ビームの落ち込みの強さ（手前を明るく・奥を暗く）"
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {ref && (
+                <div className="il2-sec">
+                  <div className="il2-eb">
+                    <span className="il2-kind">選択灯体</span>
+                    <b>SELECTED</b>
+                  </div>
+                  <RigRow
+                    label="出口幅"
+                    min={8}
+                    max={180}
+                    value={ref?.w0 ?? 40}
+                    onChange={(v) => engine.setRig('w0', v)}
+                  />
+                  <RigRow
+                    label="広がり"
+                    min={20}
+                    max={700}
+                    value={ref?.w1 ?? 260}
+                    onChange={(v) => engine.setRig('w1', v)}
+                  />
+                  <RigRow
+                    label="伸び"
+                    min={80}
+                    max={1000}
+                    value={ref?.len ?? 600}
+                    onChange={(v) => engine.setRig('len', v)}
+                  />
+                  <div className="il2-act">
+                    <button
+                      className="il-mini"
+                      onClick={() => engine.removeSelected()}
+                      title="Delete / Backspace キーでも消せます"
+                    >
+                      灯体を削除（Del）
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <StrobeSpecial engine={engine} />
@@ -1768,165 +1997,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             </div>
             </div>
 
-            <details className="il-setbox">
-              <summary>設定（全体・出力・仕込み）</summary>
-              <div className="il-toggles" style={{ marginTop: 6 }}>
-                <button
-                  className={'il-toggle' + (engine.lightOnly ? ' on' : '')}
-                  onClick={() => engine.setLightOnly(!engine.lightOnly)}
-                  title="ON=写真を使わず光だけをSyphon出力（Arena側で 映像×光）。OFF=写真照らし"
-                >
-                  光だけ出力
-                </button>
-                <button
-                  className={'il-toggle' + (engine.maskImage ? ' on' : '')}
-                  onClick={() => maskInputRef.current?.click()}
-                  title="アルファ付き画像で境界線を表示（BUILD中のみ・公演ファイルにのみ保存）"
-                >
-                  マスク
-                </button>
-                <button
-                  className={'il-toggle' + (engine.pieceCreating ? ' on' : '')}
-                  onClick={() => engine.setPieceCreating(!engine.pieceCreating)}
-                  title="写真の上をドラッグしてピースを切り出し"
-                >
-                  ピース
-                </button>
-                {engine.maskImage && (
-                  <button className="il-mini" onClick={() => engine.setMaskFromDataUrl(null)} title="マスクを外す">
-                    ×
-                  </button>
-                )}
-                {engine.isActiveSceneWarped() && (
-                  <button
-                    className="il-mini"
-                    onClick={() => engine.setActiveSceneWarpBox(null)}
-                    title="写真のワープをリセット"
-                  >
-                    ↺
-                  </button>
-                )}
-                {engine.selectedPieceId && (
-                  <button
-                    className="il-mini"
-                    onClick={() => engine.removeSelectedPiece()}
-                    title="選択中のピースを削除（Deleteでも）"
-                  >
-                    × ピース
-                  </button>
-                )}
-              </div>
-              <div className="il-toggles">
-                <span className="il-falloff-lbl">落ち込み</span>
-                {(
-                  [
-                    { label: 'ソフト', pow: 1.5 },
-                    { label: '標準', pow: 2.5 },
-                    { label: 'きつめ', pow: 4 }
-                  ] as const
-                ).map(({ label, pow }) => (
-                  <button
-                    key={label}
-                    className={'il-toggle' + (engine.falloffPow === pow ? ' on' : '')}
-                    onClick={() => engine.setFalloff(pow)}
-                    title="ビームの落ち込みの強さ（手前を明るく・奥を暗く）"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="il-toggles">
-                <span className="il-falloff-lbl">出力</span>
-                {(
-                  [
-                    { label: 'なめらか', px: 1920 },
-                    { label: 'バランス', px: 2560 },
-                    { label: '高精細', px: 3840 }
-                  ] as const
-                ).map(({ label, px }) => (
-                  <button
-                    key={label}
-                    className={'il-toggle' + (engine.outCap === px ? ' on' : '')}
-                    onClick={() => engine.setOutCap(px)}
-                    title="NDI/Syphon出力の解像度。低いほど動きが滑らか・高いほど精細（本番=高精細／動き重視=なめらか）"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <input
-                ref={maskInputRef}
-                type="file"
-                accept="image/png,image/webp,image/*"
-                style={{ display: 'none' }}
-                onChange={async (e) => {
-                  const file = e.target.files?.[0]
-                  e.target.value = '' // 同じファイル再選択でも発火させる
-                  if (!file) return
-                  try {
-                    const dataUrl = await fileToDataUrl(file)
-                    await engine.setMaskFromDataUrl(dataUrl)
-                  } catch {
-                    /* 読込失敗は無視 */
-                  }
-                }}
-              />
-              <div className="il-lbl">MASTER</div>
-              <div className="il-frow">
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={masterPct}
-                  onChange={(e) => engine.setMaster(+e.target.value / 100)}
-                />
-                <div className="il-val">{masterPct}%</div>
-              </div>
-              <div className="il-frow">
-                <span className="il-lbl" style={{ width: 46 }}>
-                  SMOKE
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={30}
-                  value={engine.st.smoke}
-                  onChange={(e) => engine.setSmoke(+e.target.value)}
-                />
-                <div className="il-val small">{engine.st.smoke}</div>
-              </div>
-              <div className="il-lbl" style={{ marginTop: 6 }}>仕込み（灯体の素性）</div>
-              <RigRow
-                label="出口幅"
-                min={8}
-                max={180}
-                value={ref?.w0 ?? 40}
-                onChange={(v) => engine.setRig('w0', v)}
-              />
-              <RigRow
-                label="広がり"
-                min={20}
-                max={700}
-                value={ref?.w1 ?? 260}
-                onChange={(v) => engine.setRig('w1', v)}
-              />
-              <RigRow
-                label="伸び"
-                min={80}
-                max={1000}
-                value={ref?.len ?? 600}
-                onChange={(v) => engine.setRig('len', v)}
-              />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 3 }}>
-                <button
-                  className="il-mini"
-                  onClick={() => engine.removeSelected()}
-                  title="Delete / Backspace キーでも消せます"
-                >
-                  選択灯体を削除（Del）
-                </button>
-              </div>
-            </details>
           </aside>
         )}
       </div>
@@ -2389,8 +2459,6 @@ const IL_CSS = `
 .il-lbl{font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:0.16em;color:var(--il-dim);border-bottom:0.5px solid var(--il-line);padding-bottom:3px;margin-top:1px;}
 .il-lbl em{font-style:normal;color:var(--il-faint);letter-spacing:0;margin-left:6px;font-family:'Noto Sans JP',sans-serif;font-size:9.5px;}
 /* CONSOLE: 機能をまとめる細枠ベイ */
-.il-bay{border:0.5px solid var(--il-line);border-radius:6px;background:rgba(255,255,255,0.012);padding:8px 10px;display:flex;flex-direction:column;gap:7px;}
-.il-bay .il-lbl{border-bottom:none;padding-bottom:0;margin-top:0;}
 .il-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;}
 .il-strip button{background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;color:var(--il-txt);padding:4px 2px 3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:42px;justify-content:center;}
 .il-strip button.on{border-color:var(--il-green);box-shadow:0 0 0 1px rgba(168,232,120,0.35) inset;}
@@ -2415,10 +2483,6 @@ const IL_CSS = `
 .il-swatches button{width:27px;height:27px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0;}
 .il-swatches button.on{border-color:#fff;}
 .il-sw-cell{position:relative;display:inline-block;line-height:0;}
-.il-sw-learn{position:absolute;top:-4px;right:-4px;width:19px;height:19px;line-height:17px;text-align:center;font-size:9px;border-radius:50%;background:#0a0a0a;color:var(--il-faint);border:0.5px solid var(--il-line);cursor:pointer;padding:0;user-select:none;}
-.il-sw-learn:hover{color:var(--il-txt);border-color:var(--il-dim);}
-.il-sw-learn.assigned{color:var(--il-cyan);border-color:var(--il-cyan);}
-.il-sw-learn.on{color:#111;background:var(--il-amber);border-color:var(--il-amber);animation:il-learn-blink 0.7s infinite;}
 .il-colorpick{width:42px;height:26px;padding:0;border:0.5px solid var(--il-line);border-radius:6px;background:none;cursor:pointer;}
 .il-hex{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--il-dim);flex:1;}
 .il-fxgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;}
@@ -2474,19 +2538,47 @@ const IL_CSS = `
 .il-mini{background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-dim);padding:6px 11px;border-radius:5px;cursor:pointer;font-size:10.5px;font-family:inherit;}
 .il-mini.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
 .il-root hr{border:none;border-top:0.5px solid var(--il-line);margin:0;}
-.il-note{font-size:10.5px;color:var(--il-faint);line-height:1.7;}
-.il-note b{color:var(--il-dim);font-weight:500;}
-.il-note summary{cursor:pointer;color:var(--il-dim);font-size:10.5px;}
 .il-card{border:0.5px solid var(--il-line);border-radius:8px;padding:8px 9px;display:flex;flex-direction:column;gap:6px;}
 .il-cardhd{display:flex;align-items:center;gap:7px;font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:0.08em;color:var(--il-txt);}
 .il-stepn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--il-green);color:#10210a;font-family:'Bebas Neue',sans-serif;font-size:13px;line-height:1;flex-shrink:0;}
 .il-card .il-lbl{border-bottom:none;padding-bottom:0;}
-.il-setbox{border:0.5px solid var(--il-line);border-radius:8px;padding:7px 9px;display:flex;flex-direction:column;gap:6px;background:rgba(0,0,0,0.18);}
-.il-setbox>summary{cursor:pointer;color:var(--il-dim);font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:0.1em;list-style:none;}
-.il-setbox>summary::-webkit-details-marker{display:none;}
-.il-setbox>summary::before{content:'▸ ';}
-.il-setbox[open]>summary::before{content:'▾ ';}
-.il-setbox .il-lbl{border-bottom:none;padding-bottom:0;}
+.il2-console{display:flex;flex-direction:column;border:0.5px solid var(--il-line);border-radius:9px;background:rgba(0,0,0,0.18);padding:0 11px;}
+.il2-sec{padding:11px 0;border-top:0.5px solid var(--il-line);}
+.il2-sec:first-child{border-top:none;}
+.il2-eb{display:flex;align-items:center;gap:8px;margin-bottom:9px;}
+.il2-kind{font-size:10px;color:#0a0a0a;background:var(--il-faint);border-radius:4px;padding:1.5px 6px;letter-spacing:0.04em;}
+.il2-eb b{font-family:'Bebas Neue',sans-serif;font-weight:400;font-size:12px;letter-spacing:0.13em;color:var(--il-dim);}
+.il2-fader{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.il2-fader:last-child{margin-bottom:0;}
+.il2-fader .il2-nm{font-size:12px;color:var(--il-txt);min-width:60px;}
+.il2-fader.hero .il2-nm{font-size:14px;}
+.il2-vv{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--il-dim);min-width:44px;text-align:right;}
+.il2-vv.big{font-size:22px;color:var(--il-amber);min-width:62px;}
+.il2-vv.big i{font-size:13px;font-style:normal;}
+.il2-switch{display:flex;align-items:center;gap:11px;width:100%;background:none;border:none;padding:0;cursor:pointer;}
+.il2-sw-track{position:relative;width:50px;height:26px;border-radius:14px;border:0.5px solid var(--il-line);background:var(--il-inset);flex:0 0 auto;}
+.il2-sw-knob{position:absolute;top:50%;left:4px;transform:translateY(-50%);width:18px;height:18px;border-radius:50%;background:var(--il-faint);transition:left .15s,background .15s;}
+.il2-switch.on .il2-sw-track{border-color:var(--il-amber);background:rgba(251,191,36,0.14);}
+.il2-switch.on .il2-sw-knob{left:28px;background:var(--il-amber);}
+.il2-sw-nm{font-size:14px;color:var(--il-txt);}
+.il2-sw-st{margin-left:auto;font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:0.12em;color:var(--il-faint);}
+.il2-switch.on .il2-sw-st{color:var(--il-amber);}
+.il2-tiles{display:flex;gap:9px;}
+.il2-tile{flex:1;padding:12px 0;border:0.5px solid var(--il-line);border-radius:9px;background:rgba(255,255,255,0.018);color:var(--il-dim);cursor:pointer;font-size:13px;font-family:inherit;text-align:center;}
+.il2-tile.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,0.10);}
+.il2-minirow{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.il2-preset{display:flex;align-items:center;gap:16px;width:100%;padding:10px 12px;border:0.5px solid var(--il-line);border-radius:9px;background:rgba(255,255,255,0.012);cursor:pointer;font-family:inherit;text-align:left;}
+.il2-pi{display:flex;align-items:baseline;gap:6px;}
+.il2-pk{font-size:11px;color:var(--il-faint);}
+.il2-pv{font-size:13px;color:var(--il-txt);}
+.il2-chev{margin-left:auto;color:var(--il-faint);font-size:12px;}
+.il2-presetbody{display:flex;flex-direction:column;gap:7px;margin-top:8px;}
+.il2-segrow{display:flex;align-items:center;gap:8px;}
+.il2-seglbl{font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:0.1em;color:var(--il-dim);min-width:50px;}
+.il2-seg{display:flex;gap:5px;flex:1;}
+.il2-segbtn{flex:1;background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-dim);padding:7px 4px;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit;}
+.il2-segbtn.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,0.10);}
+.il2-act{display:flex;justify-content:flex-end;margin-top:8px;}
 .il-fxall{background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;color:var(--il-txt);cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:42px;}
 .il-fxall.on{border-color:var(--il-green);box-shadow:0 0 0 1px rgba(168,232,120,0.35) inset;}
 /* MIDIラーン待ち受けの点滅（MASTER等・他のラーンと同じ作法） */
