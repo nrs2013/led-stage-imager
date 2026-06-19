@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../state/store'
 import { OutputRenderer } from './OutputRenderer'
+import { effectiveDmxByUniverse } from '../dmx/resolve'
 import { C, F } from '../ui/tokens'
 
 interface DecorApi {
@@ -29,12 +30,14 @@ export function LiveView({
     const tick = (): void => {
       const st = useStore.getState()
       const { chart, dmxByUniverse } = st
-      renderer.render(
-        chart,
+      // On Signal Loss: 信号が切れたユニバースを「保持」か「黒」かに（chart.settings.holdOnTimeout）
+      const dmx = effectiveDmxByUniverse(
         dmxByUniverse,
-        chart.settings.gamma,
-        st.manualMode ? st.manualByFixture : null
+        st.lastSeenByUniverse,
+        chart.settings.holdOnTimeout,
+        Date.now()
       )
+      renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
       if (publish && api?.publishFrame) {
         api.publishFrame(chart.canvas.w, chart.canvas.h, renderer.readRGBA())
       }
