@@ -21,6 +21,8 @@ export type ShapeType =
   | 'streetlamp'
   | 'chandelier'
   | 'marquee'
+/** 部品の種別：電飾(LED/装飾) か 照明(ステージ灯体)。棚のグループ分け・表示フィルタ用。 */
+export type PartFamily = 'decor' | 'light'
 export type DisplayMode = 'stroke' | 'fill' | 'both'
 export type ChannelMode = 'rgb' | 'rgbdim' | 'dim' | 'rgbw' | 'beam6'
 export type BulbStyle = 'clear' | 'frost'
@@ -35,6 +37,11 @@ export interface Shape {
   type: ShapeType
   /** Which layer (song page) owns this shape; absent only mid-migration. */
   layerId?: string
+  /** 種別: 電飾(decor) か 照明(light)。棚の2グループ分け・表示フィルタ用。
+   *  ※種別はここ(部品の属性)に持つ。Layer(曲ページ)では絶対に分けない＝
+   *  出力(OutputRenderer)は全レイヤーの全shapeを合算するので混ざる。
+   *  古いshowは欠損し得るので読む側は必ず (family ?? 'decor') で参照する。 */
+  family?: PartFamily
   points: Point[] // geometry in canvas pixels
   display: DisplayMode
   strokeWidth: number

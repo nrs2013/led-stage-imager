@@ -1,4 +1,5 @@
 import type { Chart, Shape, ShapeType, Point } from './types'
+import { familyOfType } from './part-family'
 
 let counter = 0
 export const newId = (prefix = 'id'): string =>
@@ -29,7 +30,9 @@ export function addShape(
     display: 'stroke',
     strokeWidth: 1,
     layerId: chart.activeLayerId,
-    ...init
+    ...init,
+    // 種別は init 指定が最優先、無ければ type から既定（電飾/照明）を付与。
+    family: init.family ?? familyOfType(init.type)
   } as Shape
   return { ...chart, shapes: [...chart.shapes, shape] }
 }

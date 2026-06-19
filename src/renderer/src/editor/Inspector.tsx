@@ -1,5 +1,6 @@
 import { useStore } from '../state/store'
 import type { BulbStyle, ChannelMode, DisplayMode, Shape } from '../model/types'
+import { familyOfType } from '../model/part-family'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
 import { channelCount } from '../dmx/channel-math'
 import { addressAt, formatDmx, repeatCount } from '../dmx/address'
@@ -222,6 +223,9 @@ export function Inspector(): React.JSX.Element {
   return (
     <aside style={asideStyle}>
       <SectionTitle>Fixture</SectionTitle>
+      <div style={{ fontFamily: F.ui, fontSize: 11, color: C.label, marginBottom: 4 }}>
+        種別: {(shape.family ?? familyOfType(shape.type)) === 'light' ? '照明' : '電飾'}
+      </div>
       <div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, marginBottom: 6 }}>
         {shape.type === 'blinder' ? '8灯ミニブル' : shape.type.toUpperCase()} ·{' '}
         {shape.id.slice(-6)}
@@ -749,7 +753,7 @@ export function Inspector(): React.JSX.Element {
       <SectionTitle>Patch</SectionTitle>
       {shape.type === 'image' ? (
         <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8, lineHeight: 1.6 }}>
-          写真は光りません — 「照らし」をパッチして当てると浮かびます
+          写真は光りません — 「スポット」をパッチして当てると浮かびます
         </div>
       ) : !fixture ? (
         <button

@@ -56,4 +56,31 @@ describe('chart-file', () => {
     expect(c.layers[0].underlay).toBeNull()
     expect(c.layers[0].name).toBe('CHART 1')
   })
+  it('fills missing family on load: old parts→decor, stage fixtures→light', () => {
+    const v2 = {
+      version: 2,
+      id: 'c',
+      name: 'n',
+      canvas: { w: 10, h: 10 },
+      layers: [{ id: 'l1', name: 'CHART 1', underlay: null, visible: true }],
+      activeLayerId: 'l1',
+      shapes: [
+        { id: 'a', type: 'bulb', layerId: 'l1', points: [{ x: 0, y: 0 }], display: 'fill', strokeWidth: 1 },
+        { id: 'b', type: 'uplight', layerId: 'l1', points: [{ x: 0, y: 0 }], display: 'fill', strokeWidth: 1 }
+      ],
+      fixtures: [],
+      syphon: { name: 's' },
+      settings: { holdOnTimeout: true, gamma: false, glow: false, glowAmount: 14 }
+    }
+    const c = parseChart(JSON.stringify(v2))
+    expect(c.shapes[0].family).toBe('decor') // bulb = 電飾
+    expect(c.shapes[1].family).toBe('light') // uplight = 照明
+  })
+  it('keeps family through serialize/parse round-trip', () => {
+    let c = createChart({ w: 100, h: 100 })
+    c = addShape(c, { type: 'uplight', points: [{ x: 1, y: 1 }] })
+    expect(c.shapes[0].family).toBe('light')
+    const parsed = parseChart(serializeChart(c))
+    expect(parsed.shapes[0].family).toBe('light')
+  })
 })

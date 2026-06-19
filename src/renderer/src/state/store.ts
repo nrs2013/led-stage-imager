@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Chart, Shape, Fixture, ChannelMode, Point, Layer, Underlay } from '../model/types'
 import { createChart, addShape as addShapeToChart, newId } from '../model/chart-model'
+import type { PaletteFilter } from '../model/part-family'
 import { eraseCellsFromChart } from '../model/erase'
 import { mergeRunCells, applyMerge } from '../model/merge-runs'
 import { regenChain } from '../editor/stroke-fit'
@@ -51,6 +52,8 @@ interface AppState {
   lastSeenByUniverse: Record<number, number>
   manualMode: boolean
   manualByFixture: Record<string, [number, number, number]>
+  /** 棚＆キャンバスの種別フィルタ（照明だけ/電飾だけ/両方）。UI状態でありchart(保存対象)には入れない。 */
+  paletteFilter: PaletteFilter
   snapToPixel: boolean
   /** ステップアップモード: when ON, every newly drawn/dropped shape is auto-patched
    *  at the next free address (and pasted clones renumber instead of cloning). */
@@ -158,6 +161,7 @@ interface AppState {
    *  to manual so it shows immediately) — the no-console "splash a colour" button. */
   setManualMany: (fixtureIds: string[], rgb: [number, number, number]) => void
   setSnap: (on: boolean) => void
+  setPaletteFilter: (f: PaletteFilter) => void
   setUnderlayMask: (patch: { enabled?: boolean; invert?: boolean }) => void
   setMaskData: (m: MaskData | null) => void
   setMaskEmpty: (on: boolean) => void
@@ -259,6 +263,7 @@ export const useStore = create<AppState>()((set, get) => ({
   lastSeenByUniverse: {},
   manualMode: false,
   manualByFixture: {},
+  paletteFilter: 'all',
   snapToPixel: true,
   stepPatch: false,
   penWidth: 1,
@@ -731,6 +736,7 @@ export const useStore = create<AppState>()((set, get) => ({
   helpOpen: false,
   setHelpOpen: (helpOpen) => set({ helpOpen }),
   setSnap: (on) => set({ snapToPixel: on }),
+  setPaletteFilter: (paletteFilter) => set({ paletteFilter }),
   setStepPatch: (on) => set({ stepPatch: on }),
   setUnderlayMask: (patch) =>
     set((s) => {

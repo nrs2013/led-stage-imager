@@ -7,6 +7,7 @@ import {
   type PointerEvent as RPointerEvent
 } from 'react'
 import { useStore, activeLayerOf } from '../state/store'
+import { visibleByFilter } from '../model/part-family'
 import type { Point, Shape } from '../model/types'
 import { fileToDataUrl } from '../io/image-pick'
 import { saveChartToFile } from '../io/file-ops'
@@ -378,6 +379,7 @@ export function EditorCanvas(): React.JSX.Element {
   const showDims = useStore((s) => s.showDims)
   const showIds = useStore((s) => s.showIds)
   const penWidth = useStore((s) => s.penWidth)
+  const paletteFilter = useStore((s) => s.paletteFilter)
   /** Punch-out islands of the chart (for the blueprint dimension labels). */
   const regions = useMemo<Region[]>(
     () => (mask ? findDrawableRegions(mask.bitmap, mask.w, mask.h) : []),
@@ -542,6 +544,7 @@ export function EditorCanvas(): React.JSX.Element {
       const lid = shape.layerId ?? homeId
       const ghost = lid !== activeId
       if (ghost && !layerVisible.get(lid)) return
+      if (!visibleByFilter(shape, paletteFilter)) return // 種別フィルタ（照明だけ/電飾だけ）
       ctx.globalAlpha = ghost ? 0.22 : shape.locked ? 0.4 : 1
       drawShapeInto(ctx, shape, shapeColor(i), shapeFill(i), boostRef.current)
       ctx.globalAlpha = 1
@@ -822,7 +825,7 @@ export function EditorCanvas(): React.JSX.Element {
   useEffect(() => {
     contentDirty.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chart.shapes, chart.canvas, chart.layers, chart.activeLayerId, mask])
+  }, [chart.shapes, chart.canvas, chart.layers, chart.activeLayerId, mask, paletteFilter])
 
   // neon webfonts arrive async: stale measurements (taken against the fallback
   // font) must be thrown away and the offscreen repainted once the real font lands
@@ -967,7 +970,12 @@ export function EditorCanvas(): React.JSX.Element {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'a' || e.key === 'A')) {
         const c = st.chart
         const ids = c.shapes
-          .filter((s) => !s.locked && (s.layerId ?? c.layers[0]?.id) === c.activeLayerId)
+          .filter(
+            (s) =>
+              !s.locked &&
+              (s.layerId ?? c.layers[0]?.id) === c.activeLayerId &&
+              visibleByFilter(s, st.paletteFilter)
+          )
           .map((s) => s.id)
         if (ids.length) {
           st.setTool('select')
@@ -1169,6 +1177,7 @@ export function EditorCanvas(): React.JSX.Element {
       if (!!sh.locked !== wantLocked) continue // locked backdrops: left-clicks pass through
       // other songs' ghosts are untouchable — only the active layer is editable
       if ((sh.layerId ?? chart.layers[0]?.id) !== chart.activeLayerId) continue
+      if (!visibleByFilter(sh, paletteFilter)) continue // 種別フィルタ外はクリックを透過
       const b = shapeArrayBounds(sh)
       const half = (sh.strokeWidth || 1) / 2
       const pad = tol + half
@@ -1893,6 +1902,7 @@ export function EditorCanvas(): React.JSX.Element {
             (s) =>
               !s.locked &&
               (s.layerId ?? chart.layers[0]?.id) === chart.activeLayerId &&
+              visibleByFilter(s, st.paletteFilter) &&
               shapeIntersectsRect(s, x0, y0, x1, y1)
           )
           .map((s) => s.id)

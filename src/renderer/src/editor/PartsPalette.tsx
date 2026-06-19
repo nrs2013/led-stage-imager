@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { C, F } from '../ui/tokens'
+import { useStore } from '../state/store'
+import { familyOfType, type PaletteFilter } from '../model/part-family'
+import type { ShapeType, PartFamily } from '../model/types'
 import { drawBulbGlass, drawBulbLit, BULB_DEFAULT_DIAMETER, type RGB } from '../render/bulb'
 import { drawNeonGlyphLit, clearNeonLayoutCache } from '../render/neon'
 import { drawMarqueeGlyphLit, clearMarqueeCache, marqueeCharCount } from '../render/marquee'
@@ -397,14 +400,14 @@ const CARDS: {
     part: 'image',
     label: '写真素材',
     hint: 'ALBEDO',
-    title: '写真（実物の電飾やセット）を置く — 自分では光らず、「照らし」が当たった所だけ浮かぶ。写真はInspectorで選ぶ',
+    title: '写真（実物の電飾やセット）を置く — 自分では光らず、「スポット」が当たった所だけ浮かぶ。写真はInspectorで選ぶ',
     thumb: <FixtureThumb paint={paintImage} />
   },
   {
     part: 'uplight',
-    label: '照らし',
-    hint: 'BEAM',
-    title: 'アッパーライト — 1灯ずつ置いて、出口の幅・広がり・届く高さをInspectorで決める。チャートの外にも置ける。Beam 6chモードで卓からPan/Tilt/Zoom',
+    label: 'スポット',
+    hint: 'SPOT',
+    title: 'スポット — 1灯ずつ置いて、出口の幅・広がり・届く高さをInspectorで決める。チャートの外にも置ける。Beam 6chモードで卓からPan/Tilt/Zoom',
     thumb: <FixtureThumb paint={paintUplight} />
   },
   {
@@ -433,43 +436,81 @@ const CARDS: {
 /** アイコン棚 — drag a part onto the chart to place it (part centre = the dropped
  *  cell). 4-up grid so every card stays readable as the family grows. */
 export function PartsPalette(): React.JSX.Element {
+  const paletteFilter = useStore((s) => s.paletteFilter)
+  const setPaletteFilter = useStore((s) => s.setPaletteFilter)
+
+  const card = (c: (typeof CARDS)[number]): React.JSX.Element => (
+    <div
+      key={c.part}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('application/x-decor-part', c.part)
+        e.dataTransfer.effectAllowed = 'copy'
+      }}
+      title={c.title}
+      style={cardStyle}
+    >
+      {c.thumb}
+      <div
+        style={{
+          fontSize: 10,
+          color: C.text,
+          fontFamily: F.ui,
+          marginTop: 4,
+          whiteSpace: 'nowrap',
+          maxWidth: '100%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          textAlign: 'center'
+        }}
+        title={c.label}
+      >
+        {c.label}
+      </div>
+      <div style={{ fontSize: 8.5, color: C.hint, fontFamily: F.mono }}>{c.hint}</div>
+    </div>
+  )
+
+  const GROUPS: { family: PartFamily; label: string }[] = [
+    { family: 'light', label: '照明' },
+    { family: 'decor', label: '電飾' }
+  ]
+  const shown = GROUPS.filter((g) => paletteFilter === 'all' || paletteFilter === g.family)
+  const FILTERS: { id: PaletteFilter; label: string }[] = [
+    { id: 'all', label: '両方' },
+    { id: 'light', label: '照明' },
+    { id: 'decor', label: '電飾' }
+  ]
+
   return (
     <div style={wrapStyle}>
-      <div style={titleStyle}>Parts</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-        {CARDS.map((c) => (
-          <div
-            key={c.part}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData('application/x-decor-part', c.part)
-              e.dataTransfer.effectAllowed = 'copy'
-            }}
-            title={c.title}
-            style={cardStyle}
-          >
-            {c.thumb}
-            <div
-              style={{
-                fontSize: 10,
-                color: C.text,
-                fontFamily: F.ui,
-                marginTop: 4,
-                whiteSpace: 'nowrap',
-                maxWidth: '100%',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                textAlign: 'center'
-              }}
-              title={c.label}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{ ...titleStyle, marginBottom: 0 }}>Parts</div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 5 }}>
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setPaletteFilter(f.id)}
+              title="棚とチャートの表示を、照明だけ／電飾だけ／両方 に切り替え"
+              style={filterBtnStyle(paletteFilter === f.id)}
             >
-              {c.label}
-            </div>
-            <div style={{ fontSize: 8.5, color: C.hint, fontFamily: F.mono }}>{c.hint}</div>
-          </div>
-        ))}
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 8, lineHeight: 1.5 }}>
+      {shown.map((g) => {
+        const cards = CARDS.filter((c) => familyOfType(c.part as ShapeType) === g.family)
+        return (
+          <div key={g.family} style={{ marginBottom: 10 }}>
+            <div style={groupHeadStyle}>{g.label}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+              {cards.map(card)}
+            </div>
+          </div>
+        )
+      })}
+      <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 4, lineHeight: 1.5 }}>
         ドラッグ＆ドロップで設置（中心がドロップ地点に乗ります） · 2個目からは ⌘C → クリック → ⌘V
       </div>
     </div>
@@ -502,4 +543,26 @@ const cardStyle: React.CSSProperties = {
   cursor: 'grab',
   userSelect: 'none',
   boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
+}
+
+const groupHeadStyle: React.CSSProperties = {
+  fontFamily: F.ui,
+  fontSize: 10,
+  letterSpacing: '0.08em',
+  color: C.label,
+  marginBottom: 5
+}
+
+/** フィルタの小トグル：0.5px細線＋半透明＋白文字（規約）。選択中だけアクセント線。 */
+function filterBtnStyle(active: boolean): React.CSSProperties {
+  return {
+    fontFamily: F.ui,
+    fontSize: 10,
+    padding: '4px 9px',
+    borderRadius: 5,
+    border: `0.5px solid ${active ? C.accent : C.border}`,
+    background: active ? `rgba(${C.accentRGB},0.14)` : 'transparent',
+    color: active ? C.accent : C.label,
+    cursor: 'pointer'
+  }
 }
