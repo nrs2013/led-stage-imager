@@ -416,19 +416,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
-      // 色 LEARN 待機中：Esc で中止、それ以外のキーでその色に割当
-      if (engine.learnColor != null) {
-        if (e.key === 'Escape') {
-          engine.setLearnColor(null)
-          e.preventDefault()
-          return
-        }
-        const lc = shortcutCode(e)
-        if (!lc) return
-        engine.assignColorShortcut(engine.learnColor, lc, null)
-        e.preventDefault()
-        return
-      }
       if (e.key === '?') {
         setShowKeys(true)
         e.preventDefault()
@@ -928,7 +915,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       )}
       <header className="il-header">
         <h1>
-          IMAGE LIGHTING <span style={{ color: 'var(--il-amber)' }}>画像照明モード</span>
+          LIGHT SKETCH <span style={{ color: 'var(--il-amber)' }}>かんたんモード</span>
         </h1>
         <small>写真はクリック・明かりはシーン・困ったらESC</small>
         <div style={{ flex: 1 }} />
@@ -967,7 +954,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           開く
         </button>
         <button className="il-mini" onClick={onExit}>
-          ← フル機能照明へ
+          ← SHOW MODEへ
         </button>
       </header>
 
@@ -1690,11 +1677,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     </div>
                   </>
                 )}
-                <div className="il-frow" style={{ justifyContent: 'flex-end', marginTop: 4 }}>
-                  <button className="il-mini" onClick={() => engine.removeSelected()}>
-                    削除（Del）
-                  </button>
-                </div>
               </>
             )}
 

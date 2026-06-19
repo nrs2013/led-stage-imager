@@ -1,7 +1,6 @@
 /* 画像照明モードの色まわり（UI・エンジン共通）。RGB は 0..255 の3要素タプル。 */
 export type RGB3 = [number, number, number]
 
-export const AMBER: RGB3 = [255, 168, 72]
 export const WHITE: RGB3 = [255, 255, 255]
 
 /** COLOR 欄の固定8色（のむさん確定の並び）。 */

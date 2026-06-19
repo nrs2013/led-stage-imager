@@ -118,7 +118,7 @@ export function StartScreen(): React.JSX.Element {
         >
           新規（空 FHD）
         </button>
-        <button style={smallBtn} onClick={loadSaved} title="保存した公演ファイル(.json)を開く">
+        <button style={smallBtn} onClick={loadSaved} title="保存した公演ファイル(.ledimager)を開く">
           保存ファイルを開く…
         </button>
       </div>

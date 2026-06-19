@@ -1181,20 +1181,6 @@ export class ImageLightEngine {
     }
   }
 
-  /** 編集画面表示用フレームの premultiplied RGBA（プレビュー窓に使うなら）。 */
-  readRGBA(): Uint8ClampedArray {
-    const ctx = this.frame.getContext('2d', { willReadFrequently: true })!
-    const d = ctx.getImageData(0, 0, IW, IH).data
-    for (let i = 0; i < d.length; i += 4) {
-      const a = d[i + 3]
-      if (a === 255 || a === 0) continue
-      d[i] = (d[i] * a) / 255
-      d[i + 1] = (d[i + 1] * a) / 255
-      d[i + 2] = (d[i + 2] * a) / 255
-    }
-    return d
-  }
-
   /** Syphon出力用 premultiplied RGBA（outCv＝写真の部分だけ・写真解像度）。 */
   readOutputRGBA(): Uint8ClampedArray {
     const ctx = this.outCv.getContext('2d', { willReadFrequently: true })!
@@ -1561,19 +1547,6 @@ export class ImageLightEngine {
     this.outCap = px
     this.bump()
   }
-  /** 色を「次のMIDIノート/キー」で呼べるようにする LEARN 待機。null=中止。 */
-  setLearnColor(hex: string | null): void {
-    this.learnColor = hex
-    if (hex != null) {
-      this.learnPattern = null
-      this.learnScene = null
-      this.masterLearn = false
-      this.learnParam = null
-      this.learnFx = null
-      this.initMidi()
-    }
-    this.bump(false)
-  }
   /** 同じキー(e.code)を持つ他カテゴリ(pattern/FX/color)から外す＝「1キー1役」。 */
   private clearKeyEverywhere(code: string): void {
     this.patterns.forEach((p) => {
@@ -1593,15 +1566,6 @@ export class ImageLightEngine {
     this.scenes.forEach((s) => {
       if (s.midiNote === note) s.midiNote = null
     })
-  }
-  /** プリセット色にショートカット（キー/MIDIノート）を割当。両方nullで解除。1キー/1ノート1役。 */
-  assignColorShortcut(hex: string, code: string | null, midi: number | null): void {
-    if (code != null) this.clearKeyEverywhere(code)
-    if (midi != null) this.clearMidiNoteEverywhere(midi)
-    if (code != null) this.colorKey[hex] = code
-    if (midi != null) this.colorMidi[hex] = midi
-    this.learnColor = null
-    this.bump()
   }
   /** 本番シーン切替の方式（cut/fade）と時間(ms)を設定。 */
   setSceneFadeMode(mode: 'cut' | 'fade'): void {
@@ -2774,7 +2738,6 @@ export class ImageLightEngine {
     if ((stt & 0xf0) === 0x90 && vel > 0) {
       // ノートON：LEARN中なら割当、そうでなければ割当済みを発火
       if (this.learnFx != null) this.assignFxShortcut(this.learnFx, null, note)
-      else if (this.learnColor != null) this.assignColorShortcut(this.learnColor, null, note)
       else if (this.learnPattern != null) this.assignShortcut(this.learnPattern, null, note)
       else if (this.learnScene != null) this.assignSceneMidi(this.learnScene, note)
       else if (this.learnStrobe) {
