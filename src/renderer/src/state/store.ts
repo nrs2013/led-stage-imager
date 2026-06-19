@@ -5,10 +5,13 @@ import { familyOfType, type PaletteFilter } from '../model/part-family'
 import { eraseCellsFromChart } from '../model/erase'
 import { mergeRunCells, applyMerge } from '../model/merge-runs'
 import { regenChain } from '../editor/stroke-fit'
-import { pasteDelta } from '../editor/geometry'
+import { pasteDelta, shapeArrayBounds } from '../editor/geometry'
 import { mmPerPx, rescaleFixturesToScale } from '../model/scale'
 import type { MaskData } from '../ui/mask'
 import { addressAt, nextAddressAfter, repeatCount } from '../dmx/address'
+
+/** 整列の基準辺（左/横中央/右/上/縦中央/下）。Inspector の整列ボタンが渡す。 */
+export type AlignEdge = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom'
 
 /** The layer the editor is working on — owns the visible underlay, the drawable-area
  *  mask, and every newly drawn shape. The live output ignores layers entirely. */
@@ -121,6 +124,10 @@ interface AppState {
   pasteAt: (center: Point) => void
   /** 元から少し横にずらして即ペースト（マウス追従の連続スタンプはしない・LIGHT SKETCH と同じ）。 */
   pasteOffset: () => void
+  /** 選択中の図形を端/中央でそろえる（2個以上で有効・ロック分は対象外）。 */
+  alignShapes: (edge: AlignEdge) => void
+  /** 選択中の図形を等間隔に散らす（3個以上で有効・両端は固定して間を均す）。 */
+  distributeShapes: (axis: 'h' | 'v') => void
   updateShape: (id: string, patch: Partial<Shape>) => void
   addShape: (init: { type: Shape['type']; points: Shape['points'] } & Partial<Shape>) => string
   removeShape: (id: string) => void
@@ -478,6 +485,70 @@ export const useStore = create<AppState>()((set, get) => ({
     const OFF = 14
     const d0 = pasteDelta(cb.shapes, { x: 0, y: 0 })
     get().pasteAt({ x: -d0.x + OFF, y: -d0.y + OFF })
+  },
+
+  // 選択した図形を各 points ごと平行移動して動かす共通処理（整列・等間隔の land）。
+  // ロック分は触らない（掴めない＝動かさない、の一貫）。⌘Z で1手で戻せる。
+  alignShapes: (edge) => {
+    const ids = get().selectedIds
+    const sel = get().chart.shapes.filter((s) => ids.includes(s.id) && !s.locked)
+    if (sel.length < 2) return
+    get().beginHistory()
+    const bs = sel.map((s) => ({ id: s.id, b: shapeArrayBounds(s) }))
+    const minX = Math.min(...bs.map((x) => x.b.x))
+    const maxX = Math.max(...bs.map((x) => x.b.x + x.b.w))
+    const minY = Math.min(...bs.map((x) => x.b.y))
+    const maxY = Math.max(...bs.map((x) => x.b.y + x.b.h))
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    const d = new Map<string, Point>()
+    for (const { id, b } of bs) {
+      let dx = 0
+      let dy = 0
+      if (edge === 'left') dx = minX - b.x
+      else if (edge === 'right') dx = maxX - (b.x + b.w)
+      else if (edge === 'hcenter') dx = cx - (b.x + b.w / 2)
+      else if (edge === 'top') dy = minY - b.y
+      else if (edge === 'bottom') dy = maxY - (b.y + b.h)
+      else if (edge === 'vcenter') dy = cy - (b.y + b.h / 2)
+      d.set(id, { x: dx, y: dy })
+    }
+    set((state) => ({
+      chart: {
+        ...state.chart,
+        shapes: state.chart.shapes.map((s) => {
+          const m = d.get(s.id)
+          return m ? { ...s, points: s.points.map((p) => ({ x: p.x + m.x, y: p.y + m.y })) } : s
+        })
+      }
+    }))
+  },
+
+  distributeShapes: (axis) => {
+    const ids = get().selectedIds
+    const sel = get().chart.shapes.filter((s) => ids.includes(s.id) && !s.locked)
+    if (sel.length < 3) return
+    get().beginHistory()
+    const cen = (b: { x: number; y: number; w: number; h: number }): number =>
+      axis === 'h' ? b.x + b.w / 2 : b.y + b.h / 2
+    const bs = sel.map((s) => ({ id: s.id, b: shapeArrayBounds(s) })).sort((a, c) => cen(a.b) - cen(c.b))
+    const first = cen(bs[0].b)
+    const last = cen(bs[bs.length - 1].b)
+    const step = (last - first) / (bs.length - 1) // 中心を等間隔に。両端2個は動かさない
+    const d = new Map<string, Point>()
+    bs.forEach(({ id, b }, i) => {
+      const delta = first + step * i - cen(b)
+      d.set(id, axis === 'h' ? { x: delta, y: 0 } : { x: 0, y: delta })
+    })
+    set((state) => ({
+      chart: {
+        ...state.chart,
+        shapes: state.chart.shapes.map((s) => {
+          const m = d.get(s.id)
+          return m ? { ...s, points: s.points.map((p) => ({ x: p.x + m.x, y: p.y + m.y })) } : s
+        })
+      }
+    }))
   },
 
   updateShape: (id, patch) => {

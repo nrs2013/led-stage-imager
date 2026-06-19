@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useStore } from './store'
 import { createChart } from '../model/chart-model'
+import { shapeArrayBounds } from '../editor/geometry'
 import type { Chart, Shape, Fixture } from '../model/types'
 
 const cc = (x: number, y: number): { x: number; y: number } => ({ x: x + 0.5, y: y + 0.5 })
@@ -323,5 +324,117 @@ describe('setManualMany (Quick Light)', () => {
     useStore.getState().setManualColor('fxKeep', [1, 2, 3])
     useStore.getState().setManualMany(['fx1'], [0, 0, 0])
     expect(useStore.getState().manualByFixture['fxKeep']).toEqual([1, 2, 3])
+  })
+})
+
+describe('整列・等間隔 (store)', () => {
+  const rect = (id: string, x0: number, y0: number, x1: number, y1: number): Shape => ({
+    id,
+    type: 'rect',
+    points: [
+      { x: x0, y: y0 },
+      { x: x1, y: y1 }
+    ],
+    display: 'stroke',
+    strokeWidth: 1
+  })
+  // a:中心(5,5) b:中心(60,30) c:中心(105,104) — 大きさはバラバラ
+  function seed3(): Chart {
+    const c = createChart({ w: 400, h: 300 })
+    return {
+      ...c,
+      shapes: [rect('a', 0, 0, 10, 10), rect('b', 50, 20, 70, 40), rect('c', 100, 100, 110, 108)],
+      fixtures: []
+    }
+  }
+  const cx = (id: string): number => {
+    const b = shapeArrayBounds(useStore.getState().chart.shapes.find((s) => s.id === id)!)
+    return b.x + b.w / 2
+  }
+  const cy = (id: string): number => {
+    const b = shapeArrayBounds(useStore.getState().chart.shapes.find((s) => s.id === id)!)
+    return b.y + b.h / 2
+  }
+  beforeEach(() => {
+    useStore.setState({
+      chart: seed3(),
+      selectedId: null,
+      selectedIds: ['a', 'b', 'c'],
+      history: [],
+      future: []
+    })
+  })
+
+  it('左ぞろえ：全部の左端が最小Xにそろう', () => {
+    useStore.getState().alignShapes('left')
+    for (const s of useStore.getState().chart.shapes) {
+      expect(shapeArrayBounds(s).x).toBeCloseTo(0, 6)
+    }
+  })
+
+  it('右ぞろえ：全部の右端が最大Xにそろう', () => {
+    useStore.getState().alignShapes('right')
+    for (const s of useStore.getState().chart.shapes) {
+      const b = shapeArrayBounds(s)
+      expect(b.x + b.w).toBeCloseTo(110, 6)
+    }
+  })
+
+  it('横中央：全部の中心Xがグループ中心(55)にそろう', () => {
+    useStore.getState().alignShapes('hcenter')
+    expect(cx('a')).toBeCloseTo(55, 6)
+    expect(cx('b')).toBeCloseTo(55, 6)
+    expect(cx('c')).toBeCloseTo(55, 6)
+  })
+
+  it('上ぞろえ／縦中央：上端・中心Yがそろう', () => {
+    useStore.getState().alignShapes('top')
+    for (const s of useStore.getState().chart.shapes) expect(shapeArrayBounds(s).y).toBeCloseTo(0, 6)
+    useStore.setState({ chart: seed3(), selectedIds: ['a', 'b', 'c'], history: [], future: [] })
+    useStore.getState().alignShapes('vcenter')
+    // group minY=0,maxY=108 -> cy=54
+    expect(cy('a')).toBeCloseTo(54, 6)
+    expect(cy('b')).toBeCloseTo(54, 6)
+    expect(cy('c')).toBeCloseTo(54, 6)
+  })
+
+  it('横に均等：中心Xが等間隔・両端(a,c)は固定', () => {
+    // centers 5,60,105 -> first5 last105 step50 -> 5,55,105
+    useStore.getState().distributeShapes('h')
+    expect(cx('a')).toBeCloseTo(5, 6)
+    expect(cx('b')).toBeCloseTo(55, 6)
+    expect(cx('c')).toBeCloseTo(105, 6)
+  })
+
+  it('2個未満は整列しない（no-op）', () => {
+    useStore.setState({ selectedIds: ['a'] })
+    const before = JSON.stringify(useStore.getState().chart.shapes)
+    useStore.getState().alignShapes('left')
+    expect(JSON.stringify(useStore.getState().chart.shapes)).toBe(before)
+  })
+
+  it('3個未満は等間隔しない（no-op）', () => {
+    useStore.setState({ selectedIds: ['a', 'b'] })
+    const before = JSON.stringify(useStore.getState().chart.shapes)
+    useStore.getState().distributeShapes('h')
+    expect(JSON.stringify(useStore.getState().chart.shapes)).toBe(before)
+  })
+
+  it('ロックした図形は動かさない', () => {
+    const locked = useStore
+      .getState()
+      .chart.shapes.map((s) => (s.id === 'b' ? { ...s, locked: true } : s))
+    useStore.setState({ chart: { ...useStore.getState().chart, shapes: locked } })
+    useStore.getState().alignShapes('left')
+    expect(cx('b')).toBeCloseTo(60, 6) // ロックのbは元のまま
+    expect(shapeArrayBounds(useStore.getState().chart.shapes.find((s) => s.id === 'a')!).x).toBeCloseTo(0, 6)
+  })
+
+  it('整列は⌘Zで1手で戻せる', () => {
+    const before = cx('b')
+    useStore.getState().alignShapes('left')
+    expect(cx('b')).not.toBeCloseTo(before, 3)
+    useStore.getState().undo()
+    expect(cx('b')).toBeCloseTo(before, 6)
   })
 })

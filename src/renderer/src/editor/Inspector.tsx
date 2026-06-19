@@ -111,6 +111,8 @@ export function Inspector(): React.JSX.Element {
   const chart = useStore((s) => s.chart)
   const selectedId = useStore((s) => s.selectedId)
   const selectedIds = useStore((s) => s.selectedIds)
+  const alignShapes = useStore((s) => s.alignShapes)
+  const distributeShapes = useStore((s) => s.distributeShapes)
   const updateShape = useStore((s) => s.updateShape)
   const upsertFixture = useStore((s) => s.upsertFixture)
   const bulkPatch = useStore((s) => s.bulkPatch)
@@ -136,12 +138,63 @@ export function Inspector(): React.JSX.Element {
         if (!fxs.length) return fallback
         return fxs[0][k]
       }
+      const ab = { ...buttonStyle({}), flex: 1, padding: '9px 0', fontSize: 12, fontFamily: F.ui }
+      const abDim = (on: boolean) => ({ ...ab, opacity: on ? 1 : 0.4 })
       return (
         <aside style={asideStyle}>
           <SectionTitle>Multi</SectionTitle>
           <div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, marginBottom: 4 }}>
-            {ids.length} fixtures selected · patched {fxs.length}/{ids.length}
+            {ids.length} 個選択中 · patched {fxs.length}/{ids.length}
           </div>
+
+          <SectionTitle>整列・等間隔</SectionTitle>
+          <div
+            style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}
+          >
+            選んだ {ids.length} 個を端／中央でそろえる・等間隔に並べる。⌘Z で戻せます。
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+            <button style={ab} title="左ぞろえ（左端を合わせる）" onClick={() => alignShapes('left')}>
+              左
+            </button>
+            <button style={ab} title="左右の中央でそろえる" onClick={() => alignShapes('hcenter')}>
+              中央
+            </button>
+            <button style={ab} title="右ぞろえ（右端を合わせる）" onClick={() => alignShapes('right')}>
+              右
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+            <button style={ab} title="上ぞろえ（上端を合わせる）" onClick={() => alignShapes('top')}>
+              上
+            </button>
+            <button style={ab} title="上下の中央でそろえる" onClick={() => alignShapes('vcenter')}>
+              中段
+            </button>
+            <button style={ab} title="下ぞろえ（下端を合わせる）" onClick={() => alignShapes('bottom')}>
+              下
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: rowGap }}>
+            <button
+              style={abDim(ids.length >= 3)}
+              disabled={ids.length < 3}
+              title="左右の間隔を等しくする（3個以上・両端は固定）"
+              onClick={() => distributeShapes('h')}
+            >
+              横に均等
+            </button>
+            <button
+              style={abDim(ids.length >= 3)}
+              disabled={ids.length < 3}
+              title="上下の間隔を等しくする（3個以上・両端は固定）"
+              onClick={() => distributeShapes('v')}
+            >
+              縦に均等
+            </button>
+          </div>
+
+          <SectionTitle>パッチ</SectionTitle>
           <div
             style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: rowGap, lineHeight: 1.5 }}
           >
