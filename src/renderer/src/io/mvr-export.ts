@@ -20,7 +20,8 @@ const MODE_NAMES: Record<Fixture['mode'], string> = {
   rgbdim: 'RGB Dim',
   dim: 'Dim',
   rgbw: 'RGBW Dim',
-  beam6: 'Beam 6ch'
+  beam6: 'Beam 6ch',
+  beam8: 'Beam 8ch'
 }
 
 const esc = (s: string): string =>
@@ -78,6 +79,7 @@ export function buildGdtfXml(fixtureTypeId: string): string {
     `<Attribute Name="Pan" Pretty="P" Feature="Position.PanTilt"/>` +
     `<Attribute Name="Tilt" Pretty="T" Feature="Position.PanTilt"/>` +
     `<Attribute Name="Zoom" Pretty="Z" Feature="Beam.Beam"/>` +
+    `<Attribute Name="Shutter" Pretty="Shut" Feature="Beam.Beam"/>` +
     `</Attributes>` +
     `</AttributeDefinitions>` +
     `<Wheels/><PhysicalDescriptions/><Models/>` +
@@ -88,6 +90,7 @@ export function buildGdtfXml(fixtureTypeId: string): string {
     dmxMode('Dim', ['Dimmer']) +
     dmxMode('RGBW Dim', ['ColorAdd_R', 'ColorAdd_G', 'ColorAdd_B', 'ColorAdd_W', 'Dimmer']) +
     dmxMode('Beam 6ch', ['ColorAdd_R', 'ColorAdd_G', 'ColorAdd_B', 'Pan', 'Tilt', 'Zoom']) +
+    dmxMode('Beam 8ch', ['Pan', 'Tilt', 'Dimmer', 'Shutter', 'ColorAdd_R', 'ColorAdd_G', 'ColorAdd_B', 'Zoom']) +
     `</DMXModes><Revisions/></FixtureType></GDTF>`
   )
 }

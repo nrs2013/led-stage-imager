@@ -124,11 +124,10 @@ function useMenuUndo(): void {
         const st = useStore.getState()
         if (!st.clipboard) return
         if (st.pasteMark) {
-          st.pasteAt(st.pasteMark) // paste exactly at the marked spot
+          st.pasteAt(st.pasteMark) // クリックで印を付けた場所に貼る
           st.setPasteMark(null)
         } else {
-          st.setTool('select')
-          st.setPasteArmed(true) // no mark: ghost-follow stamp mode
+          st.pasteOffset() // 印が無ければ少し横にずらして即1個（マウス追従の連続スタンプはしない）
         }
       }
     })

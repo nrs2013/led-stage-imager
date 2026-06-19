@@ -138,7 +138,7 @@ export function shapeBounds(shape: Shape): Bounds {
     const w = blinderWidth(shape)
     return { x: c.x - w / 2, y: c.y - w, w, h: w * 2 }
   }
-  if (shape.type === 'uplight' && shape.points.length >= 1) {
+  if ((shape.type === 'uplight' || shape.type === 'movinghead') && shape.points.length >= 1) {
     // pick the housing mark only — the beam itself is light, not a grab target
     const c = shape.points[0]
     const hw = Math.max(6, (shape.beamW0 ?? 14) * 0.6)
@@ -222,7 +222,7 @@ export function traceShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
     ctx.rect(p[0].x - w / 2, p[0].y - w, w, w * 2)
     return
   }
-  if (shape.type === 'uplight' && p.length >= 1) {
+  if ((shape.type === 'uplight' || shape.type === 'movinghead') && p.length >= 1) {
     const hw = Math.max(6, (shape.beamW0 ?? 14) * 0.6)
     ctx.beginPath()
     ctx.rect(p[0].x - hw, p[0].y - hw * 0.55, hw * 2, hw * 1.1)
@@ -387,7 +387,8 @@ export function pasteDelta(shapes: Shape[], at: Point): Point {
     'patt',
     'pixelpatt',
     'image',
-    'uplight'
+    'uplight',
+    'movinghead'
   ])
   const allBulbs = shapes.length > 0 && shapes.every((sh) => PARTS.has(sh.type))
   if (allBulbs) {

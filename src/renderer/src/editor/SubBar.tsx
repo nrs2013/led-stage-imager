@@ -17,7 +17,6 @@ export function SubBar(): React.JSX.Element {
   const setUnderlayVisible = useStore((s) => s.setUnderlayVisible)
   const setUnderlayMask = useStore((s) => s.setUnderlayMask)
   const applyChartImage = useStore((s) => s.applyChartImage)
-  const setStarted = useStore((s) => s.setStarted)
   const maskEmpty = useStore((s) => s.maskEmpty)
   const showDims = useStore((s) => s.showDims)
   const setShowDims = useStore((s) => s.setShowDims)
@@ -56,9 +55,10 @@ export function SubBar(): React.JSX.Element {
     ) {
       return
     }
+    markNewChart() // 新規＝ファイル未確定。次の保存で保存先を聞く
     setChart(createChart({ w: 1920, h: 1080 }))
-    markNewChart() // 新規＝まだファイル未確定。次の保存で保存先を聞く
-    setStarted(false) // back to the doorway: drop a chart or pick a blank canvas
+    // 編集画面のまま空チャートにする。StartScreen へ戻すと SHOW MODE 再選択で
+    // 「前回の続き(自動バックアップ)」が復活し、新規にならない不具合になるため戻さない。
   }
   const openChart = async (): Promise<void> => {
     try {

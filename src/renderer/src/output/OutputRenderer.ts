@@ -1,5 +1,5 @@
 import type { Chart, Shape, Fixture } from '../model/types'
-import { fixtureColor, beamPose, type RGB, type BeamPose } from '../dmx/channel-math'
+import { fixtureColor, beamPose, shutterGate, type RGB, type BeamPose } from '../dmx/channel-math'
 import { addressAt, repeatCount } from '../dmx/address'
 import { bulbHueIntensity } from '../render/bulb'
 import {
@@ -175,16 +175,18 @@ export class OutputRenderer {
     const images = chart.shapes.filter((s) => s.type === 'image' && s.imageData)
     const lights: { shape: Shape; hue: RGB; I: number; pose: BeamPose }[] = []
     for (const s of chart.shapes) {
-      if (s.type !== 'uplight') continue
+      if (s.type !== 'uplight' && s.type !== 'movinghead') continue
       const fx = fxByShape.get(s.id)
       if (!fx) continue
       const data = dmxByUniverse[fx.universe] ?? ZEROS
       const man = manual?.[fx.id]
       const rgb = man ?? fixtureColor(fx, data, gamma)
       const { hue, intensity } = bulbHueIntensity(rgb)
-      if (intensity <= 0.004) continue
+      // Shutter(beam8)で消灯。手動色(テストフェーダー)経路では適用しない＝卓由来のみ。
+      const I = man ? intensity : intensity * shutterGate(fx, data)
+      if (I <= 0.004) continue
       const pose = man ? { pan: 0, tilt: 0, zoom: 0 } : beamPose(fx, data)
-      lights.push({ shape: s, hue, I: intensity, pose })
+      lights.push({ shape: s, hue, I, pose })
     }
     if (lights.length === 0) return
     const w = this.canvas.width
@@ -327,8 +329,8 @@ export class OutputRenderer {
 
   private drawShape(shape: Shape, rgb: RGB, ox = 0, oy = 0, rep = 0): void {
     const ctx = this.ctx
-    // photos & uplights are composited in the dedicated light-map pass
-    if (shape.type === 'image' || shape.type === 'uplight') return
+    // photos & uplights/movingheads are composited in the dedicated light-map pass
+    if (shape.type === 'image' || shape.type === 'uplight' || shape.type === 'movinghead') return
     ctx.save()
     if (ox || oy) ctx.translate(ox, oy)
     // neon signs: instance i lights ONLY tube #i (its own console colour) — the

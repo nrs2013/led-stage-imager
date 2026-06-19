@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { Chart, Shape, Fixture, ChannelMode, Point, Layer, Underlay } from '../model/types'
 import { createChart, addShape as addShapeToChart, newId } from '../model/chart-model'
-import type { PaletteFilter } from '../model/part-family'
+import { familyOfType, type PaletteFilter } from '../model/part-family'
 import { eraseCellsFromChart } from '../model/erase'
 import { mergeRunCells, applyMerge } from '../model/merge-runs'
 import { regenChain } from '../editor/stroke-fit'
@@ -119,6 +119,8 @@ interface AppState {
   setPasteArmed: (on: boolean) => void
   setPasteMark: (p: Point | null) => void
   pasteAt: (center: Point) => void
+  /** 元から少し横にずらして即ペースト（マウス追従の連続スタンプはしない・LIGHT SKETCH と同じ）。 */
+  pasteOffset: () => void
   updateShape: (id: string, patch: Partial<Shape>) => void
   addShape: (init: { type: Shape['type']; points: Shape['points'] } & Partial<Shape>) => string
   removeShape: (id: string) => void
@@ -468,6 +470,16 @@ export const useStore = create<AppState>()((set, get) => ({
     }))
   },
 
+  pasteOffset: () => {
+    const cb = get().clipboard
+    if (!cb || cb.shapes.length === 0) return
+    // 元から少し横にずらして即ペースト（LIGHT SKETCH と同じ）。pasteDelta(…,{0,0}) は -アンカー
+    // なので、それを打ち消して +OFF した点を pasteAt に渡すと、結果は元位置から +OFF の平行移動。
+    const OFF = 14
+    const d0 = pasteDelta(cb.shapes, { x: 0, y: 0 })
+    get().pasteAt({ x: -d0.x + OFF, y: -d0.y + OFF })
+  },
+
   updateShape: (id, patch) => {
     get().beginHistory(`upd-${id}`)
     set((s) => ({
@@ -612,12 +624,16 @@ export const useStore = create<AppState>()((set, get) => ({
           }
         }
       }
+      // 照明灯体(light)は既定で beam8(8ch)、それ以外は rgb。shape が見つからなければ rgb に倒す。
+      const sh0 = s.chart.shapes.find((x) => x.id === shapeId)
+      const defMode: ChannelMode =
+        sh0 && (sh0.family ?? familyOfType(sh0.type)) === 'light' ? 'beam8' : 'rgb'
       const fx: Fixture = {
         id: newId('fx'),
         shapeId,
         universe: 0,
         start: 1,
-        mode: 'rgb' as ChannelMode,
+        mode: defMode,
         ...patch
       }
       return {
@@ -659,14 +675,19 @@ export const useStore = create<AppState>()((set, get) => ({
       const updated = s.chart.fixtures.map((f) => (idSet.has(f.shapeId) ? { ...f, ...patch } : f))
       const created: Fixture[] = shapeIds
         .filter((id) => !have.has(id))
-        .map((id) => ({
-          id: newId('fx'),
-          shapeId: id,
-          universe: 0,
-          start: 1,
-          mode: 'rgb' as ChannelMode,
-          ...patch
-        }))
+        .map((id) => {
+          const sh = s.chart.shapes.find((x) => x.id === id)
+          const defMode: ChannelMode =
+            sh && (sh.family ?? familyOfType(sh.type)) === 'light' ? 'beam8' : 'rgb'
+          return {
+            id: newId('fx'),
+            shapeId: id,
+            universe: 0,
+            start: 1,
+            mode: defMode,
+            ...patch
+          }
+        })
       return { chart: { ...s.chart, fixtures: [...updated, ...created] } }
     })
   },

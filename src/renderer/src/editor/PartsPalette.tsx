@@ -411,6 +411,13 @@ const CARDS: {
     thumb: <FixtureThumb paint={paintUplight} />
   },
   {
+    part: 'movinghead',
+    label: 'ムービング',
+    hint: '8CH',
+    title: 'ムービング（汎用照明灯体）— 卓のDMXで Pan/Tilt/Dimmer/Shutter/RGB/Zoom（8ch）を受けて向き・明るさ・色・点滅・広がりが動く。出口/広がり/届く高さはInspector。スポットと同じビーム見た目。',
+    thumb: <FixtureThumb paint={paintUplight} />
+  },
+  {
     part: 'roomlamp',
     label: '室内ランプ',
     hint: 'LAMP',

@@ -42,7 +42,9 @@ const SIZED_FIXTURES = new Set<Shape['type']>([
 
 /** 「既にある部品を実寸に合わせる」対象の数（校正済みのとき Setup のボタンに出す）。 */
 export function countFittableFixtures(shapes: Shape[]): number {
-  return shapes.filter((s) => SIZED_FIXTURES.has(s.type) || s.type === 'uplight').length
+  return shapes.filter(
+    (s) => SIZED_FIXTURES.has(s.type) || s.type === 'uplight' || s.type === 'movinghead'
+  ).length
 }
 
 /** 校正前に置いた灯体（生px＝1px:1mm前提で置かれた）の大きさを、今の実寸スケールへ直す。
@@ -55,7 +57,7 @@ export function rescaleFixturesToScale(shapes: Shape[], mmPerPxVal: number): Sha
     if (SIZED_FIXTURES.has(s.type) && s.diameter != null) {
       return { ...s, diameter: s.diameter / mmPerPxVal }
     }
-    if (s.type === 'uplight') {
+    if (s.type === 'uplight' || s.type === 'movinghead') {
       const o = { ...s }
       if (s.beamW0 != null) o.beamW0 = s.beamW0 / mmPerPxVal
       if (s.beamW1 != null) o.beamW1 = s.beamW1 / mmPerPxVal

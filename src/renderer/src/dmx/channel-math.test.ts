@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fixtureColor, channelCount } from './channel-math'
+import { fixtureColor, channelCount, beamPose } from './channel-math'
 import type { Fixture } from '../model/types'
 
 const uni = (over: Record<number, number>): Uint8Array => {
@@ -22,6 +22,8 @@ describe('channelCount', () => {
     expect(channelCount('rgbdim')).toBe(4)
     expect(channelCount('dim')).toBe(1)
     expect(channelCount('rgbw')).toBe(5)
+    expect(channelCount('beam6')).toBe(6)
+    expect(channelCount('beam8')).toBe(8)
   })
 })
 
@@ -41,5 +43,30 @@ describe('fixtureColor', () => {
     const data = uni({ 0: 255 }) // dim full
     const f = fx('dim', 1, { fixedColor: [0, 255, 0] } as Partial<Fixture>)
     expect(fixtureColor(f, data, false)).toEqual([0, 255, 0])
+  })
+  it('beam6 は先頭3ch=RGB素通し（既存仕様を固定＝壊していないこと）', () => {
+    const data = uni({ 0: 10, 1: 20, 2: 30 })
+    expect(fixtureColor(fx('beam6', 1), data, false)).toEqual([10, 20, 30])
+  })
+  it('beam8 は Dimmer(+2)×RGB(+4..+6)', () => {
+    const data = uni({ 2: 128, 4: 200, 5: 100, 6: 0 }) // Dim128, R200 G100 B0
+    const [r, g, b] = fixtureColor(fx('beam8', 1), data, false)
+    expect(r).toBe(Math.round((200 * 128) / 255))
+    expect(g).toBe(Math.round((100 * 128) / 255))
+    expect(b).toBe(0)
+  })
+})
+
+describe('beamPose (DMX128=中心)', () => {
+  it('beam6: Pan=i+3 / Tilt=i+4 / Zoom=i+5', () => {
+    const data = uni({ 3: 255, 4: 128, 5: 255 })
+    expect(beamPose(fx('beam6', 1), data)).toEqual({ pan: 1, tilt: 0, zoom: 1 })
+  })
+  it('beam8: Pan=i+0 / Tilt=i+1 / Zoom=i+7', () => {
+    const data = uni({ 0: 255, 1: 128, 7: 255 })
+    expect(beamPose(fx('beam8', 1), data)).toEqual({ pan: 1, tilt: 0, zoom: 1 })
+  })
+  it('ビーム以外は中心姿勢', () => {
+    expect(beamPose(fx('rgb', 1), uni({ 0: 255 }))).toEqual({ pan: 0, tilt: 0, zoom: 0 })
   })
 })

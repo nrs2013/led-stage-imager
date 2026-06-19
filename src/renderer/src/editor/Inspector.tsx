@@ -1,5 +1,5 @@
 import { useStore } from '../state/store'
-import type { BulbStyle, ChannelMode, DisplayMode, Shape } from '../model/types'
+import type { BulbStyle, ChannelMode, DisplayMode, PartFamily, Shape } from '../model/types'
 import { familyOfType } from '../model/part-family'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
 import { channelCount } from '../dmx/channel-math'
@@ -62,7 +62,7 @@ function sizeText(shape: Shape): string {
   if (shape.type === 'image') {
     return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${shape.imageData ? '写真あり' : '写真未設定'}`
   }
-  if (shape.type === 'uplight') {
+  if (shape.type === 'uplight' || shape.type === 'movinghead') {
     return `出口 ${Math.round(shape.beamW0 ?? 14)} · 広がり ${Math.round(shape.beamW1 ?? 90)} · 届く高さ ${Math.round(shape.beamLen ?? 200)} px`
   }
   if (shape.type === 'freehand') {
@@ -86,8 +86,24 @@ const CHANNEL_MODES: { id: ChannelMode; label: string }[] = [
   { id: 'rgbdim', label: 'RGB+Dim (4ch)' },
   { id: 'dim', label: 'Dim (1ch)' },
   { id: 'rgbw', label: 'RGBW (5ch)' },
-  { id: 'beam6', label: 'Beam ムービング (6ch)' }
+  { id: 'beam6', label: 'Beam ムービング (6ch)' },
+  { id: 'beam8', label: 'Beam 汎用 (P/T/Dim/Shut/RGB/Zoom 8ch)' }
 ]
+
+/** 種別で出すmodeを絞る。照明灯体はビーム系中心、電飾は従来。
+ *  現在の mode は必ず残す（選択肢から消えると <select> の値が宙に浮いて壊れるため）。 */
+function modesForFamily(
+  family: PartFamily,
+  current: ChannelMode
+): { id: ChannelMode; label: string }[] {
+  const want = new Set<ChannelMode>(
+    family === 'light'
+      ? ['beam8', 'beam6', 'dim']
+      : ['rgb', 'rgbdim', 'dim', 'rgbw', 'beam6']
+  )
+  want.add(current)
+  return CHANNEL_MODES.filter((m) => want.has(m.id))
+}
 
 const rowGap = 14
 
@@ -602,8 +618,8 @@ export function Inspector(): React.JSX.Element {
         </Field>
       )}
 
-      {/* uplight: rigging values — the desk steers colour/gauge (+Pan/Tilt/Zoom in 6ch) */}
-      {shape.type === 'uplight' && (
+      {/* uplight / movinghead: rigging values — the desk steers colour/gauge (+Pan/Tilt/Zoom) */}
+      {(shape.type === 'uplight' || shape.type === 'movinghead') && (
         <>
           <div style={{ display: 'flex', gap: 8 }}>
             <Field label="出口の幅 (px)" flex={1}>
@@ -678,6 +694,7 @@ export function Inspector(): React.JSX.Element {
         shape.type !== 'pixelpatt' &&
         shape.type !== 'image' &&
         shape.type !== 'uplight' &&
+        shape.type !== 'movinghead' &&
         shape.type !== 'roomlamp' &&
         shape.type !== 'streetlamp' &&
         shape.type !== 'chandelier' &&
@@ -800,7 +817,7 @@ export function Inspector(): React.JSX.Element {
               style={{ ...inputStyle, fontFamily: F.ui }}
               onChange={(e) => upsertFixture(shape.id, { mode: e.target.value as ChannelMode })}
             >
-              {CHANNEL_MODES.map((m) => (
+              {modesForFamily(shape.family ?? familyOfType(shape.type), fixture.mode).map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
                 </option>

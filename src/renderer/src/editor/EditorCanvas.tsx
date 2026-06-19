@@ -339,8 +339,8 @@ function drawShapeInto(
     drawImageSchematic(ctx, shape, stroke, boost)
     return
   }
-  // uplight: housing mark + dashed beam outline (the rigging plot)
-  if (shape.type === 'uplight') {
+  // uplight / movinghead: housing mark + dashed beam outline (the rigging plot)
+  if (shape.type === 'uplight' || shape.type === 'movinghead') {
     drawUplightSchematic(ctx, shape, stroke, fill, boost)
     return
   }
@@ -948,11 +948,10 @@ export function EditorCanvas(): React.JSX.Element {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'V')) {
         if (st.clipboard) {
           if (st.pasteMark) {
-            st.pasteAt(st.pasteMark) // paste exactly at the marked spot
+            st.pasteAt(st.pasteMark) // クリックで印を付けた場所に貼る
             st.setPasteMark(null)
           } else {
-            st.setTool('select')
-            st.setPasteArmed(true)
+            st.pasteOffset() // 印が無ければ少し横にずらして即1個（マウス追従の連続スタンプはしない）
           }
           e.preventDefault()
         }
@@ -1981,6 +1980,7 @@ export function EditorCanvas(): React.JSX.Element {
       'pixelpatt',
       'image',
       'uplight',
+      'movinghead',
       'roomlamp',
       'streetlamp',
       'chandelier'
@@ -2085,10 +2085,11 @@ export function EditorCanvas(): React.JSX.Element {
         display: 'fill',
         strokeWidth: 1
       })
-    } else if (part === 'uplight') {
-      // uplight: one-point lamp, beam aims up — works outside the chart too
+    } else if (part === 'uplight' || part === 'movinghead') {
+      // uplight(スポット)/movinghead(ムービング): 1点配置・ビーム上向き・チャート外も可。
+      // ビーム資産は共通。違いは種別(family=light)と既定パッチmode(beam8)＝part-family/store側で連動。
       addShape({
-        type: 'uplight',
+        type: part === 'movinghead' ? 'movinghead' : 'uplight',
         points: [center],
         display: 'fill',
         strokeWidth: 1,

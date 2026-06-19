@@ -66,7 +66,8 @@ describe('chart-file', () => {
       activeLayerId: 'l1',
       shapes: [
         { id: 'a', type: 'bulb', layerId: 'l1', points: [{ x: 0, y: 0 }], display: 'fill', strokeWidth: 1 },
-        { id: 'b', type: 'uplight', layerId: 'l1', points: [{ x: 0, y: 0 }], display: 'fill', strokeWidth: 1 }
+        { id: 'b', type: 'uplight', layerId: 'l1', points: [{ x: 0, y: 0 }], display: 'fill', strokeWidth: 1 },
+        { id: 'c', type: 'movinghead', layerId: 'l1', points: [{ x: 0, y: 0 }], display: 'fill', strokeWidth: 1 }
       ],
       fixtures: [],
       syphon: { name: 's' },
@@ -75,6 +76,7 @@ describe('chart-file', () => {
     const c = parseChart(JSON.stringify(v2))
     expect(c.shapes[0].family).toBe('decor') // bulb = 電飾
     expect(c.shapes[1].family).toBe('light') // uplight = 照明
+    expect(c.shapes[2].family).toBe('light') // movinghead = 照明
   })
   it('keeps family through serialize/parse round-trip', () => {
     let c = createChart({ w: 100, h: 100 })

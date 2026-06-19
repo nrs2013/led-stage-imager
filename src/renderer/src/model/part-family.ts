@@ -8,6 +8,7 @@ export type PaletteFilter = 'all' | PartFamily
  *  どの既存部品を照明に入れるかは のむさん確認事項（初期案：照らし/PAR/PAT/PixelPAT/8灯ミニブル）。 */
 const LIGHT_TYPES: ReadonlySet<ShapeType> = new Set<ShapeType>([
   'uplight',
+  'movinghead',
   'parlight',
   'patt',
   'pixelpatt',
