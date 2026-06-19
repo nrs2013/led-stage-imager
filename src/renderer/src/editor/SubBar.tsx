@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore, activeLayerOf } from '../state/store'
 import { createChart, newId } from '../model/chart-model'
-import { saveChartToFile, openChartFromFile } from '../io/file-ops'
+import { saveChartToFile, saveChartAsToFile, openChartFromFile, markNewChart } from '../io/file-ops'
 import { pickImage, imageSize } from '../io/image-pick'
 import { SettingsDialog } from '../ui/SettingsDialog'
 import { FillDialog } from '../ui/FillDialog'
@@ -57,6 +57,7 @@ export function SubBar(): React.JSX.Element {
       return
     }
     setChart(createChart({ w: 1920, h: 1080 }))
+    markNewChart() // 新規＝まだファイル未確定。次の保存で保存先を聞く
     setStarted(false) // back to the doorway: drop a chart or pick a blank canvas
   }
   const openChart = async (): Promise<void> => {
@@ -72,8 +73,14 @@ export function SubBar(): React.JSX.Element {
     const label = await saveChartToFile(chart)
     if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
   }
-  const duplicate = (): void =>
+  const saveChartAs = async (): Promise<void> => {
+    const label = await saveChartAsToFile(chart)
+    if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
+  }
+  const duplicate = (): void => {
+    markNewChart() // 複製＝別作品。元ファイルに上書きしないよう保存先をリセット
     setChart({ ...chart, id: newId('chart'), name: `${chart.name || 'Untitled'} copy` })
+  }
 
   return (
     <div style={subBar}>
@@ -83,8 +90,11 @@ export function SubBar(): React.JSX.Element {
       <button style={fileBtn} onClick={openChart}>
         開く
       </button>
-      <button style={fileBtn} onClick={saveChart} title="ファイルに保存（⌘S）">
+      <button style={fileBtn} onClick={saveChart} title="今のファイルに上書き保存（⌘S・初回だけ保存先を聞く）">
         保存
+      </button>
+      <button style={fileBtn} onClick={saveChartAs} title="別名で保存（新しいファイルとして保存し、以降はそちらに上書き）">
+        別名で保存
       </button>
       {savedFlash && (
         <span style={{ fontSize: 11, color: C.green, fontFamily: F.mono, whiteSpace: 'nowrap' }}>

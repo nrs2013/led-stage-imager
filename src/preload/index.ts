@@ -49,7 +49,14 @@ const api = {
   // Files
   saveChart: (json: string, name: string): Promise<string | null> =>
     ipcRenderer.invoke('chart:save', json, name),
+  saveChartAs: (json: string, name: string): Promise<string | null> =>
+    ipcRenderer.invoke('chart:saveAs', json, name),
+  chartNew: (): Promise<boolean> => ipcRenderer.invoke('chart:new'),
   openChartFile: (): Promise<string | null> => ipcRenderer.invoke('chart:open'),
+  // ダブルクリックで開かれたファイルの中身(JSON)がメインから届く
+  onOpenChartPath: (cb: (json: string) => void): void => {
+    ipcRenderer.on('chart:open-path', (_e, json) => cb(json))
+  },
   autosaveWrite: (json: string): Promise<boolean> =>
     ipcRenderer.invoke('chart:autosave-write', json),
   autosaveRead: (): Promise<string | null> => ipcRenderer.invoke('chart:autosave-read'),

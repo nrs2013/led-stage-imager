@@ -1,5 +1,11 @@
 appId: com.decor.studio
 productName: LED STAGE IMAGER
+# 保存ファイル .ledimager をアプリに関連付け（ダブルクリックで開く）。
+# アイコンは buildResources(build/) の ledimager.icns / ledimager.ico を自動採用。
+fileAssociations:
+  - ext: ledimager
+    name: LED STAGE IMAGER Project
+    role: Editor
 directories:
   buildResources: build
 files:
@@ -50,6 +56,19 @@ mac:
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    # .ledimager を正式な型(UTI)として宣言し、書類アイコンを紐づける。
+    # これが無いと macOS が動的UTI(dyn.*)を割り当て、Finder が汎用(?)アイコンを出す。
+    # CFBundleDocumentTypes は fileAssociations が自動生成するので、ここでは型宣言のみ。
+    - UTExportedTypeDeclarations:
+        - UTTypeIdentifier: com.decor.studio.ledimager
+          UTTypeDescription: LED STAGE IMAGER Project
+          UTTypeConformsTo:
+            - public.data
+            - public.content
+          UTTypeIconFile: ledimager.icns
+          UTTypeTagSpecification:
+            public.filename-extension:
+              - ledimager
   notarize: false
 dmg:
   artifactName: ${name}-${version}.${ext}

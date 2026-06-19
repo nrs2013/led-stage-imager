@@ -25,6 +25,8 @@ let mainWindow: BrowserWindow | null = null
 let previewWindow: BrowserWindow | null = null
 let lastChart: unknown = null
 let midiInputs: string[] = [] // renderer が検出した MIDI 入力ポート名（ステータスバー表示用）
+let currentChartPath: string | null = null // 今開いている .ledimager のパス（⌘Sの上書き先）
+let pendingOpenPath: string | null = null // 起動直後などで、画面が出来たら開くべきファイル
 
 function startEngine(): void {
   publisher.start('LED STAGE IMAGER')
@@ -102,6 +104,36 @@ function closePreview(): void {
   previewWindow = null
 }
 
+/** ダブルクリックで開かれた .ledimager を読み込み、画面へ渡す（⌘S の上書き先にも設定）。
+ *  画面がまだ無い起動直後は pendingOpenPath に積み、did-finish-load で流す。 */
+function deliverOpenFile(p: string): void {
+  currentChartPath = p
+  const w = mainWindow
+  if (w && !w.isDestroyed() && !w.webContents.isLoading()) {
+    try {
+      w.webContents.send('chart:open-path', readFileSync(p, 'utf8'))
+      if (w.isMinimized()) w.restore()
+      w.focus()
+    } catch (err) {
+      console.error('[open-file] 読み込み失敗:', err)
+    }
+    pendingOpenPath = null
+  } else {
+    pendingOpenPath = p
+  }
+}
+
+// macOS: Finder でダブルクリック／Dock にドロップされたファイルはこのイベントで来る（起動前でも）。
+app.on('open-file', (e, p) => {
+  e.preventDefault()
+  deliverOpenFile(p)
+})
+// Windows/Linux: ダブルクリック起動時はファイルパスが引数で来る（macOS は open-file 経由）。
+if (process.platform !== 'darwin') {
+  const arg = process.argv.find((a) => a.toLowerCase().endsWith('.ledimager'))
+  if (arg && existsSync(arg)) pendingOpenPath = arg
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -132,6 +164,11 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'), q ? { search: q } : undefined)
   }
+
+  // ダブルクリックで開かれた（起動直後で保留中の）ファイルを、画面ができたら流し込む。
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (pendingOpenPath) deliverOpenFile(pendingOpenPath)
+  })
 }
 
 /** App menu: Cmd+Z/Shift+Cmd+Z go to the app's own chart undo (the default Electron
@@ -266,23 +303,48 @@ app.whenReady().then(() => {
     }
   })
 
-  // Chart save / open + Syphon source rename.
-  ipcMain.handle('chart:save', async (_e, json: string, name: string) => {
+  // Chart save / open. 普通の書類アプリと同じく「今開いているファイルのパス」(currentChartPath:
+  // モジュール先頭で宣言) を憶えておき、⌘S(=chart:save) は黙ってそのファイルに上書きする（初回だけ保存先を聞く）。
+  const CHART_FILTERS = [
+    { name: 'LED STAGE IMAGER', extensions: ['ledimager'] },
+    { name: 'DECOR Chart (旧)', extensions: ['decor.json', 'json'] }
+  ]
+  const askSavePath = async (name: string): Promise<string | null> => {
     const res = await dialog.showSaveDialog({
-      defaultPath: `${name || 'chart'}.decor.json`,
-      filters: [{ name: 'DECOR Chart', extensions: ['decor.json', 'json'] }]
+      defaultPath: `${name || 'chart'}.ledimager`,
+      filters: CHART_FILTERS
     })
-    if (res.canceled || !res.filePath) return null
-    writeFileSync(res.filePath, json, 'utf8')
-    return res.filePath
+    return res.canceled || !res.filePath ? null : res.filePath
+  }
+  ipcMain.handle('chart:save', async (_e, json: string, name: string) => {
+    if (!currentChartPath) {
+      const p = await askSavePath(name)
+      if (!p) return null
+      currentChartPath = p
+    }
+    writeFileSync(currentChartPath, json, 'utf8')
+    return currentChartPath
+  })
+  ipcMain.handle('chart:saveAs', async (_e, json: string, name: string) => {
+    const p = await askSavePath(name)
+    if (!p) return null
+    currentChartPath = p
+    writeFileSync(currentChartPath, json, 'utf8')
+    return currentChartPath
   })
   ipcMain.handle('chart:open', async () => {
     const res = await dialog.showOpenDialog({
       properties: ['openFile'],
-      filters: [{ name: 'DECOR Chart', extensions: ['decor.json', 'json'] }]
+      filters: CHART_FILTERS
     })
     if (res.canceled || res.filePaths.length === 0) return null
-    return readFileSync(res.filePaths[0], 'utf8')
+    currentChartPath = res.filePaths[0]
+    return readFileSync(currentChartPath, 'utf8')
+  })
+  // 新規/別作品に切り替えたら「今のファイル」を忘れる（次の⌘Sで保存先を聞く）。
+  ipcMain.handle('chart:new', () => {
+    currentChartPath = null
+    return true
   })
 
   // 画像照明モード「公演まるごと保存/開く」: 1フォルダに show.json ＋ media/（写真・動画）。

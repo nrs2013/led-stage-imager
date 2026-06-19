@@ -17,6 +17,7 @@ import { useDmxBridge } from './state/dmx-bridge'
 import { useMask } from './state/use-mask'
 import { useAutosave } from './io/autosave'
 import type { Chart } from './model/types'
+import { parseChart } from './io/chart-file'
 import { C } from './ui/tokens'
 
 const isOutput = typeof window !== 'undefined' && window.location.search.includes('output')
@@ -31,6 +32,7 @@ interface DecorApi {
   onEditPaste?: (cb: () => void) => void
   nativeCopy?: () => void
   nativePaste?: () => void
+  onOpenChartPath?: (cb: (json: string) => void) => void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -133,6 +135,23 @@ function useMenuUndo(): void {
   }, [])
 }
 
+/** ダブルクリックで開かれた .ledimager（main から JSON が届く）を読み込んで表示する。 */
+function useOpenFile(): void {
+  useEffect(() => {
+    getApi()?.onOpenChartPath?.((json) => {
+      try {
+        const c = parseChart(json)
+        const st = useStore.getState()
+        st.setImageLight(false)
+        st.setChart(c)
+        st.setStarted(true)
+      } catch (e) {
+        console.error('[open-file] parse failed', e)
+      }
+    })
+  }, [])
+}
+
 /** Dropping a file outside a drop zone must not navigate the window away. */
 function useDropGuard(): void {
   useEffect(() => {
@@ -159,6 +178,7 @@ function EditorApp(): React.JSX.Element {
   useDropGuard()
   useMenuUndo()
   useAutosave()
+  useOpenFile()
   // 画像照明モード: エディタ/Liveに代えて全画面表示（自前でSyphonへpublish）。
   // hooks は全てこの分岐より前で呼ぶこと（条件付きreturnの後にhookは置けない）。
   if (imageLight) return <ImageLightingMode onExit={() => setImageLight(false)} />
