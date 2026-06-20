@@ -4,8 +4,10 @@ import {
   mmToCanvasPx,
   stageWidthMeters,
   rescaleFixturesToScale,
-  countFittableFixtures
+  countFittableFixtures,
+  DEFAULT_STAGE_WIDTH_MM
 } from './scale'
+import { createChart } from './chart-model'
 import type { Chart, Shape } from './types'
 
 // テスト用の最小 Shape
@@ -143,5 +145,27 @@ describe('countFittableFixtures', () => {
       fx('line')
     ]
     expect(countFittableFixtures(shapes)).toBe(3)
+  })
+})
+
+describe('新規チャートの既定スケール（部品がやたら大きい問題の解消）', () => {
+  it('createChart は横40mに校正済み＝未校正ではない', () => {
+    const c = createChart({ w: 1920, h: 1080 })
+    expect(c.settings.stageWidthMm).toBe(DEFAULT_STAGE_WIDTH_MM)
+    expect(c.settings.stageWidthMm).toBe(40000)
+    expect(mmPerPx(c)).not.toBeNull()
+  })
+
+  it('パッド700mm はチャート幅の約1.75%で入る（昔は幅700px＝巨大だった）', () => {
+    const c = createChart({ w: 1920, h: 1080 })
+    const padPx = mmToCanvasPx(c, 700)
+    expect(padPx / c.canvas.w).toBeCloseTo(700 / 40000, 6) // = 1.75%
+    expect(padPx).toBeLessThan(40) // 700px だった頃の 1/20 以下
+  })
+
+  it('canvas解像度が変わっても見かけの比は一定（3840pxでも1.75%）', () => {
+    const c = createChart({ w: 3840, h: 1080 })
+    expect(mmToCanvasPx(c, 700) / c.canvas.w).toBeCloseTo(700 / 40000, 6)
+    expect(mmToCanvasPx(c, 700)).toBeCloseTo(67.2, 1) // 実機で確認した値
   })
 })

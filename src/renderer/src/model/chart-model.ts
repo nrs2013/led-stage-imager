@@ -1,5 +1,6 @@
 import type { Chart, Shape, ShapeType, Point } from './types'
 import { familyOfType } from './part-family'
+import { DEFAULT_STAGE_WIDTH_MM } from './scale'
 
 let counter = 0
 export const newId = (prefix = 'id'): string =>
@@ -17,7 +18,15 @@ export function createChart(canvas: { w: number; h: number }): Chart {
     shapes: [],
     fixtures: [],
     syphon: { name: 'LED STAGE IMAGER' },
-    settings: { holdOnTimeout: true, gamma: false, glow: false, glowAmount: 14 }
+    // 既定で「横40m」に校正済み＝部品が最初から実物大の小さいドットで入る（未校正だと
+    // mm=px で巨大になる問題の解消・Setup で公演ごとに変更可）。model/scale.DEFAULT_STAGE_WIDTH_MM。
+    settings: {
+      holdOnTimeout: true,
+      gamma: false,
+      glow: false,
+      glowAmount: 14,
+      stageWidthMm: DEFAULT_STAGE_WIDTH_MM
+    }
   }
 }
 

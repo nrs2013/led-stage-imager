@@ -6,6 +6,13 @@ import type { Chart, Shape } from './types'
 // 背景(underlay)は canvas.w px いっぱいに引き伸ばして描かれるので、その px が stageWidthMm を
 // 表す → 1px = stageWidthMm / canvas.w (mm)。部品はドロップ時に実寸mm→px へ変換して置く。
 
+// 新規チャートの既定ステージ実寸 横幅（mm）。これを焼き込むことで「未校正＝部品が
+// やたら大きい(mm=px)」を解消する。値は 2026-06-14 の実機検証（本物チャート 横40m で
+// パッド70cm がΦ67px＝チャート幅の約1.75%）でOKとなった見え方を再現。
+// 部品の見かけの大きさ＝700mm÷stageWidthMm（=チャート幅比）なので、canvas解像度に
+// 関係なくこの比で入る。公演ごとに Setup の「ステージ実寸 横(m)」で変えられる（のむさん 2026-06-20）。
+export const DEFAULT_STAGE_WIDTH_MM = 40000
+
 /** 1canvas px あたりの実寸 mm。未校正（stageWidthMm 無し／不正）なら null。 */
 export function mmPerPx(chart: Chart): number | null {
   const mm = chart.settings.stageWidthMm
