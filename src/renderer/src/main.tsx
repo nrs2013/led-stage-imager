@@ -21,6 +21,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { NEON_FONTS } from './render/neon'
+import './io/debug-bridge' // 開発用「のぞき窓」：window.__debug* を生やす（main のローカルHTTPが読む）
 
 // canvas measureText alone never triggers a webfont download — kick the neon faces
 // into loading up-front so the first sign paints with real glyphs

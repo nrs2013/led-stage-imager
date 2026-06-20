@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, dialog, screen, Menu, session } fro
 import { join, extname } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync, unlinkSync } from 'fs'
 import { networkInterfaces } from 'os'
+import { createServer } from 'http'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { ArtNetReceiver } from './artnet/artnet-receiver'
@@ -27,6 +28,71 @@ let lastChart: unknown = null
 let midiInputs: string[] = [] // renderer が検出した MIDI 入力ポート名（ステータスバー表示用）
 let currentChartPath: string | null = null // 今開いている .ledimager のパス（⌘Sの上書き先）
 let pendingOpenPath: string | null = null // 起動直後などで、画面が出来たら開くべきファイル
+
+/**
+ * 開発用「のぞき窓」（のむさん 2026-06-20）。127.0.0.1:7331 にローカル限定の小さなHTTPを立て、
+ * renderer の window.__debug*（src/renderer/src/io/debug-bridge.ts）を executeJavaScript で呼んで返す：
+ *   GET /state         … 今のデータ(JSON)            GET /snapshot.png … 今のキャンバスの絵(PNG)
+ *   GET /logs          … 直近のコンソールログ
+ * 画面を乗っ取らず内部を読むための窓口。localhost限定なので本番/友達配布でも無害（外から到達不可）。
+ */
+const DEBUG_PORT = 7331
+function startDebugBridge(): void {
+  try {
+    const server = createServer((req, res) => {
+      void (async (): Promise<void> => {
+        const url = (req.url || '/').split('?')[0]
+        res.setHeader('Access-Control-Allow-Origin', '*')
+        const win = mainWindow
+        if (!win || win.isDestroyed() || win.webContents.isLoading()) {
+          res.writeHead(503)
+          res.end('app window not ready')
+          return
+        }
+        try {
+          if (url.startsWith('/state')) {
+            const s = await win.webContents.executeJavaScript(
+              'window.__debugState ? window.__debugState() : "{}"'
+            )
+            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(typeof s === 'string' ? s : JSON.stringify(s))
+          } else if (url.startsWith('/snapshot')) {
+            const dataUrl: string = await win.webContents.executeJavaScript(
+              'window.__debugSnapshot ? window.__debugSnapshot() : ""'
+            )
+            const m = /^data:image\/png;base64,(.+)$/.exec(dataUrl || '')
+            if (!m) {
+              res.writeHead(204)
+              res.end()
+              return
+            }
+            const buf = Buffer.from(m[1], 'base64')
+            res.writeHead(200, { 'content-type': 'image/png', 'content-length': buf.length })
+            res.end(buf)
+          } else if (url.startsWith('/logs')) {
+            const logs = await win.webContents.executeJavaScript(
+              'window.__debugLogs ? window.__debugLogs() : ""'
+            )
+            res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+            res.end(String(logs))
+          } else {
+            res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+            res.end('LED STAGE IMAGER debug bridge\n/state\n/snapshot.png\n/logs')
+          }
+        } catch (e) {
+          res.writeHead(500)
+          res.end(String(e))
+        }
+      })()
+    })
+    server.on('error', (e) => console.log('[debug-bridge] not started:', String(e)))
+    server.listen(DEBUG_PORT, '127.0.0.1', () =>
+      console.log(`[debug-bridge] http://127.0.0.1:${DEBUG_PORT}  (/state /snapshot.png /logs)`)
+    )
+  } catch (e) {
+    console.log('[debug-bridge] error:', String(e))
+  }
+}
 
 function startEngine(): void {
   publisher.start('LED STAGE IMAGER')
@@ -205,6 +271,7 @@ function buildMenu(): void {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.decor.studio')
   buildMenu()
+  startDebugBridge() // 開発用「のぞき窓」(127.0.0.1:7331)。画面を奪わず内部を読む窓口
 
   // Web MIDI を許可する。Electron は既定で midi 権限を付与しないため、これが無いと
   // renderer の navigator.requestMIDIAccess() が拒否され、MIDI 入力が一切来ない（LEARN も効かない）。
