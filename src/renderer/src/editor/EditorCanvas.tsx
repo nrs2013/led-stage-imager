@@ -601,7 +601,20 @@ export function EditorCanvas(): React.JSX.Element {
     const v = view
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, cw, ch)
-    ctx.fillStyle = C.canvas
+    // シネマティックなヴィネット（編集画面だけ・出力(Syphon)＝OutputRenderer には無関係）。
+    // 中央は色を正確に見るため中立に保ち、周辺をすっと落として "暗転した客席" の奥行きを出す。
+    const vg = ctx.createRadialGradient(
+      cw / 2,
+      ch * 0.42,
+      0,
+      cw / 2,
+      ch * 0.42,
+      Math.hypot(cw, ch) * 0.58
+    )
+    vg.addColorStop(0, '#101016')
+    vg.addColorStop(0.5, '#0a0a0d')
+    vg.addColorStop(1, '#020205')
+    ctx.fillStyle = vg
     ctx.fillRect(0, 0, cw, ch)
 
     // content blit (crisp pixels when zoomed in, smooth when zoomed out)

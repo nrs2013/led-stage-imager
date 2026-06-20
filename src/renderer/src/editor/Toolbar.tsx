@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useStore, type Tool } from '../state/store'
-import { C, F, buttonStyle } from '../ui/tokens'
+import { C, F, chrome, buttonStyle } from '../ui/tokens'
 import { NumberField } from '../ui/NumberField'
 
 /** Tool icons: the shape you click is the shape you draw next. */
@@ -139,12 +139,23 @@ export function Toolbar({
         gap: 8,
         height: 52,
         padding: '0 14px',
-        background: C.panel,
-        borderBottom: `0.5px solid ${C.border}`,
-        flexShrink: 0
+        background: chrome.bar,
+        borderBottom: '0.5px solid rgba(123,197,232,0.22)',
+        boxShadow: `${chrome.topHi}, ${chrome.accentEdge}`,
+        flexShrink: 0,
+        position: 'relative',
+        zIndex: 3
       }}
     >
-      <div style={{ fontFamily: F.display, fontSize: 22, letterSpacing: '0.12em', color: C.white }}>
+      <div
+        style={{
+          fontFamily: F.display,
+          fontSize: 22,
+          letterSpacing: '0.14em',
+          color: C.white,
+          textShadow: '0 0 18px rgba(123,197,232,0.18)'
+        }}
+      >
         LED&nbsp;STAGE&nbsp;<span style={{ color: C.accent }}>IMAGER</span>
       </div>
 

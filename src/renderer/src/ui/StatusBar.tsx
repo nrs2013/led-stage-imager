@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../state/store'
-import { C, F } from '../ui/tokens'
+import { C, F, chrome } from '../ui/tokens'
 
 interface NetApi {
   listInterfaces?: () => Promise<{ name: string; address: string }[]>
@@ -146,8 +146,9 @@ const bar: React.CSSProperties = {
   gap: 8,
   height: 34,
   padding: '0 14px',
-  background: C.panel,
+  background: chrome.bar,
   borderTop: `0.5px solid ${C.border}`,
+  boxShadow: chrome.topHi,
   flexShrink: 0
 }
 const lbl: React.CSSProperties = {

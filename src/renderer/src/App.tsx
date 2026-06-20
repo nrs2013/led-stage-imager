@@ -18,7 +18,7 @@ import { useMask } from './state/use-mask'
 import { useAutosave } from './io/autosave'
 import type { Chart } from './model/types'
 import { parseChart } from './io/chart-file'
-import { C } from './ui/tokens'
+import { C, chrome } from './ui/tokens'
 
 const isOutput = typeof window !== 'undefined' && window.location.search.includes('output')
 
@@ -192,7 +192,7 @@ function EditorApp(): React.JSX.Element {
     )
   }
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.canvas }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: chrome.root }}>
       <Toolbar testOpen={testOpen} onToggleTest={() => setTestOpen((v) => !v)} />
       {mode === 'edit' ? (
         <>
@@ -206,7 +206,7 @@ function EditorApp(): React.JSX.Element {
                 display: 'flex',
                 flexDirection: 'column',
                 minHeight: 0,
-                background: C.panel,
+                background: chrome.panel,
                 borderLeft: `0.5px solid ${C.border}`
               }}
             >

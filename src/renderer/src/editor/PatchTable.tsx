@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../state/store'
-import { C, F, buttonStyle } from '../ui/tokens'
+import { C, F, chrome, buttonStyle } from '../ui/tokens'
 import { channelRange, detectOverlaps } from '../dmx/patch'
 import { formatDmx, repeatCount } from '../dmx/address'
 import { resolveColor } from '../dmx/resolve'
@@ -182,8 +182,9 @@ export function PatchTable(): React.JSX.Element {
 const wrapStyle: React.CSSProperties = {
   height: 190,
   flexShrink: 0,
-  background: C.panel,
+  background: chrome.bar,
   borderTop: `0.5px solid ${C.border}`,
+  boxShadow: chrome.topHi,
   padding: '10px 14px',
   display: 'flex',
   flexDirection: 'column'

@@ -4,14 +4,13 @@ import { createChart } from '../model/chart-model'
 import { openChartFromFile, markNewChart } from '../io/file-ops'
 import { readBackup } from '../io/autosave'
 import type { Chart } from '../model/types'
-import { C, F } from './tokens'
 
 /**
- * The doorway: first choose a MODE, not a file.
- *  - SHOW MODE  … 本番。電飾・照明を配置図に置いて卓のDMXで可視化し Syphon/NDI 出力する。
+ * The doorway: first choose a MODE, not a file (cinematic-beam design・のむさん 2026-06-20).
+ *  - SHOW MODE  … 本番。電飾・照明を配置図に置いて卓のDMXで可視化し Syphon/NDI 出力する。常に新規（空）で開始。
  *  - LIGHT SKETCH … かんたん。写真を灯体で照らして見た目を作る簡易プレビュー（旧・画像照明モード）。
- * チャート画像（配置図）は SHOW MODE に入ってから上のバーの「チャート画像」で貼る
- * （= 起動時にチャート取り込みを強制しない・のむさん 2026-06-19）。
+ * チャート画像（配置図）は SHOW MODE に入ってから上のバーの「チャート画像」で貼る。
+ * 画面の文言は英語のみ（のむさん要望）。ロゴは Cormorant Garamond 300（同梱・CSP font-src 'self'）。
  */
 export function StartScreen(): React.JSX.Element {
   const setStarted = useStore((s) => s.setStarted)
@@ -41,7 +40,7 @@ export function StartScreen(): React.JSX.Element {
   }
 
   // SHOW MODE に入る：いつでも「新規（空チャート）」で始める＝普通のアプリ(Excel/PowerPoint)と同じ。
-  // 前回の自動バックアップは下の「前回の続きから」ボタンでだけ復元する（保存し忘れの保険・のむさん 2026-06-20）。
+  // 前回の自動バックアップは下の「Recover last session」でだけ復元する（保存し忘れの保険）。
   const enterShowMode = (): void => {
     startBlank(1920, 1080)
   }
@@ -55,7 +54,7 @@ export function StartScreen(): React.JSX.Element {
         setStarted(true)
       }
     } catch (err) {
-      setError('保存ファイルを開けませんでした: ' + (err as Error).message)
+      setError('Could not open the file: ' + (err as Error).message)
     }
   }
 
@@ -69,155 +68,148 @@ export function StartScreen(): React.JSX.Element {
   }, [])
 
   return (
-    <main style={wrap}>
-      <div style={{ textAlign: 'center' }}>
-        <h1 style={title}>LED STAGE IMAGER</h1>
-        <div style={subtitle}>CHOOSE A MODE</div>
-      </div>
+    <main className="ss-root">
+      <style>{SS_CSS}</style>
 
-      <div style={modeCol}>
-        <button
-          style={showModeBtn}
-          onClick={enterShowMode}
-          title="本番モード — 電飾・照明を配置図に置いて、卓のDMXで可視化し Syphon/NDI 出力する"
-        >
-          <span style={modeTitle}>SHOW MODE</span>
-          <span style={modeSub}>
-            本番 — 新規の配置図から始める。電飾・照明を置いて卓のDMXで可視化（Syphon/NDI出力）
-          </span>
-        </button>
+      <svg className="ss-beam" viewBox="0 0 620 760" preserveAspectRatio="xMidYMin slice" aria-hidden="true">
+        <defs>
+          <linearGradient id="ss-cone" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#7bc5e8" stopOpacity="0.17" />
+            <stop offset="0.5" stopColor="#7bc5e8" stopOpacity="0.05" />
+            <stop offset="1" stopColor="#7bc5e8" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="ss-core" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#fafaf8" stopOpacity="0.20" />
+            <stop offset="1" stopColor="#fafaf8" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <g style={{ mixBlendMode: 'screen' }}>
+          <polygon points="310,0 242,520 378,520" fill="url(#ss-cone)" />
+          <polygon points="310,0 290,360 330,360" fill="url(#ss-core)" />
+        </g>
+      </svg>
 
-        <button
-          style={sketchModeBtn}
-          onClick={() => setImageLight(true)}
-          title="かんたんモード — セット写真を灯体で照らして見た目を作る（卓・Art-Net不要）"
-        >
-          <span style={{ ...modeTitle, color: C.canvas }}>LIGHT SKETCH</span>
-          <span style={{ ...modeSub, color: 'rgba(10,10,10,0.72)' }}>
-            かんたん — 写真を灯体で照らして見た目を作る（卓なしでOK）
-          </span>
-        </button>
-      </div>
+      <div className="ss-inner">
+        <div className="ss-glow" aria-hidden="true" />
 
-      <div style={row}>
-        <button style={smallBtn} onClick={loadSaved} title="保存した公演ファイル(.ledimager)を開く">
-          保存ファイルを開く…
-        </button>
-        {backup && (
+        <div className="ss-fix" aria-hidden="true">
+          <svg width="50" height="36" viewBox="0 0 46 34" fill="none" stroke="#a8a8a0" strokeWidth="1">
+            <line x1="3" y1="4" x2="43" y2="4" />
+            <line x1="9" y1="4" x2="6" y2="9" />
+            <line x1="20" y1="4" x2="17" y2="9" />
+            <line x1="31" y1="4" x2="28" y2="9" />
+            <line x1="42" y1="4" x2="39" y2="9" />
+            <rect x="18" y="8" width="10" height="9" rx="1.5" />
+            <line x1="23" y1="17" x2="23" y2="22" />
+            <path d="M19 22 L27 22 L31 33 L15 33 Z" stroke="#7bc5e8" strokeOpacity="0.5" />
+          </svg>
+        </div>
+
+        <h1 className="ss-title">LED STAGE IMAGER</h1>
+        <p className="ss-tag">DMX Visualizer&nbsp;·&nbsp;Syphon / NDI Output</p>
+
+        <div className="ss-modes">
           <button
-            style={smallBtn}
-            onClick={resume}
-            title="保存し忘れの保険。前回いじっていた内容（5秒ごとの自動バックアップ）を呼び戻します"
+            className="ss-mode ss-show"
+            onClick={enterShowMode}
+            title="Place fixtures on a chart, visualize live DMX, output to Syphon / NDI"
           >
-            前回の続きから復元 — {backup.name || 'Untitled'}（{backup.layers.length}枚・電飾
-            {backup.shapes.length}個）
+            <span className="ss-mi">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" strokeWidth="1">
+                <rect x="2" y="3" width="16" height="11" rx="1" />
+                <line x1="2" y1="14" x2="18" y2="14" />
+                <circle cx="6.5" cy="7" r="1" />
+                <circle cx="11" cy="9.5" r="1" />
+                <circle cx="14.5" cy="6" r="1" />
+              </svg>
+            </span>
+            <span className="ss-mt">
+              <span className="ss-mh">Show Mode</span>
+              <span className="ss-ms">Fixtures on a chart · live DMX · Syphon / NDI</span>
+            </span>
+            <svg className="ss-ar" width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
+              <path d="M5 3 L9 7 L5 11" />
+            </svg>
           </button>
+
+          <button
+            className="ss-mode ss-sketch"
+            onClick={() => setImageLight(true)}
+            title="Light a photo with virtual fixtures (no console / Art-Net needed)"
+          >
+            <span className="ss-mi">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" strokeWidth="1">
+                <rect x="3" y="3" width="14" height="11" rx="1" />
+                <path d="M3 11 L7 8 L10 10 L14 6 L17 9" />
+                <circle cx="13" cy="6" r="1.4" />
+              </svg>
+            </span>
+            <span className="ss-mt">
+              <span className="ss-mh">Light Sketch</span>
+              <span className="ss-ms">Light a photo with virtual fixtures</span>
+            </span>
+            <svg className="ss-ar" width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
+              <path d="M5 3 L9 7 L5 11" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="ss-foot">
+          <button className="ss-open" onClick={loadSaved} title="Open a saved show file (.ledimager)">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
+              <path d="M1.5 4 L5.5 4 L7 6 L12.5 6 L12.5 11.5 L1.5 11.5 Z" />
+            </svg>
+            Open File
+          </button>
+          {backup && (
+            <button
+              className="ss-recover"
+              onClick={resume}
+              title="Safety net — restore what you were last editing (auto-backup every 5s)"
+            >
+              Recover last session
+            </button>
+          )}
+        </div>
+
+        {error && (
+          <div className="ss-err" data-testid="start-error">
+            {error}
+          </div>
         )}
       </div>
-
-      <div style={hintLine}>
-        チャート画像（配置図）は SHOW MODE に入ってから、上のバーの「チャート画像」で貼れます。
-      </div>
-
-      {error && (
-        <div style={errBox} data-testid="start-error">
-          {error}
-        </div>
-      )}
     </main>
   )
 }
 
-const wrap: React.CSSProperties = {
-  flex: 1,
-  minHeight: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 26,
-  background: C.canvas
-}
-const title: React.CSSProperties = {
-  margin: 0,
-  fontFamily: F.display,
-  fontSize: 44,
-  letterSpacing: '0.08em',
-  color: C.white,
-  fontWeight: 400
-}
-const subtitle: React.CSSProperties = {
-  marginTop: 2,
-  fontSize: 10,
-  letterSpacing: '0.3em',
-  color: C.hint,
-  fontFamily: F.ui
-}
-const modeCol: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 14,
-  width: 'min(560px, 80vw)'
-}
-const modeBtnBase: React.CSSProperties = {
-  width: '100%',
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  gap: 4,
-  padding: '22px 20px',
-  borderRadius: 8,
-  cursor: 'pointer'
-}
-const showModeBtn: React.CSSProperties = {
-  ...modeBtnBase,
-  border: `0.5px solid ${C.cyan}`,
-  background: `rgba(${C.accentRGB},0.08)`
-}
-const sketchModeBtn: React.CSSProperties = {
-  ...modeBtnBase,
-  border: 'none',
-  background: C.amber,
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)'
-}
-const modeTitle: React.CSSProperties = {
-  fontFamily: F.display,
-  fontSize: 24,
-  letterSpacing: '0.08em',
-  color: C.white
-}
-const modeSub: React.CSSProperties = {
-  fontSize: 12,
-  color: C.label,
-  fontFamily: F.ui,
-  textAlign: 'center'
-}
-const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }
-const smallBtn: React.CSSProperties = {
-  background: 'transparent',
-  border: `0.5px solid ${C.border}`,
-  color: C.label,
-  padding: '8px 13px',
-  fontSize: 11,
-  fontFamily: F.ui,
-  borderRadius: 5,
-  cursor: 'pointer'
-}
-const hintLine: React.CSSProperties = {
-  fontSize: 11,
-  color: C.faint,
-  fontFamily: F.ui,
-  textAlign: 'center',
-  maxWidth: 520,
-  lineHeight: 1.6
-}
-const errBox: React.CSSProperties = {
-  maxWidth: 560,
-  padding: '9px 14px',
-  border: '1px solid #6a3531',
-  borderRadius: 4,
-  background: 'rgba(224,114,106,0.09)',
-  color: '#e0726a',
-  fontSize: 12,
-  fontFamily: F.ui
-}
+const SS_CSS = `
+.ss-root{flex:1;min-height:0;position:relative;overflow:hidden;background:#0a0a0a;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.ss-beam{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;}
+.ss-inner{position:relative;z-index:2;width:min(480px,82vw);text-align:center;padding:24px 0;}
+.ss-glow{position:absolute;top:-10px;left:50%;transform:translateX(-50%);width:460px;height:300px;background:radial-gradient(ellipse 55% 58% at 50% 42%,rgba(123,197,232,0.07),transparent 72%);mix-blend-mode:screen;pointer-events:none;}
+.ss-fix{display:flex;justify-content:center;margin-bottom:42px;}
+.ss-fix svg{opacity:.5;}
+.ss-title{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:52px;letter-spacing:.2em;color:#fafaf8;line-height:1;margin:0;text-indent:.2em;}
+.ss-tag{margin:20px 0 0;font-size:10.5px;font-weight:300;letter-spacing:.34em;text-transform:uppercase;color:#a8a8a0;font-family:'Inter',sans-serif;}
+.ss-modes{margin-top:54px;display:flex;flex-direction:column;gap:11px;text-align:left;}
+.ss-mode{width:100%;display:flex;align-items:center;gap:18px;padding:18px 22px;border:0.5px solid #2c2a27;border-radius:10px;background:rgba(255,255,255,0.008);cursor:pointer;transition:border-color .2s,background .2s;font-family:'Inter',sans-serif;}
+.ss-mode:hover{background:rgba(255,255,255,0.02);}
+.ss-show:hover{border-color:#7bc5e8;}
+.ss-sketch:hover{border-color:#f5c878;}
+.ss-mi{flex:none;width:30px;display:flex;justify-content:center;}
+.ss-mi svg{stroke:#7bc5e8;opacity:.85;}
+.ss-sketch .ss-mi svg{stroke:#f5c878;}
+.ss-mt{flex:1;}
+.ss-mh{display:block;font-size:13px;font-weight:300;letter-spacing:.2em;color:#e8e5dc;text-transform:uppercase;}
+.ss-ms{display:block;margin-top:5px;font-size:10px;font-weight:300;letter-spacing:.06em;color:#888780;}
+.ss-ar{flex:none;stroke:#5a5a55;transition:stroke .2s,transform .2s;}
+.ss-show:hover .ss-ar{stroke:#7bc5e8;transform:translateX(3px);}
+.ss-sketch:hover .ss-ar{stroke:#f5c878;transform:translateX(3px);}
+.ss-foot{margin-top:30px;display:flex;align-items:center;justify-content:space-between;}
+.ss-open{display:inline-flex;align-items:center;gap:9px;font-size:10px;font-weight:300;letter-spacing:.22em;text-transform:uppercase;color:#a8a8a0;cursor:pointer;background:none;border:none;font-family:'Inter',sans-serif;padding:6px 2px;}
+.ss-open:hover{color:#fafaf8;}
+.ss-open svg{stroke:#a8a8a0;}
+.ss-recover{font-size:9px;font-weight:300;letter-spacing:.16em;text-transform:uppercase;color:#5a5a55;cursor:pointer;background:none;border:none;font-family:'Inter',sans-serif;padding:6px 2px;}
+.ss-recover:hover{color:#888780;}
+.ss-err{margin-top:18px;font-size:11px;color:#e0726a;font-family:'Inter',sans-serif;letter-spacing:.02em;}
+`

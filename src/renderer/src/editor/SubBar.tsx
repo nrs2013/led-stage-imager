@@ -5,7 +5,7 @@ import { saveChartToFile, saveChartAsToFile, openChartFromFile, markNewChart } f
 import { pickImage, imageSize } from '../io/image-pick'
 import { SettingsDialog } from '../ui/SettingsDialog'
 import { FillDialog } from '../ui/FillDialog'
-import { C, F, buttonStyle } from '../ui/tokens'
+import { C, F, chrome, buttonStyle } from '../ui/tokens'
 
 const fileBtn = { ...buttonStyle({}), padding: '8px 11px', fontSize: 11 }
 
@@ -216,7 +216,7 @@ const subBar: React.CSSProperties = {
   gap: 8,
   height: 42,
   padding: '0 14px',
-  background: C.panel,
+  background: chrome.bar,
   borderBottom: `0.5px solid ${C.border}`,
   flexShrink: 0
 }

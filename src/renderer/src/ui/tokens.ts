@@ -29,7 +29,25 @@ export const C = {
 export const F = {
   display: "'Bebas Neue', 'Inter', sans-serif",
   ui: "'Inter', 'Noto Sans JP', sans-serif",
-  mono: "'JetBrains Mono', monospace"
+  mono: "'JetBrains Mono', monospace",
+  // 起動画面の細セリフ・ワードマーク用（@fontsource 同梱・CSP font-src 'self'）。
+  serif: "'Cormorant Garamond', 'Times New Roman', serif"
+} as const
+
+/** Cinematic chrome（のむさん 2026-06-20）：バー/パネル/背景に "機械加工された卓" の
+ *  微妙な奥行きを与える。near-black の暖色レンジ内のごく薄いグラデ＋上端ハイライトだけで、
+ *  作業領域（キャンバス＝色精度のため中立 #0a0a0a）には触れない。 */
+export const chrome = {
+  /** ツールバー/サブバー/ステータスバー＝上が持ち上がる卓パネル（はっきり見える奥行き） */
+  bar: 'linear-gradient(180deg, #1d1a15 0%, #121009 52%, #070604 100%)',
+  /** バー上端の細ハイライト（削り出しエッジ感） */
+  topHi: 'inset 0 1px 0 rgba(255,255,255,0.07)',
+  /** 上のバーの下端＝cyanの発光ライン（"電源が入った卓" のアクセント） */
+  accentEdge: '0 1px 0 0 rgba(123,197,232,0.5), 0 6px 24px -5px rgba(123,197,232,0.45)',
+  /** 右側のパネル列（Layers/Parts/Inspector） */
+  panel: 'linear-gradient(180deg, #151210 0%, #090806 100%)',
+  /** アプリ全体の地＝中央が明るい暗転した客席の奥行き */
+  root: 'radial-gradient(140% 130% at 50% -16%, #1a1611 0%, #0a0908 50%, #040404 100%)'
 } as const
 
 export const inputStyle: CSSProperties = {
