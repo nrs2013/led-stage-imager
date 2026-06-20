@@ -40,10 +40,10 @@ export function StartScreen(): React.JSX.Element {
     setStarted(true)
   }
 
-  // SHOW MODE に入る：前回の続きがあれば再開、無ければ空のFHDチャート（画像は入ってから貼る）
+  // SHOW MODE に入る：いつでも「新規（空チャート）」で始める＝普通のアプリ(Excel/PowerPoint)と同じ。
+  // 前回の自動バックアップは下の「前回の続きから」ボタンでだけ復元する（保存し忘れの保険・のむさん 2026-06-20）。
   const enterShowMode = (): void => {
-    if (backup) resume()
-    else startBlank(1920, 1080)
+    startBlank(1920, 1080)
   }
 
   const loadSaved = async (): Promise<void> => {
@@ -83,8 +83,7 @@ export function StartScreen(): React.JSX.Element {
         >
           <span style={modeTitle}>SHOW MODE</span>
           <span style={modeSub}>
-            本番 — 電飾・照明を配置して卓のDMXで可視化（Syphon/NDI出力）
-            {backup ? '　·　前回の続きから再開' : ''}
+            本番 — 新規の配置図から始める。電飾・照明を置いて卓のDMXで可視化（Syphon/NDI出力）
           </span>
         </button>
 
@@ -101,26 +100,19 @@ export function StartScreen(): React.JSX.Element {
       </div>
 
       <div style={row}>
+        <button style={smallBtn} onClick={loadSaved} title="保存した公演ファイル(.ledimager)を開く">
+          保存ファイルを開く…
+        </button>
         {backup && (
           <button
             style={smallBtn}
             onClick={resume}
-            title="自動バックアップ（5秒ごと）から復元します。落ちても消えません"
+            title="保存し忘れの保険。前回いじっていた内容（5秒ごとの自動バックアップ）を呼び戻します"
           >
-            前回の続きから — {backup.name || 'Untitled'}（{backup.layers.length}枚・電飾
+            前回の続きから復元 — {backup.name || 'Untitled'}（{backup.layers.length}枚・電飾
             {backup.shapes.length}個）
           </button>
         )}
-        <button
-          style={smallBtn}
-          onClick={() => startBlank(1920, 1080)}
-          title="空のチャートで SHOW MODE を始める（FHD・後からチャート画像を貼れます）"
-        >
-          新規（空 FHD）
-        </button>
-        <button style={smallBtn} onClick={loadSaved} title="保存した公演ファイル(.ledimager)を開く">
-          保存ファイルを開く…
-        </button>
       </div>
 
       <div style={hintLine}>
