@@ -25,7 +25,16 @@ export function SubBar(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fillOpen, setFillOpen] = useState(false)
   const [savedFlash, setSavedFlash] = useState<string | null>(null)
+  const [newFlash, setNewFlash] = useState(false)
   const u = activeLayerOf(chart).underlay
+
+  // "New chart" flash — New を押したら必ず目に見える反応を出す（空の時は見た目が変わらず
+  // 「効いてない？」と誤解されるため・のむさん 2026-06-20）
+  useEffect(() => {
+    if (!newFlash) return
+    const t = setTimeout(() => setNewFlash(false), 1800)
+    return () => clearTimeout(t)
+  }, [newFlash])
 
   // "Saved: name" flash — fired by the Save button AND ⌘S (EditorCanvas)
   useEffect(() => {
@@ -59,6 +68,9 @@ export function SubBar(): React.JSX.Element {
     setChart(createChart({ w: 1920, h: 1080 }))
     // 編集画面のまま空チャートにする。StartScreen へ戻すと SHOW MODE 再選択で
     // 「前回の続き(自動バックアップ)」が復活し、新規にならない不具合になるため戻さない。
+    setSavedFlash(null)
+    setNewFlash(true) // 目に見える反応（空の時でも「効いた」と分かる）
+    window.dispatchEvent(new CustomEvent('decor:fit')) // ビューを全体表示にリセット
   }
   const openChart = async (): Promise<void> => {
     try {
@@ -85,20 +97,25 @@ export function SubBar(): React.JSX.Element {
   return (
     <div style={subBar}>
       <button style={fileBtn} onClick={newChart}>
-        新規
+        New
       </button>
       <button style={fileBtn} onClick={openChart}>
-        開く
+        Open
       </button>
       <button style={fileBtn} onClick={saveChart} title="今のファイルに上書き保存（⌘S・初回だけ保存先を聞く）">
-        保存
+        Save
       </button>
       <button style={fileBtn} onClick={saveChartAs} title="別名で保存（新しいファイルとして保存し、以降はそちらに上書き）">
-        別名で保存
+        Save As
       </button>
       {savedFlash && (
         <span style={{ fontSize: 11, color: C.green, fontFamily: F.mono, whiteSpace: 'nowrap' }}>
-          保存しました: {savedFlash}
+          Saved: {savedFlash}
+        </span>
+      )}
+      {newFlash && (
+        <span style={{ fontSize: 11, color: C.cyan, fontFamily: F.mono, whiteSpace: 'nowrap' }}>
+          ● New chart
         </span>
       )}
       <button style={fileBtn} onClick={duplicate}>

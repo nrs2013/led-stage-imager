@@ -335,7 +335,7 @@ const CARDS: {
 }[] = [
   {
     part: 'bulb',
-    label: 'ボール球',
+    label: 'Ball Bulb',
     hint: `Φ${BULB_DEFAULT_DIAMETER}`,
     title: 'ドラッグしてチャートに置く（中心がそのマスに乗る）',
     thumb: <BulbThumb />
@@ -363,77 +363,77 @@ const CARDS: {
   },
   {
     part: 'blinder',
-    label: '8灯ミニブル',
+    label: '8-Lamp Blinder',
     hint: '2×4',
     title: '8灯ミニブル — 既定は8球一斉（番地間隔3で8球バラバラ）',
     thumb: <FixtureThumb paint={paintBlinder} />
   },
   {
     part: 'festoon',
-    label: '垂れ電球',
+    label: 'Festoon',
     hint: 'STRING',
     title: 'ドラッグして張り、両端をつかんで掛け直す（1球=1番地・たわみはInspector）',
     thumb: <FestoonThumb />
   },
   {
     part: 'neon',
-    label: 'ネオン管',
+    label: 'Neon',
     hint: 'TEXT',
     title: 'ドラッグしてチャートに置き、Inspectorで文字を打つ（1文字=1番地）',
     thumb: <NeonThumb />
   },
   {
     part: 'marquee',
-    label: 'マーキー',
+    label: 'Marquee',
     hint: 'BULB TEXT',
     title: 'マーキーライト — 電球で文字を描く劇場サイン。Inspectorで文字を打つ（1文字=1番地・文字ごとにチェイス・電球間隔も調整可）',
     thumb: <MarqueeThumb />
   },
   {
     part: 'stars',
-    label: '星球',
+    label: 'Stars',
     hint: 'W+B 2ch',
     title: 'ドラッグして置き、四隅で広げる（白ch+青chの2番地・密度はInspector）',
     thumb: <StarsThumb />
   },
   {
     part: 'image',
-    label: '写真素材',
+    label: 'Photo',
     hint: 'ALBEDO',
     title: '写真（実物の電飾やセット）を置く — 自分では光らず、「スポット」が当たった所だけ浮かぶ。写真はInspectorで選ぶ',
     thumb: <FixtureThumb paint={paintImage} />
   },
   {
     part: 'uplight',
-    label: 'スポット',
+    label: 'Spot',
     hint: 'SPOT',
     title: 'スポット — 1灯ずつ置いて、出口の幅・広がり・届く高さをInspectorで決める。チャートの外にも置ける。Beam 6chモードで卓からPan/Tilt/Zoom',
     thumb: <FixtureThumb paint={paintUplight} />
   },
   {
     part: 'movinghead',
-    label: 'ムービング',
+    label: 'Moving',
     hint: '8CH',
     title: 'ムービング（汎用照明灯体）— 卓のDMXで Pan/Tilt/Dimmer/Shutter/RGB/Zoom（8ch）を受けて向き・明るさ・色・点滅・広がりが動く。出口/広がり/届く高さはInspector。スポットと同じビーム見た目。',
     thumb: <FixtureThumb paint={paintUplight} />
   },
   {
     part: 'roomlamp',
-    label: '室内ランプ',
+    label: 'Room Lamp',
     hint: 'LAMP',
     title: '室内ランプ — シェードが暖色に灯り、下へ光がこぼれる。電飾屋が用意できないセットの灯り（卓RGBで色・明るさ・単一番地）',
     thumb: <FixtureThumb paint={paintRoomLamp} />
   },
   {
     part: 'streetlamp',
-    label: '街灯',
+    label: 'Street Lamp',
     hint: 'STREET',
     title: '街灯 — 灯具から下へ光のコーン・地面に光の輪。夜景・寒色にも（卓RGBで色・明るさ・単一番地）',
     thumb: <FixtureThumb paint={paintStreetLamp} />
   },
   {
     part: 'chandelier',
-    label: 'シャンデリア',
+    label: 'Chandelier',
     hint: 'CHAND',
     title: 'シャンデリア — 複数のロウソク球が暖色に灯る豪華アイテム。まず全体を1番地で一斉点灯（卓RGBで色・明るさ）',
     thumb: <FixtureThumb paint={paintChandelier} />
@@ -464,11 +464,16 @@ export function PartsPalette(): React.JSX.Element {
           color: C.text,
           fontFamily: F.ui,
           marginTop: 4,
-          whiteSpace: 'nowrap',
-          maxWidth: '100%',
+          width: '100%',
+          textAlign: 'center',
+          lineHeight: 1.15,
+          // 英語名は日本語より長い → 2行まで折り返し、全カード同じ高さで揃える（崩れ防止）
+          minHeight: 23,
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
           overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          textAlign: 'center'
+          overflowWrap: 'break-word'
         }}
         title={c.label}
       >
@@ -479,14 +484,14 @@ export function PartsPalette(): React.JSX.Element {
   )
 
   const GROUPS: { family: PartFamily; label: string }[] = [
-    { family: 'light', label: '照明' },
-    { family: 'decor', label: '電飾' }
+    { family: 'light', label: 'Light' },
+    { family: 'decor', label: 'Decor' }
   ]
   const shown = GROUPS.filter((g) => paletteFilter === 'all' || paletteFilter === g.family)
   const FILTERS: { id: PaletteFilter; label: string }[] = [
-    { id: 'all', label: '両方' },
-    { id: 'light', label: '照明' },
-    { id: 'decor', label: '電飾' }
+    { id: 'all', label: 'All' },
+    { id: 'light', label: 'Light' },
+    { id: 'decor', label: 'Decor' }
   ]
 
   return (
@@ -511,7 +516,7 @@ export function PartsPalette(): React.JSX.Element {
         return (
           <div key={g.family} style={{ marginBottom: 10 }}>
             <div style={groupHeadStyle}>{g.label}</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 }}>
               {cards.map(card)}
             </div>
           </div>
@@ -531,10 +536,11 @@ const wrapStyle: React.CSSProperties = {
 }
 
 const titleStyle: React.CSSProperties = {
-  fontFamily: F.display,
-  fontSize: 15,
-  letterSpacing: '0.1em',
-  color: C.white,
+  fontFamily: F.ui,
+  fontSize: 13,
+  fontWeight: 300,
+  letterSpacing: '0.24em',
+  color: C.label,
   marginBottom: 8,
   textTransform: 'uppercase'
 }
@@ -543,7 +549,7 @@ const cardStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  padding: '8px 10px 7px',
+  padding: '8px 5px 7px',
   background: '#242220',
   border: `1px solid #3b3631`,
   borderRadius: 5,

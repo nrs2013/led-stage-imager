@@ -29,6 +29,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const widthM = stageWidthMeters(chart) ?? ''
   const fitCount = countFittableFixtures(chart.shapes) // 実寸に直せる灯体の数
   const [fitArmed, setFitArmed] = useState(false) // 2回押しで実行（誤爆防止）
+  const [widthDraft, setWidthDraft] = useState<string | null>(null) // 入力中だけ生文字を保持（打ちやすく）
 
   // Esc closes the dialog (matches HelpPanel / StartScreen).
   useEffect(() => {
@@ -62,18 +63,27 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
           />
         </Field>
 
-        <Field label="ステージ実寸 横 (m)">
+        <Field label="Stage Width (m)">
           <input
             type="number"
             min={0}
             step={0.1}
-            value={widthM}
+            value={widthDraft ?? (widthM === '' ? '' : String(widthM))}
             placeholder="未設定"
             style={inputStyle}
+            onFocus={() => setWidthDraft(widthM === '' ? '' : String(widthM))}
             onChange={(e) => {
-              const v = Number(e.target.value)
-              // 正の有限値のみ採用。0/空/NaN は未設定扱い（0でゼロ割・無限大になるのを防ぐ）
+              // 入力中は打った文字をそのまま表示（空にもできる）。有効な正の値なら即反映。
+              const raw = e.target.value
+              setWidthDraft(raw)
+              const v = Number(raw)
+              if (raw.trim() !== '' && Number.isFinite(v) && v > 0) setStageWidthMeters(v)
+            }}
+            onBlur={(e) => {
+              // 確定。0/空/NaN は未設定扱い（0でゼロ割・無限大になるのを防ぐ）
+              const v = Number(e.currentTarget.value)
               setStageWidthMeters(Number.isFinite(v) && v > 0 ? v : 0)
+              setWidthDraft(null)
             }}
           />
         </Field>

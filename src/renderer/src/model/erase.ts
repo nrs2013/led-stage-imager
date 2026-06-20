@@ -26,7 +26,7 @@ export function eraseCellsFromChart(
   for (const sh of chart.shapes) {
     if (
       sh.type !== 'freehand' ||
-      sh.repeat ||
+      (sh.repeat?.count ?? 1) > 1 || // 本物の配列(count>1)だけセル消し対象外。count=1 repeat は対象
       (layerId !== undefined && (sh.layerId ?? homeLayer) !== layerId)
     ) {
       shapes.push(sh)

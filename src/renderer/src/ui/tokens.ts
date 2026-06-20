@@ -42,8 +42,6 @@ export const chrome = {
   bar: 'linear-gradient(180deg, #1d1a15 0%, #121009 52%, #070604 100%)',
   /** バー上端の細ハイライト（削り出しエッジ感） */
   topHi: 'inset 0 1px 0 rgba(255,255,255,0.07)',
-  /** 上のバーの下端＝cyanの発光ライン（"電源が入った卓" のアクセント） */
-  accentEdge: '0 1px 0 0 rgba(123,197,232,0.5), 0 6px 24px -5px rgba(123,197,232,0.45)',
   /** 右側のパネル列（Layers/Parts/Inspector） */
   panel: 'linear-gradient(180deg, #151210 0%, #090806 100%)',
   /** アプリ全体の地＝中央が明るい暗転した客席の奥行き */
@@ -81,15 +79,16 @@ export function buttonStyle(opts?: { active?: boolean; accent?: string; accentRG
   const accent = opts?.accent ?? C.accent
   const active = opts?.active ?? false
   return {
-    background: active ? accent : '#242220',
+    // idle = 削り出した卓キーの微グラデ／active = アクセント色のフラット塗り（発光させない）
+    background: active ? accent : 'linear-gradient(180deg, #26231f 0%, #1a1815 100%)',
     border: `1px solid ${active ? accent : '#3b3631'}`,
     color: active ? '#0a0a0a' : C.text,
     padding: '9px 15px',
     borderRadius: 3,
     fontSize: 12,
     fontFamily: F.ui,
-    fontWeight: 600,
-    letterSpacing: '0.02em',
+    fontWeight: 400,
+    letterSpacing: '0.06em',
     cursor: 'pointer',
     lineHeight: 1,
     whiteSpace: 'nowrap',

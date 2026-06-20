@@ -863,6 +863,13 @@ export function EditorCanvas(): React.JSX.Element {
     return () => window.removeEventListener('decor:image-loaded', onImg)
   }, [])
 
+  // New（SubBar）でビューを全体表示にリセット＝空でも「効いた」と分かる
+  useEffect(() => {
+    const onFit = (): void => fitRef.current()
+    window.addEventListener('decor:fit', onFit)
+    return () => window.removeEventListener('decor:fit', onFit)
+  }, [])
+
   // cache underlay + mask images (the ACTIVE layer's chart image)
   const activeUnderlayUrl = activeLayerOf(chart).underlay?.dataUrl
   useEffect(() => {
@@ -2236,6 +2243,26 @@ export function EditorCanvas(): React.JSX.Element {
         >
           {snapToPixel ? 'Snap ON' : 'Snap OFF'}
         </button>
+        {(() => {
+          // ロック解除の「必ず効く出口」。ロック品（画像/未パッチのモチーフ含む）は右クリックや
+          // パッチチップから解除しづらいので、ロックが1つでもあれば常にこのボタンを出す（⌘Zで戻せる）。
+          const lockedIds = chart.shapes.filter((s) => s.locked).map((s) => s.id)
+          if (lockedIds.length === 0) return null
+          return (
+            <button
+              onClick={() => useStore.getState().setLocked(lockedIds, false)}
+              style={{
+                ...zoomBtn,
+                background: 'rgba(245,200,120,0.16)',
+                border: `0.5px solid ${C.amber}`,
+                color: C.amber
+              }}
+              title="ロックした部品・画像を全部解除（掴めるように戻す）。⌘Zで戻せます"
+            >
+              Unlock {lockedIds.length}
+            </button>
+          )
+        })()}
       </div>
       {tool === 'polyline' && draft && (
         <div style={hintStyle}>Click to add points · Double-click to finish · Esc to cancel</div>
@@ -2278,7 +2305,7 @@ export function EditorCanvas(): React.JSX.Element {
         >
           {(() => {
             const mergeCount = chart.shapes.filter(
-              (s) => selectedIds.includes(s.id) && isPaintedRun(s) && !s.repeat
+              (s) => selectedIds.includes(s.id) && isPaintedRun(s) && (s.repeat?.count ?? 1) <= 1
             ).length
             return (
               <button

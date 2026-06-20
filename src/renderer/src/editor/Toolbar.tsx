@@ -140,20 +140,18 @@ export function Toolbar({
         height: 52,
         padding: '0 14px',
         background: chrome.bar,
-        borderBottom: '0.5px solid rgba(123,197,232,0.22)',
-        boxShadow: `${chrome.topHi}, ${chrome.accentEdge}`,
-        flexShrink: 0,
-        position: 'relative',
-        zIndex: 3
+        borderBottom: `0.5px solid ${C.border}`,
+        boxShadow: chrome.topHi,
+        flexShrink: 0
       }}
     >
       <div
         style={{
-          fontFamily: F.display,
-          fontSize: 22,
-          letterSpacing: '0.14em',
-          color: C.white,
-          textShadow: '0 0 18px rgba(123,197,232,0.18)'
+          fontFamily: F.serif,
+          fontSize: 23,
+          fontWeight: 400,
+          letterSpacing: '0.16em',
+          color: C.white
         }}
       >
         LED&nbsp;STAGE&nbsp;<span style={{ color: C.accent }}>IMAGER</span>

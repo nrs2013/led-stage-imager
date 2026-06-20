@@ -153,10 +153,10 @@ const bar: React.CSSProperties = {
 }
 const lbl: React.CSSProperties = {
   fontSize: 10,
-  color: C.label,
-  letterSpacing: '0.06em',
+  color: C.hint,
+  letterSpacing: '0.2em',
   textTransform: 'uppercase',
-  fontFamily: F.ui
+  fontFamily: F.mono
 }
 const chip: React.CSSProperties = {
   fontFamily: F.mono,

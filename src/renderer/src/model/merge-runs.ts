@@ -9,7 +9,7 @@ const cellOf = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 const isRun = (s: Shape): boolean =>
   s.type === 'freehand' &&
   s.points.length >= 1 &&
-  !s.repeat &&
+  (s.repeat?.count ?? 1) <= 1 && // 本物の配列(count>1)だけ除外。count=1 repeat は配列でない
   s.points.every((p) => Math.abs((p.x % 1) - 0.5) < 1e-6 && Math.abs((p.y % 1) - 0.5) < 1e-6)
 
 /** Corner cells of a run (its verts, or just both ends), optionally reversed. */

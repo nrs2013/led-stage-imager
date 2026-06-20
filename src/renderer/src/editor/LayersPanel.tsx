@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { pickImage } from '../io/image-pick'
 import { C, F, buttonStyle } from '../ui/tokens'
@@ -19,6 +19,7 @@ export function LayersPanel(): React.JSX.Element {
   const renameLayer = useStore((s) => s.renameLayer)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const cancelRename = useRef(false) // Esc=取り消し。blur(commit)を1回だけ握り潰す
 
   const addWithImage = async (): Promise<void> => {
     const dataUrl = await pickImage()
@@ -29,6 +30,11 @@ export function LayersPanel(): React.JSX.Element {
   }
 
   const commitRename = (id: string): void => {
+    if (cancelRename.current) {
+      cancelRename.current = false // Escで取り消し＝確定しない
+      setEditingId(null)
+      return
+    }
     const name = draft.trim()
     if (name) renameLayer(id, name)
     setEditingId(null)
@@ -38,7 +44,7 @@ export function LayersPanel(): React.JSX.Element {
     <div style={panel}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <span style={title}>Layers</span>
-        <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1曲=1枚</span>
+        <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1 song = 1 image</span>
         <div style={{ flex: 1 }} />
         <button style={smallBtn} onClick={addWithImage} title="チャート画像を選んで新しい曲ページを追加">
           + Image
@@ -74,7 +80,10 @@ export function LayersPanel(): React.JSX.Element {
                   onBlur={() => commitRename(l.id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') commitRename(l.id)
-                    if (e.key === 'Escape') setEditingId(null)
+                    if (e.key === 'Escape') {
+                      cancelRename.current = true // blur(commit)を握り潰して取り消し
+                      setEditingId(null)
+                    }
                   }}
                   onClick={(e) => e.stopPropagation()}
                   style={{
@@ -182,9 +191,10 @@ const panel: React.CSSProperties = {
 }
 
 const title: React.CSSProperties = {
-  fontFamily: F.display,
+  fontFamily: F.ui,
   fontSize: 13,
-  letterSpacing: '0.12em',
+  fontWeight: 300,
+  letterSpacing: '0.24em',
   textTransform: 'uppercase',
-  color: C.white
+  color: C.label
 }
