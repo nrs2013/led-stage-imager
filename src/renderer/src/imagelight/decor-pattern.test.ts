@@ -86,6 +86,31 @@ describe('buildDecorLeds', () => {
     expect(topC(inA)).toBe(0)
     expect(topC(inB)).toBe(0)
   })
+
+  it('追加した出方（ドット/格子/斜め/レンガ/市松/リング）は線分を出し、始点はマスク内側・色は範囲内', () => {
+    const w = 120
+    const h = 120
+    const mask = fullMask(w, h)
+    for (const kind of ['dot', 'grid', 'diag', 'brick', 'checker', 'ring'] as const) {
+      const segs = buildDecorLeds(mask, w, h, { kind, channels: 6, lineSpacing: 10 })
+      expect(segs.length).toBeGreaterThan(0)
+      for (const s of segs) {
+        expect(mask[s.y * w + s.x]).toBeGreaterThanOrEqual(128)
+        expect(s.c).toBeGreaterThanOrEqual(0)
+        expect(s.c).toBeLessThan(6)
+      }
+    }
+  })
+
+  it('格子は横線と縦線の両方を含む', () => {
+    const segs = buildDecorLeds(fullMask(100, 100), 100, 100, {
+      kind: 'grid',
+      channels: 4,
+      lineSpacing: 12
+    })
+    expect(segs.some((s) => s.vertical)).toBe(true)
+    expect(segs.some((s) => !s.vertical)).toBe(true)
+  })
 })
 
 const ALL_EFFECTS = [
@@ -98,7 +123,10 @@ const ALL_EFFECTS = [
   'grad',
   'sparkle',
   'strobe',
-  'pulse'
+  'pulse',
+  'twinkle',
+  'meteor',
+  'alt'
 ] as const
 const ALL_DIRS = ['fwd', 'rev', 'ping', 'center'] as const
 
@@ -148,5 +176,22 @@ describe('decorChannelColor', () => {
   it('chase / pulse は color1 をそのまま使う', () => {
     const [r, g, b] = decorChannelColor(0, 6, 'chase', 'fwd', C1, C2, 1.2, 0)
     expect([r, g, b]).toEqual([C1[0], C1[1], C1[2]])
+  })
+
+  it('twinkle / alt も方向で変わらない（全体系）', () => {
+    for (const eff of ['twinkle', 'alt'] as const) {
+      const fwd = decorChannelColor(2, 6, eff, 'fwd', C1, C2, 1.2, 1.3)[3]
+      const rev = decorChannelColor(2, 6, eff, 'rev', C1, C2, 1.2, 1.3)[3]
+      expect(fwd).toBeCloseTo(rev, 9)
+    }
+  })
+
+  it('meteor は方向が効く（順は頭が ch0、逆は ch(N-1)）', () => {
+    const fwdHead = decorChannelColor(0, 6, 'meteor', 'fwd', C1, C2, 1.2, 0)[3]
+    const fwdTail = decorChannelColor(3, 6, 'meteor', 'fwd', C1, C2, 1.2, 0)[3]
+    expect(fwdHead).toBeGreaterThan(fwdTail)
+    const revHead = decorChannelColor(5, 6, 'meteor', 'rev', C1, C2, 1.2, 0)[3]
+    const revTail = decorChannelColor(2, 6, 'meteor', 'rev', C1, C2, 1.2, 0)[3]
+    expect(revHead).toBeGreaterThan(revTail)
   })
 })

@@ -219,6 +219,16 @@ interface Snap {
 //     チルト等を捨てて、初期プリセットを常にまっさら（均等10台・tilt0・下向き）にする
 const RIG_KEY = 'decor.imagelight.rig.v3'
 
+// アプリを新しく開くたびに明かり/色/MIDI を引き継がない（のむさん確定 2026-06-21）。
+// 保持はページ生存中のメモリ(sessionRig)のみ＝モード切替の行き来では残るが、アプリ再起動で消える。
+// 旧バージョンが localStorage に残した前回リグも、開いた瞬間に完全削除する。
+let sessionRig: RigPayload | null = null
+try {
+  localStorage.removeItem(RIG_KEY)
+} catch {
+  /* localStorage が使えなくても支障なし */
+}
+
 /** localStorage / 公演ファイル 共通のリグ内容（灯体配置=beams は含めない）。 */
 export interface RigPayload {
   st?: { master?: number; smoke?: number }
@@ -3091,19 +3101,18 @@ export class ImageLightEngine {
     if (typeof d.strobeRate === 'number') this.strobeRate = d.strobeRate
   }
   private saveRig(): void {
+    // セッション内（ページ生存中）だけ保持＝モード切替の行き来では残るが、アプリ再起動で消える。
+    // localStorage には書かない＝新しく開いたら明かり/色/MIDI はまっさら。
     try {
-      localStorage.setItem(RIG_KEY, JSON.stringify(this.rigData()))
+      sessionRig = JSON.parse(JSON.stringify(this.rigData())) as RigPayload
     } catch {
-      /* localStorage 不可でも本番に支障なし */
+      /* ignore */
     }
   }
   private loadRig(): void {
-    try {
-      const raw = localStorage.getItem(RIG_KEY)
-      if (raw) this.applyRig(JSON.parse(raw) as RigPayload)
-    } catch {
-      /* 壊れていたら初期状態のまま */
-    }
+    // 同一セッション中に作ったリグだけ復元（モード切替で消えないように）。
+    // アプリ再起動後は sessionRig=null＝初期状態のまま＝まっさら。
+    if (sessionRig) this.applyRig(sessionRig)
   }
 
   /** 公演まるごとの書き出し材料を作る（リグ＋シーン一覧＋メディアのファイル）。

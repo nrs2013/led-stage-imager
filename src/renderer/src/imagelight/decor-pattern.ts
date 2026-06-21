@@ -13,7 +13,16 @@
  *  太さ(px)の見た目は描画側(engine)で付ける＝ここは“どこに線があるか”だけを返す純粋関数。 */
 import { hsl2rgb, type RGB3 } from './colors'
 
-export type DecorPatternKind = 'h' | 'v' | 'outline'
+export type DecorPatternKind =
+  | 'h'
+  | 'v'
+  | 'outline'
+  | 'dot'
+  | 'grid'
+  | 'diag'
+  | 'brick'
+  | 'checker'
+  | 'ring'
 export type DecorEffect =
   | 'chase'
   | 'theater'
@@ -25,10 +34,13 @@ export type DecorEffect =
   | 'sparkle'
   | 'strobe'
   | 'pulse'
+  | 'twinkle'
+  | 'meteor'
+  | 'alt'
 /** 色の流れる向き。順=番号小→大／逆=大→小／往復=端で折返し／中央=中央から外へ。 */
 export type DecorDirection = 'fwd' | 'rev' | 'ping' | 'center'
 /** 方向の概念が無い（全体一斉系）エフェクト。UI では方向セグメントをグレーアウトする。 */
-export const DECOR_NONDIR: DecorEffect[] = ['sparkle', 'strobe', 'pulse']
+export const DECOR_NONDIR: DecorEffect[] = ['sparkle', 'strobe', 'pulse', 'twinkle', 'alt']
 
 export interface DecorPattern {
   /** この電飾パターンを表示するか。 */
@@ -191,6 +203,84 @@ function genPatternInRegion(
         }
       }
     }
+  } else if (kind === 'dot') {
+    // ドット: lineSpacing 間隔の格子点。斜めに色が流れるよう (行+列) % channels。
+    let row = 0
+    for (let y = minY; y <= maxY; y += lineSpacing, row++) {
+      const yy = Math.round(y)
+      let col = 0
+      for (let x = minX; x <= maxX; x += lineSpacing, col++) {
+        const xx = Math.round(x)
+        if (inside(xx, yy))
+          out.push({ x: xx, y: yy, len: 1, vertical: false, c: (row + col) % channels })
+      }
+    }
+  } else if (kind === 'grid') {
+    // 格子: 横線と縦線の両方（クロスハッチ）。
+    genPatternInRegion(out, inside, reg, 'h', channels, lineSpacing)
+    genPatternInRegion(out, inside, reg, 'v', channels, lineSpacing)
+  } else if (kind === 'diag') {
+    // 斜めストライプ: x+y 一定の帯。描画は h/v 線のみなので点(len=1)で表現。
+    const sp = Math.max(2, lineSpacing)
+    for (let y = minY; y <= maxY; y += 2) {
+      for (let x = minX; x <= maxX; x += 2) {
+        if ((x + y) % sp >= 2) continue
+        if (!inside(x, y)) continue
+        out.push({ x, y, len: 1, vertical: false, c: Math.floor((x + y) / sp) % channels })
+      }
+    }
+  } else if (kind === 'brick') {
+    // レンガ: 横線を一定幅で区切り、1行おきに半分ずらして目地を作る。
+    const bw = Math.max(8, lineSpacing * 3)
+    let k = 0
+    for (let y = minY; y <= maxY; y += lineSpacing, k++) {
+      const yy = Math.round(y)
+      const off = (k % 2) * Math.round(bw / 2)
+      let runStart = -1
+      for (let x = minX; x <= maxX + 1; x++) {
+        const joint = (((x - minX + off) % bw) | 0) === 0
+        const ins = x <= maxX && inside(x, yy) && !joint
+        if (ins && runStart < 0) runStart = x
+        else if (!ins && runStart >= 0) {
+          out.push({ x: runStart, y: yy, len: x - runStart, vertical: false, c: k % channels })
+          runStart = -1
+        }
+      }
+    }
+  } else if (kind === 'checker') {
+    // 市松: セル単位で塗る/塗らないを交互。塗るセルに横 run を敷く。
+    const cell = Math.max(4, lineSpacing * 2)
+    for (let y = minY; y <= maxY; y += 2) {
+      const yy = Math.round(y)
+      const gy = Math.floor((y - minY) / cell)
+      let runStart = -1
+      let runCol = 0
+      for (let x = minX; x <= maxX + 1; x++) {
+        const gx = Math.floor((x - minX) / cell)
+        const onCell = (gx + gy) % 2 === 0
+        const ins = x <= maxX && inside(x, yy) && onCell
+        if (ins && runStart < 0) {
+          runStart = x
+          runCol = gx % channels
+        } else if (!ins && runStart >= 0) {
+          out.push({ x: runStart, y: yy, len: x - runStart, vertical: false, c: runCol })
+          runStart = -1
+        }
+      }
+    }
+  } else if (kind === 'ring') {
+    // リング: 中心からの距離が lineSpacing ごとの同心円。点(len=1)で表現。
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    const sp = Math.max(3, lineSpacing)
+    for (let y = minY; y <= maxY; y += 2) {
+      for (let x = minX; x <= maxX; x += 2) {
+        if (!inside(x, y)) continue
+        const d = Math.hypot(x - cx, y - cy)
+        if (d % sp >= 2) continue
+        out.push({ x, y, len: 1, vertical: false, c: Math.floor(d / sp) % channels })
+      }
+    }
   } else {
     // 縁取り: 外周ドット（内側で、近傍に外側がある所）を角度で channels 分割。
     const cx = (minX + maxX) / 2
@@ -280,6 +370,18 @@ export function decorChannelColor(
     const b = ((Math.sin(t * speed * 1.5) + 1) / 2) * 0.85 + 0.12
     return [c1[0], c1[1], c1[2], b]
   }
+  if (effect === 'twinkle') {
+    // ちらちら: 各 ch が乱れた位相でゆっくり明滅（sparkle より柔らかい）。
+    const ph = dhash(ch * 51.3) * 6.2832
+    const b = ((Math.sin(t * speed * 2 + ph) + 1) / 2) * 0.8 + 0.12
+    return [c1[0], c1[1], c1[2], b]
+  }
+  if (effect === 'alt') {
+    // 交互点滅: 偶数 ch 群と奇数 ch 群が交互に点く。
+    const on = Math.floor(t * speed * 2) % 2
+    const b = ch % 2 === on ? 0.95 : 0.08
+    return [c1[0], c1[1], c1[2], b]
+  }
   // ---- 方向 → 実効位置 e / 周期 M / 先頭 h ----
   let e: number
   let M: number
@@ -321,6 +423,13 @@ export function decorChannelColor(
     const d = Math.round(e) - Math.round(h)
     const b = (((d % step) + step) % step) === 0 ? 1 : 0.06
     return [c1[0], c1[1], c1[2], b]
+  }
+  if (effect === 'meteor') {
+    // 流星: 鋭く明るい頭 + 短い尾が一筋スッと流れる（chase より頭が立つ）。
+    const tr2 = Math.max(1.5, M * 0.22)
+    const d2 = (((h - e) % M) + M) % M
+    const b = d2 < tr2 ? Math.pow(1 - d2 / tr2, 1.6) : 0.04
+    return [c1[0], c1[1], c1[2], clamp01(b)]
   }
   // chase / comet: 先頭 h から後ろへ尾を引いて流れる（comet は尾が長い）。
   const tr = effect === 'comet' ? Math.max(2, M * 0.55) : Math.max(1.2, M * 0.3)
