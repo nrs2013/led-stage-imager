@@ -8,6 +8,14 @@
  */
 import { WHITE, COLORS, sameRgb, hexToRgb, type RGB3 } from './colors'
 import {
+  buildDecorLeds,
+  decorChannelColor,
+  DEFAULT_DECOR,
+  type DecorPattern,
+  type DecorSeg
+} from './decor-pattern'
+import { isEmptyPixel } from '../ui/mask'
+import {
   chaseK,
   breathK,
   fireK,
@@ -255,6 +263,8 @@ export interface ShowFile {
   beams?: Beam[]
   /** マスク用アルファ画像（あれば media/ 配下のファイル名で参照）。 */
   mask?: { file: string } | null
+  /** 簡単スケッチの電飾パターン設定（卓なし＝見た目だけ）。無い＝既定。 */
+  decor?: DecorPattern
 }
 
 /** blob: URL（動画）→ dataURL（保存でファイルに書き出すため）。 */
@@ -397,6 +407,17 @@ export class ImageLightEngine {
   maskSrc: string | null = null
   /** マスクのアルファ境界線だけ描いたキャンバス（シアン1px）。BUILD で重ねる。 */
   maskEdgeCanvas: HTMLCanvasElement | null = null
+  /** 簡単スケッチの電飾パターン（卓なし＝アプリ自身が色を流す“見た目だけ”の仕掛け）。 */
+  decor: DecorPattern = { ...DEFAULT_DECOR }
+  /** マスクのアルファから生成した線分（マスク作業解像度 px 座標）。null=未生成。 */
+  private decorSegs: DecorSeg[] | null = null
+  /** マスクの「描ける所」ビットマップ（作業解像度・255=描ける）。重い canvas 読み出しの結果を保持。 */
+  private decorDrawable: Uint8Array | null = null
+  private decorMaskW = 0
+  private decorMaskH = 0
+  /** チェイス用の時計（秒）。decor.playing 中だけ進む（t0 のリセットに影響されない）。 */
+  private decorClock = 0
+  private decorLastNow = -1
   armedSave = false
   userColors: RGB3[] = []
   /** カラフルチェイスで流す色並び（空=固定8色ぜんぶ）。COLOR欄からD&Dで組む。 */
@@ -630,6 +651,7 @@ export class ImageLightEngine {
     this.activeIsVideo() ||
     this.fading ||
     this.motifChase ||
+    this.decorAnimating() ||
     this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars')
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
@@ -890,6 +912,7 @@ export class ImageLightEngine {
   renderFrame(now = performance.now()): void {
     this.updateVideoFrame() // 動画シーンなら mat を今のコマへ
     const ms = now - this.t0
+    const decorT = this.decorTime(now) // 電飾チェイス用の時計（playing 中だけ進む・1フレーム1回）
     const QW = IW
     const QH = IH
     const beams = this.beams
@@ -1054,11 +1077,25 @@ export class ImageLightEngine {
       fc.globalCompositeOperation = 'source-over'
     }
 
+    // 電飾パターン（簡単スケッチ・卓なし）を frame に発光合成。写真の上に光が乗る。
+    if (this.decor.enabled && this.decorSegs && this.decorSegs.length) {
+      const boxLW = this.getMaskBoxLW()
+      if (boxLW) {
+        fc.setTransform(Q, 0, 0, Q, 0, 0)
+        this.drawDecorLeds(fc, boxLW, decorT)
+        fc.setTransform(1, 0, 0, 1, 0, 0)
+        fc.globalCompositeOperation = 'source-over'
+        fc.globalAlpha = 1
+      }
+    }
+
     // ---- Syphon出力: 写真の部分だけを写真の解像度で（余白なし・写真フル解像度）
     this.composeOutput(maxI)
     // 出力(outCv)にもモチーフを乗せる＝編集画面と同じ絵を Resolume へ送る
     // （composeOutput は写真＋光だけ。モチーフはここで box→出力の写像で重ねる）。
     this.drawMotifsOnOutput(beams, Is, ms)
+    // 出力にも電飾パターンを重ねる（編集画面と同じ絵を Arena へ）。
+    this.drawDecorOnOutput(decorT)
   }
 
   /** 出力(outCv)にモチーフを重ねる。outCv は box 領域を出力解像度に伸ばしたものなので、
@@ -2447,6 +2484,10 @@ export class ImageLightEngine {
       this.maskImage = null
       this.maskSrc = null
       this.maskEdgeCanvas = null
+      this.decorSegs = null
+      this.decorDrawable = null
+      this.decorMaskW = 0
+      this.decorMaskH = 0
       this.bump()
       return
     }
@@ -2459,6 +2500,8 @@ export class ImageLightEngine {
     this.maskImage = img
     this.maskSrc = dataUrl
     this.maskEdgeCanvas = this.buildMaskEdgeCanvas(img)
+    this.rebuildDecorMask()
+    this.regenDecorLeds()
     this.bump()
   }
 
@@ -2562,6 +2605,174 @@ export class ImageLightEngine {
     const iw = mw * sc
     const ih = mh * sc
     return { x: (IW - iw) / 2, y: (IH - ih) / 2, w: iw, h: ih }
+  }
+
+  // ---------- 電飾パターン（簡単スケッチ・卓なし＝アプリ自身が色を流す） ----------
+
+  /** マスク表示枠を LW×LH 座標で返す（getMaskDisplayBox は IW×IH＝Q倍なので割り戻す）。 */
+  private getMaskBoxLW(): { x: number; y: number; w: number; h: number } | null {
+    const b = this.getMaskDisplayBox()
+    if (!b) return null
+    return { x: b.x / Q, y: b.y / Q, w: b.w / Q, h: b.h / Q }
+  }
+
+  /** 電飾パターン設定を更新。形/本数/ピッチが変わったら LED を作り直す。 */
+  setDecor(patch: Partial<DecorPattern>): void {
+    const before = this.decor
+    this.decor = { ...before, ...patch }
+    const geomChanged =
+      (patch.kind !== undefined && patch.kind !== before.kind) ||
+      (patch.channels !== undefined && patch.channels !== before.channels) ||
+      (patch.lineSpacing !== undefined && patch.lineSpacing !== before.lineSpacing)
+    if (geomChanged || (this.decor.enabled && !this.decorSegs && !!this.maskImage)) {
+      this.regenDecorLeds()
+    }
+    if (patch.playing === true) this.decorLastNow = -1 // 再開でチェイスが飛ばないように
+    this.bump()
+  }
+
+  /** マスク画像のアルファ→「描ける所」ビットマップを作業解像度で作って保持（マスク取込時だけ）。
+   *  作業解像度は長辺 1280 に抑える＝巨大マスクでも軽い。極性はチャートエディタ computeMask と同じ。 */
+  private rebuildDecorMask(): void {
+    const img = this.maskImage
+    if (!img) {
+      this.decorDrawable = null
+      this.decorMaskW = 0
+      this.decorMaskH = 0
+      return
+    }
+    const swSrc = img.naturalWidth || img.width
+    const shSrc = img.naturalHeight || img.height
+    if (swSrc <= 0 || shSrc <= 0) {
+      this.decorDrawable = null
+      return
+    }
+    const MAXW = 1280
+    const k = Math.min(1, MAXW / Math.max(swSrc, shSrc))
+    const sw = Math.max(1, Math.round(swSrc * k))
+    const sh = Math.max(1, Math.round(shSrc * k))
+    const c = document.createElement('canvas')
+    c.width = sw
+    c.height = sh
+    const ctx = c.getContext('2d', { willReadFrequently: true })
+    if (!ctx) {
+      this.decorDrawable = null
+      return
+    }
+    ctx.clearRect(0, 0, sw, sh)
+    ctx.drawImage(img, 0, 0, sw, sh)
+    const data = ctx.getImageData(0, 0, sw, sh).data
+    // この画像にアルファがあるか（computeMask と同じ判定）。
+    let hasAlpha = false
+    for (let i = 0; i < sw * sh; i++) {
+      if (data[i * 4 + 3] < 250) {
+        hasAlpha = true
+        break
+      }
+    }
+    // 描ける所＝透過(アルファ無し画像なら黒)。チャートエディタ computeMask と同じ極性で 255 に。
+    const drawable = new Uint8Array(sw * sh)
+    for (let i = 0; i < sw * sh; i++) {
+      const empty = isEmptyPixel(
+        data[i * 4],
+        data[i * 4 + 1],
+        data[i * 4 + 2],
+        data[i * 4 + 3],
+        hasAlpha
+      )
+      drawable[i] = empty ? 255 : 0
+    }
+    this.decorDrawable = drawable
+    this.decorMaskW = sw
+    this.decorMaskH = sh
+    c.width = 0
+    c.height = 0
+  }
+
+  /** 保持中の「描ける所」ビットマップから、各コンテナごとに線分を作り直す（形/色数/間隔変更時）。
+   *  太さ(px)は描画側なので含めない＝太さスライダーは再生成不要で軽い。
+   *  重い canvas 読み出しは rebuildDecorMask 側に分離してあるので、スライダー操作でも軽い。 */
+  private regenDecorLeds(): void {
+    const d = this.decorDrawable
+    if (!d || this.decorMaskW <= 0 || this.decorMaskH <= 0) {
+      this.decorSegs = null
+      return
+    }
+    this.decorSegs = buildDecorLeds(d, this.decorMaskW, this.decorMaskH, {
+      kind: this.decor.kind,
+      channels: this.decor.channels,
+      lineSpacing: this.decor.lineSpacing
+    })
+  }
+
+  /** 電飾チェイスが動いているか（毎フレーム描き直しが要るか）。 */
+  decorAnimating(): boolean {
+    return this.decor.enabled && this.decor.playing && !!this.decorSegs && this.decorSegs.length > 0
+  }
+
+  /** チェイス用の時計（秒）。playing 中だけ進める。 */
+  private decorTime(now: number): number {
+    if (this.decorLastNow < 0) this.decorLastNow = now
+    if (this.decor.enabled && this.decor.playing) {
+      this.decorClock += (now - this.decorLastNow) / 1000
+    }
+    this.decorLastNow = now
+    return this.decorClock
+  }
+
+  /** 既に「LW×LH 座標へ変換済み」の ctx に、box(LW×LH)の中へ電飾の線分を発光描画する。
+   *  線分（run）を「太さ thickness(本番px)」の長方形で描く＝点ではなく“線そのもの”。
+   *  frame（fc・Q変換）と 出力(outCv・box→出力写像)で共通に使う。 */
+  private drawDecorLeds(
+    ctx: CanvasRenderingContext2D,
+    box: { x: number; y: number; w: number; h: number },
+    t: number
+  ): void {
+    const segs = this.decorSegs
+    if (!segs || !segs.length || this.decorMaskW <= 0 || this.decorMaskH <= 0) return
+    const d = this.decor
+    const N = Math.max(1, d.channels)
+    const cs: { css: string; a: number }[] = new Array(N)
+    for (let i = 0; i < N; i++) {
+      const [r, g, b, a] = decorChannelColor(i, N, d.effect, d.direction, d.color1, d.color2, d.speed, t)
+      cs[i] = { css: `rgb(${r | 0},${g | 0},${b | 0})`, a }
+    }
+    const sx = box.w / this.decorMaskW // マスク px → LW（x）
+    const sy = box.h / this.decorMaskH // マスク px → LW（y・アスペクト同率）
+    // 太さは本番フレーム(IW)px 指定。fc は Q 変換下なので LW へは /Q。最小でも約 1px 残す。
+    const thick = Math.max(0.6, d.thickness / Q)
+    const half = thick / 2
+    ctx.globalCompositeOperation = 'lighter'
+    for (let kk = 0; kk < segs.length; kk++) {
+      const S = segs[kk]
+      const c = cs[S.c]
+      if (!c || c.a <= 0.03) continue
+      const X = box.x + S.x * sx
+      const Y = box.y + S.y * sy
+      ctx.fillStyle = c.css
+      ctx.globalAlpha = Math.min(1, c.a)
+      if (S.vertical) ctx.fillRect(X - half, Y, thick, Math.max(thick, S.len * sy))
+      else ctx.fillRect(X, Y - half, Math.max(thick, S.len * sx), thick)
+    }
+    ctx.globalAlpha = 1
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  /** 出力(outCv)に電飾パターンを重ねる（モチーフと同じ box→出力写像）。 */
+  private drawDecorOnOutput(t: number): void {
+    if (this.lightOnly || !this.box || this.outW <= 16) return
+    if (!this.decor.enabled || !this.decorSegs || !this.decorSegs.length) return
+    const boxLW = this.getMaskBoxLW()
+    if (!boxLW) return
+    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const box = this.box
+    const sx = this.outW / box.w
+    const sy = this.outH / box.h
+    oc.setTransform(sx, 0, 0, sy, -box.x * sx, -box.y * sy)
+    this.drawDecorLeds(oc, boxLW, t)
+    oc.setTransform(1, 0, 0, 1, 0, 0)
+    oc.globalCompositeOperation = 'source-over'
+    oc.globalAlpha = 1
   }
 
   // ---------- パニック・全体 ----------
@@ -2941,7 +3152,12 @@ export class ImageLightEngine {
       // 灯体配置を丸ごと保存（runtime 専用の _tn/_cn/_zp は復元時に再計算されるので含めてOK）。
       beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp } })),
       scenes: scenesMeta,
-      mask: maskMeta
+      mask: maskMeta,
+      decor: {
+        ...this.decor,
+        color1: this.decor.color1.slice() as RGB3,
+        color2: this.decor.color2.slice() as RGB3
+      }
     }
     return { json: JSON.stringify(show, null, 2), media }
   }
@@ -2974,7 +3190,13 @@ export class ImageLightEngine {
     this.maskSrc = null
     this.maskEdgeCanvas = null
     this.applyRig(show.rig)
-    // マスク復元（show.mask があれば）
+    // 電飾パターン設定を復元（無いショーは既定へ＝前のショーの設定を引きずらない）。
+    this.decor = show.decor ? { ...DEFAULT_DECOR, ...show.decor } : { ...DEFAULT_DECOR }
+    this.decorSegs = null
+    this.decorDrawable = null
+    this.decorClock = 0
+    this.decorLastNow = -1
+    // マスク復元（show.mask があれば）。setMaskFromDataUrl が LED を作り直す。
     if (show.mask && show.mask.file) {
       const maskUrl = mediaByFile[show.mask.file]
       if (maskUrl) await this.setMaskFromDataUrl(maskUrl)
