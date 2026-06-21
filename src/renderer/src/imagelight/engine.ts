@@ -115,7 +115,9 @@ export interface Beam {
     | 'pixelpatt'
     | 'stars'
     | 'festoon'
+    | 'image'
   motifDiam?: number
+  imageSrc?: string // 画像灯体（リアルな発光画像・dataURL）。色は持たず明るさだけで光る
   motifText?: string
   motifLetterColors?: string[]
   motifSpeed?: number
@@ -855,6 +857,18 @@ export class ImageLightEngine {
   }
 
   // ---------- モチーフ描画 ----------
+  private imageCache = new Map<string, HTMLImageElement>() // 画像灯体のデコード済み画像
+  /** 画像灯体の画像をデコード&キャッシュ（dataURL→Image）。未ロードでもImageを返す。 */
+  private imageFor(src: string): HTMLImageElement {
+    let img = this.imageCache.get(src)
+    if (!img) {
+      img = new Image()
+      img.onload = (): void => this.bump(false) // 読めたら再描画
+      img.src = src
+      this.imageCache.set(src, img)
+    }
+    return img
+  }
   private drawMotifLit(g: CanvasRenderingContext2D, b: Beam, I: number, ms: number): void {
     if (I <= 0.004) return
     const c = b._cn ?? b.color
@@ -864,6 +878,18 @@ export class ImageLightEngine {
       drawStreetLampLit(g, b.x, b.y, d, rgb)
     } else if (b.motif === 'chandelier') {
       drawChandelierLit(g, b.x, b.y, d, rgb)
+    } else if (b.motif === 'image') {
+      // リアルな発光画像を「明るさだけ」で光らせる：加算合成で黒は出ず、明るい所が I 分だけ光る。
+      const img = b.imageSrc ? this.imageFor(b.imageSrc) : null
+      if (img && img.complete && img.naturalWidth > 0) {
+        const w = d
+        const h = d * (img.naturalHeight / img.naturalWidth)
+        g.save()
+        g.globalCompositeOperation = 'lighter'
+        g.globalAlpha = Math.min(1, I)
+        g.drawImage(img, b.x - w / 2, b.y - h / 2, w, h)
+        g.restore()
+      }
     } else if (b.motif === 'marquee') {
       const shape = {
         points: [{ x: b.x, y: b.y }],
@@ -1397,6 +1423,39 @@ export class ImageLightEngine {
         type === 'festoon' ? 240 : 200, // 垂れ幕 6m幅
       ...(type === 'marquee' ? { motifText: 'LIVE', motifSpeed: 8 } : {}),
       ...(type === 'stars' ? { motifSeed: Math.floor(this.rnd() * 1e6) + 1 } : {})
+    })
+    this.selected = [this.beams.length - 1]
+    this.bump()
+  }
+  /** リアルな発光画像を灯体として追加（明るさだけで光る・色は画像のまま）。 */
+  addImageMotif(dataUrl: string): void {
+    if (this.beams.length >= MAX_BEAMS) return
+    const same = this.beams.filter((b) => b.motif === 'image')
+    const last = same[same.length - 1]
+    let x = last ? last.x + 220 : 800
+    let y = last ? last.y : 380
+    if (x > 1460) {
+      x = 200 + ((same.length * 180) % 1200)
+      y += 180
+    }
+    this.pushHistory()
+    this.rigCustomized = true
+    this.imageFor(dataUrl) // 先読み
+    this.beams.push({
+      x,
+      y,
+      w0: 0,
+      w1: 0,
+      len: 0,
+      pan: 0,
+      tilt: 0,
+      zoom: 1,
+      gauge: 0.9,
+      color: [255, 255, 255],
+      sp: makeSearchParams(this.rnd),
+      motif: 'image',
+      imageSrc: dataUrl,
+      motifDiam: 300
     })
     this.selected = [this.beams.length - 1]
     this.bump()

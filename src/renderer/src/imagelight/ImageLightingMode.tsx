@@ -78,11 +78,11 @@ const DECOR_FX: [DecorEffect, string, string, string][] = [
   ['wave', 'WAVE', 'ウェーブ', '明暗の波がうねる'],
   ['fill', 'FILL', 'フィル', '端から塗り潰す'],
   ['rainbow', 'RAINBOW', 'レインボー', '虹色が流れる'],
-  ['grad', 'GRADIENT', '2色グラデ', '色1↔色2が流れる'],
+  ['grad', 'GRAD', '2色グラデ', '色1↔色2が流れる'],
   ['sparkle', 'SPARKLE', 'きらめき', 'ランダムに瞬く'],
   ['twinkle', 'TWINKLE', 'ちらちら', 'やわらかく瞬く'],
   ['strobe', 'STROBE', 'ストロボ', '全体が高速点滅'],
-  ['alt', 'ALTERNATE', '交互点滅', '2組が交互に点く'],
+  ['alt', 'ALT', '交互点滅', '2組が交互に点く'],
   ['pulse', 'PULSE', '同時点滅', '全体が呼吸']
 ]
 const DECOR_DIRS: [DecorDirection, string][] = [
@@ -162,6 +162,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const maskInputRef = useRef<HTMLInputElement>(null)
+  const imageMotifInputRef = useRef<HTMLInputElement>(null)
   const colorPickRef = useRef<HTMLInputElement>(null)
   // 写真の 4 辺スケールワープ — どの辺をつかんでいるか + 開始位置 + ドラッグ開始時の box
   const warpDragRef = useRef<{
@@ -936,7 +937,18 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       )}
       <header className="il-header">
         <h1>
-          LIGHT SKETCH <span style={{ color: 'var(--il-amber)' }}>かんたんモード</span>
+          LIGHT SKETCH
+          <span
+            style={{
+              fontFamily: "'Noto Sans JP',sans-serif",
+              fontSize: 11,
+              color: 'var(--il-dim)',
+              letterSpacing: 0,
+              marginLeft: 8
+            }}
+          >
+            かんたんモード
+          </span>
         </h1>
         <small>写真はクリック・明かりはシーン・困ったらESC</small>
         <div style={{ flex: 1 }} />
@@ -991,7 +1003,23 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           />
           {engine.scenes.length === 0 && (
             <div className="il-empty">
-              <div className="il-empty-big" onClick={() => fileInputRef.current?.click()}>＋ 写真／動画を選ぶ（ドロップでもOK）</div>
+              <div className="il-empty-big" onClick={() => fileInputRef.current?.click()}>
+                <span style={{ fontFamily: "'Bebas Neue',sans-serif", letterSpacing: '0.16em' }}>
+                  LOAD PHOTO / VIDEO
+                </span>
+                <br />
+                <span
+                  style={{
+                    fontFamily: "'Noto Sans JP',sans-serif",
+                    fontSize: 11,
+                    color: 'var(--il-faint)',
+                    fontWeight: 400,
+                    letterSpacing: 0
+                  }}
+                >
+                  写真・動画を選ぶ（ドロップでもOK）
+                </span>
+              </div>
               <div className="il-empty-sub">
                 セット写真やループ動画を読み込むと、ここで灯体が照らします（クリックでも選べます）
               </div>
@@ -1279,7 +1307,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 {engine.beams.map((b, i) => {
                   if (!b.motif) return null
                   const label: Record<string, string> = {
-                    streetlamp: '街灯', chandelier: 'シャンデリア', marquee: 'マーキー',
+                    streetlamp: '街灯', chandelier: 'シャンデリア', marquee: 'マーキー', image: '画像',
                     bulb: 'ボール球', parlight: 'PAR', blinder: 'ミニブル', patt: 'PAT', pixelpatt: 'PixelPAT',
                     stars: '星', festoon: '垂れ幕'
                   }
@@ -1327,6 +1355,23 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   await engine.setMaskFromDataUrl(dataUrl)
                   engine.setDecor({ enabled: true }) // チャートを読んだら電飾を自動でON
                   if (engine.scenes.length === 0) engine.addEmptyScene() // 背景が無ければ空背景を出して電飾が見えるように
+                } catch {
+                  /* 読込失敗は無視 */
+                }
+              }}
+            />
+            <input
+              ref={imageMotifInputRef}
+              type="file"
+              accept="image/png,image/webp,image/*"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (!file) return
+                try {
+                  const dataUrl = await fileToDataUrl(file)
+                  if (dataUrl) engine.addImageMotif(dataUrl)
                 } catch {
                   /* 読込失敗は無視 */
                 }
@@ -1581,6 +1626,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   {engine.maskImage && (
                     <button
                       className="il-mini"
+                      style={{ flexShrink: 0, minWidth: 58 }}
                       onClick={() => engine.setMaskFromDataUrl(null)}
                       title="チャートを外す"
                     >
@@ -1623,9 +1669,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       ['outline', 'OUTLINE'],
                       ['dot', 'DOTS'],
                       ['grid', 'GRID'],
-                      ['diag', 'DIAGONAL'],
+                      ['diag', 'DIAG'],
                       ['brick', 'BRICK'],
-                      ['checker', 'CHECKER'],
+                      ['checker', 'CHECK'],
                       ['ring', 'RINGS']
                     ] as [DecorPatternKind, string][]
                   ).map(([k, lbl]) => (
@@ -1986,6 +2032,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   {label}
                 </button>
               ))}
+              <button
+                className="il-mini"
+                disabled={engine.beams.length >= MAX_BEAMS}
+                onClick={() => imageMotifInputRef.current?.click()}
+                title="画像生成などで作ったリアルな発光画像（黒背景）を灯体として読み込む。明るさだけで光ります"
+              >
+                画像
+              </button>
             </div>
             </div>
 
@@ -2018,7 +2072,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                         type="text"
                         value={ref.motifText ?? 'LIVE'}
                         maxLength={16}
-                        style={{ flex: 1, background: '#111', color: '#eee', border: '0.5px solid #555', padding: '2px 6px', fontSize: 13 }}
+                        style={{ flex: 1, background: 'var(--il-inset)', color: 'var(--il-txt)', border: '0.5px solid var(--il-line)', padding: '2px 6px', fontSize: 13 }}
                         onChange={(e) => engine.setMotifText(e.target.value)}
                       />
                     </div>
@@ -2810,35 +2864,35 @@ const IL_CSS = `
   height:100%;display:flex;flex-direction:column;background:var(--il-bg);color:var(--il-txt);font-family:'Noto Sans JP',sans-serif;overflow:hidden;}
 .il-root *{box-sizing:border-box;}
 .il-header{display:flex;align-items:baseline;gap:14px;padding:10px 16px 8px;}
-.il-header h1{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:2px;font-weight:400;}
+.il-header h1{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.14em;font-weight:400;}
 .il-header small{font-size:12px;color:var(--il-dim);}
 .il-main{flex:1;min-height:0;display:flex;}
 .il-stage{flex:1;min-width:0;position:relative;background:#000;border-top:0.5px solid var(--il-line);}
 .il-cv{width:100%;height:100%;display:block;}
 .il-empty{position:absolute;top:0;left:0;right:0;bottom:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;pointer-events:auto;}
-.il-empty-big{font-size:20px;color:var(--il-dim);font-weight:700;letter-spacing:1px;border:1.5px dashed var(--il-line);border-radius:10px;padding:26px 40px;}
-.il-empty-sub{font-size:12px;color:var(--il-faint);}
-.il-hint{position:absolute;top:10px;left:14px;font-size:11.5px;color:rgba(255,255,255,0.4);pointer-events:none;line-height:1.8;}
-.il-hint b{color:rgba(255,255,255,0.66);font-weight:500;}
+.il-empty-big{font-family:'Bebas Neue',sans-serif;font-size:15px;color:var(--il-dim);font-weight:400;letter-spacing:0.16em;border:0.5px dashed var(--il-line);border-radius:10px;padding:22px 34px;}
+.il-empty-sub{font-size:12px;color:var(--il-faint);letter-spacing:0.02em;}
+.il-hint{position:absolute;top:10px;left:14px;font-size:11.5px;color:var(--il-faint);pointer-events:none;line-height:1.6;}
+.il-hint b{color:var(--il-amber);font-weight:500;}
 .il-scenes{position:absolute;left:0;right:0;bottom:0;display:flex;gap:8px;align-items:flex-end;padding:8px 12px;background:rgba(10,9,8,0.74);border-top:0.5px solid var(--il-line);overflow-x:auto;}
 .il-sc-wrap{flex:0 0 auto;display:flex;flex-direction:column;align-items:stretch;gap:4px;}
-.il-sc{flex:0 0 auto;width:96px;cursor:pointer;border:2px solid var(--il-line);border-radius:6px;background:#000;padding:0;position:relative;}
+.il-sc{flex:0 0 auto;width:96px;cursor:pointer;border:0.5px solid var(--il-line);border-radius:6px;background:#000;padding:0;position:relative;}
 .il-sc.on{border-color:var(--il-amber);}
 .il-sc canvas{display:block;width:92px;height:52px;border-radius:4px;}
-.il-sc-name{font-family:inherit;font-size:13px;font-weight:600;color:var(--il-txt);text-align:center;line-height:1.2;padding:3px 4px;border-radius:3px;cursor:text;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.il-sc-name{font-family:inherit;font-size:11px;font-weight:500;color:var(--il-txt);text-align:center;line-height:1.2;padding:3px 4px;border-radius:3px;cursor:text;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .il-sc-name:hover{background:rgba(255,255,255,0.07);}
-.il-sc-wrap.on .il-sc-name{color:var(--il-amber);font-weight:700;}
-.il-sc-name-input{font-family:inherit;font-size:13px;font-weight:600;color:var(--il-txt);background:rgba(0,0,0,0.9);border:1px solid var(--il-amber);border-radius:3px;padding:3px 4px;width:96px;text-align:center;outline:none;box-sizing:border-box;}
+.il-sc-wrap.on .il-sc-name{color:var(--il-amber);font-weight:500;}
+.il-sc-name-input{font-family:inherit;font-size:11px;font-weight:500;color:var(--il-txt);background:rgba(0,0,0,0.9);border:0.5px solid var(--il-amber);border-radius:3px;padding:3px 4px;width:96px;text-align:center;outline:none;box-sizing:border-box;}
 .il-sc .il-sc-del{position:absolute;top:3px;right:3px;left:auto;bottom:auto;width:20px;height:20px;line-height:18px;text-align:center;border-radius:50%;background:rgba(20,16,14,0.9);border:1px solid var(--il-line);color:var(--il-txt);font-size:14px;font-family:inherit;cursor:pointer;opacity:1;text-shadow:none;z-index:2;}
 .il-sc .il-sc-del:hover{background:var(--il-red);border-color:var(--il-red);color:#fff;}
-.il-sc .il-sc-vid{position:absolute;top:2px;left:2px;bottom:auto;font-size:8px;line-height:14px;color:#111;background:var(--il-cyan);border-radius:3px;padding:0 4px;text-shadow:none;}
+.il-sc .il-sc-vid{position:absolute;top:2px;left:2px;bottom:auto;font-size:8px;line-height:14px;color:var(--il-cyan);background:rgba(34,211,238,0.12);border:0.5px solid var(--il-cyan);border-radius:3px;padding:0 4px;text-shadow:none;}
 .il-sc .il-sc-learn{position:absolute;bottom:3px;right:3px;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;line-height:1;padding:3px 5px;border-radius:3px;background:rgba(20,16,14,0.85);color:var(--il-amber);border:1px solid var(--il-amber);cursor:pointer;text-shadow:none;letter-spacing:0.04em;user-select:none;}
 .il-sc .il-sc-learn:hover{background:var(--il-amber);color:#111;}
 .il-sc .il-sc-learn.assigned{color:var(--il-cyan);border-color:var(--il-cyan);}
 .il-sc .il-sc-learn.assigned:hover{background:var(--il-cyan);color:#111;}
 .il-sc .il-sc-learn.on{background:var(--il-amber);color:#111;border-color:var(--il-amber);animation:il-learn-blink 0.7s infinite;}
 @keyframes il-learn-blink{0%,100%{opacity:1;}50%{opacity:0.55;}}
-.il-sc-add{flex:0 0 auto;width:96px;height:80px;border:1.5px dashed var(--il-dim);border-radius:6px;background:transparent;color:var(--il-dim);cursor:pointer;font-size:11px;font-family:inherit;align-self:flex-end;}
+.il-sc-add{flex:0 0 auto;width:96px;height:80px;border:0.5px dashed var(--il-line);border-radius:6px;background:transparent;color:var(--il-faint);cursor:pointer;font-size:11px;font-family:inherit;align-self:flex-end;}
 .il-learn-overlay{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.78);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);}
 .il-learn-card{background:#1a1611;border:2px solid var(--il-amber);border-radius:10px;padding:36px 56px;text-align:center;min-width:420px;box-shadow:0 24px 60px rgba(0,0,0,0.6);}
 .il-learn-eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--il-amber);letter-spacing:0.22em;margin-bottom:10px;}
@@ -2856,9 +2910,9 @@ const IL_CSS = `
 .il-lbl{font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:0.16em;color:var(--il-dim);border-bottom:0.5px solid var(--il-line);padding-bottom:3px;margin-top:1px;}
 .il-lbl em{font-style:normal;color:var(--il-faint);letter-spacing:0;margin-left:6px;font-family:'Noto Sans JP',sans-serif;font-size:9.5px;}
 /* CONSOLE: 機能をまとめる細枠ベイ */
-.il-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;}
+.il-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;}
 .il-strip button{background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;color:var(--il-txt);padding:4px 2px 3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:42px;justify-content:center;}
-.il-strip button.on{border-color:var(--il-green);box-shadow:0 0 0 1px rgba(168,232,120,0.35) inset;}
+.il-strip button.on{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,0.30) inset;}
 .il-strip button.addfx{border-style:dashed;color:var(--il-dim);}
 .il-strip .nm{font-family:'Bebas Neue',sans-serif;font-size:15px;line-height:1;}
 .il-strip .fxall .nm,.il-fxall .nm{font-size:11px;}
@@ -2873,19 +2927,19 @@ const IL_CSS = `
 .il-root input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:22px;background:transparent;cursor:pointer;}
 .il-root input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:2px;background:#403a33;}
 .il-root input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--il-amber);border:none;margin-top:-5px;}
-.il-val{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--il-amber);width:50px;text-align:right;}
-.il-val.small{font-size:11px;color:var(--il-txt);width:46px;}
-.il-val.big{font-size:16px;width:56px;}
+.il-val{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--il-amber);width:48px;text-align:right;font-feature-settings:'tnum';}
+.il-val.small{font-size:11px;color:var(--il-txt);width:48px;}
+.il-val.big{font-size:14px;width:48px;}
 .il-swatches{display:flex;gap:6px;flex-wrap:wrap;}
-.il-swatches button{width:27px;height:27px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0;}
-.il-swatches button.on{border-color:#fff;}
+.il-swatches button{width:27px;height:27px;border-radius:50%;border:1.5px solid transparent;cursor:pointer;padding:0;}
+.il-swatches button.on{border-color:var(--il-amber);}
 .il-sw-cell{position:relative;display:inline-block;line-height:0;}
 .il-colorpick{width:42px;height:26px;padding:0;border:0.5px solid var(--il-line);border-radius:6px;background:none;cursor:pointer;}
 .il-hex{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--il-dim);flex:1;}
-.il-fxgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;}
+.il-fxgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
 .il-fxcell{position:relative;}
 .il-fxcell .il-fxbtn{width:100%;background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-txt);padding:11px 0 10px;border-radius:5px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:1px;}
-.il-fxcell.on .il-fxbtn{border-color:var(--il-green);color:var(--il-green);box-shadow:0 0 0 1px rgba(168,232,120,0.3) inset;}
+.il-fxcell.on .il-fxbtn{border-color:var(--il-amber);color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,0.3) inset;}
 .il-fx-led{position:absolute;top:4px;left:5px;width:5px;height:5px;border-radius:50%;background:var(--il-line);pointer-events:none;}
 .il-fxcell.on .il-fx-led{background:var(--il-green);}
 .il-fx-learn{position:absolute;top:2px;right:3px;width:22px;height:22px;line-height:20px;text-align:center;font-size:11px;border-radius:50%;background:rgba(20,16,14,0.7);color:var(--il-faint);border:0.5px solid var(--il-line);cursor:pointer;padding:0;user-select:none;}
@@ -2909,22 +2963,22 @@ const IL_CSS = `
 .il-chasepal-drop{display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-height:30px;padding:6px;border:1.5px dashed var(--il-line);border-radius:6px;background:var(--il-inset);}
 .il-chasepal-drop.over{border-color:var(--il-green);background:rgba(168,232,120,0.08);}
 .il-chasepal-empty{font-size:10px;color:var(--il-faint);}
-.il-chasepal-chip{width:20px;height:20px;border-radius:5px;cursor:pointer;border:1px solid rgba(0,0,0,0.3);box-shadow:0 1px 2px rgba(0,0,0,0.4);}
+.il-chasepal-chip{width:20px;height:20px;border-radius:5px;cursor:pointer;border:0.5px solid var(--il-line);}
 .il-chasepal-chip:hover{outline:2px solid var(--il-red);outline-offset:1px;}
 .il-playpats{display:flex;flex-direction:column;gap:6px;}
 .il-patbig{display:flex;align-items:center;gap:8px;background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:7px;padding:11px 10px;cursor:pointer;color:var(--il-txt);text-align:left;}
 .il-patbig.on{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,.25) inset;}
 .il-patbig.empty{opacity:0.3;cursor:default;}
 .il-patbig .pn{font-family:'Bebas Neue',sans-serif;font-size:15px;color:var(--il-dim);width:14px;}
-.il-patbig .pname{flex:1;font-size:13.5px;font-weight:700;}
-.il-patbig .pkey{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--il-cyan);}
-.il-buildpats{display:flex;flex-direction:column;gap:4px;}
+.il-patbig .pname{flex:1;font-size:13px;font-weight:600;color:var(--il-txt);}
+.il-patbig .pkey{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--il-faint);}
+.il-buildpats{display:flex;flex-direction:column;gap:6px;}
 .il-patrow{display:flex;align-items:center;gap:6px;background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;padding:8px 9px;cursor:pointer;}
 .il-patrow.armed{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,.3) inset;}
 .il-patrow .pn{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--il-dim);width:12px;}
 .il-patrow .pname{flex:1;font-size:11.5px;}
 .il-patrow .pname input{width:100%;background:#15130f;border:0.5px solid var(--il-line);color:var(--il-txt);font-size:11.5px;border-radius:4px;padding:2px 4px;font-family:inherit;}
-.il-patrow .pkey{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--il-cyan);min-width:26px;text-align:right;}
+.il-patrow .pkey{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--il-faint);min-width:26px;text-align:right;}
 .il-ic{background:none;border:0.5px solid var(--il-line);color:var(--il-dim);border-radius:4px;font-size:10px;padding:5px 9px;cursor:pointer;font-family:inherit;}
 .il-ic.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
 .il-ic.assigned{border-color:var(--il-cyan);color:var(--il-cyan);}
@@ -2933,11 +2987,13 @@ const IL_CSS = `
 .il-cc.set{border-color:var(--il-amber);color:var(--il-amber);}
 .il-cc.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
 .il-mini{background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-dim);padding:6px 11px;border-radius:5px;cursor:pointer;font-size:10.5px;font-family:inherit;}
+.il-mini:hover{border-color:var(--il-dim);color:var(--il-txt);}
+.il-mini:disabled{opacity:0.4;cursor:default;}
 .il-mini.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
 .il-root hr{border:none;border-top:0.5px solid var(--il-line);margin:0;}
-.il-card{border:0.5px solid var(--il-line);border-radius:8px;padding:8px 9px;display:flex;flex-direction:column;gap:6px;}
-.il-cardhd{display:flex;align-items:center;gap:7px;font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:0.08em;color:var(--il-txt);}
-.il-stepn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--il-green);color:#10210a;font-family:'Bebas Neue',sans-serif;font-size:13px;line-height:1;flex-shrink:0;}
+.il-card{border:0.5px solid var(--il-line);border-radius:8px;padding:8px 11px;display:flex;flex-direction:column;gap:6px;}
+.il-cardhd{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--il-txt);}
+.il-stepn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:transparent;border:0.5px solid var(--il-amber);color:var(--il-amber);font-family:'Bebas Neue',sans-serif;font-size:13px;line-height:1;flex-shrink:0;}
 .il-card .il-lbl{border-bottom:none;padding-bottom:0;}
 .il2-console{display:flex;flex-direction:column;border:0.5px solid var(--il-line);border-radius:9px;background:rgba(0,0,0,0.18);padding:0 11px;}
 .il2-sec{padding:8px 0;border-top:0.5px solid var(--il-line);}
@@ -2950,7 +3006,7 @@ const IL_CSS = `
 .il2-fader .il2-nm{font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:0.1em;color:var(--il-dim);min-width:54px;}
 .il2-fader.hero .il2-nm{font-size:14px;}
 .il2-vv{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--il-txt);min-width:40px;text-align:right;font-feature-settings:'tnum';}
-.il2-vv.big{font-size:22px;color:var(--il-amber);min-width:62px;}
+.il2-vv.big{font-size:20px;color:var(--il-amber);min-width:62px;}
 .il2-vv.big i{font-size:13px;font-style:normal;}
 .il2-switch{display:flex;align-items:center;gap:11px;width:100%;background:none;border:none;padding:0;cursor:pointer;}
 .il2-sw-track{position:relative;width:50px;height:26px;border-radius:14px;border:0.5px solid var(--il-line);background:var(--il-inset);flex:0 0 auto;}
@@ -2963,7 +3019,7 @@ const IL_CSS = `
 .il2-switch.on .il2-sw-st{color:var(--il-amber);}
 .il2-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(86px,1fr));gap:6px;}
 .il2-fxgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(86px,1fr));gap:6px;margin-top:8px;}
-.il2-tile{padding:7px 6px;border:0.5px solid var(--il-line);border-radius:8px;background:var(--il-inset);color:var(--il-dim);cursor:pointer;font-size:12px;letter-spacing:0.04em;font-family:inherit;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.il2-tile{padding:7px 4px;border:0.5px solid var(--il-line);border-radius:8px;background:var(--il-inset);color:var(--il-dim);cursor:pointer;font-size:11px;letter-spacing:0.02em;font-family:inherit;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .il2-tile.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,0.12);box-shadow:0 0 0 1px rgba(251,191,36,0.25) inset;}
 .il2-minirow{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
 .il2-fxpick{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;border:0.5px solid var(--il-line);border-radius:9px;background:rgba(255,255,255,0.012);cursor:pointer;font-family:inherit;text-align:left;margin-top:8px;}
@@ -2978,7 +3034,7 @@ const IL_CSS = `
 .il2-fxli .nm{font-size:12px;}
 .il2-fxli .ds{margin-left:auto;font-size:10px;color:var(--il-dim);}
 .il2-seg{display:flex;border:0.5px solid var(--il-line);border-radius:9px;overflow:hidden;margin-top:8px;}
-.il2-seg button{flex:1;background:rgba(255,255,255,0.012);border:none;border-right:0.5px solid var(--il-line);color:var(--il-dim);padding:8px 0;font-size:12px;letter-spacing:0.04em;font-family:inherit;cursor:pointer;}
+.il2-seg button{flex:1;background:rgba(255,255,255,0.012);border:none;border-right:0.5px solid var(--il-line);color:var(--il-dim);padding:8px 0;font-size:11px;letter-spacing:0.02em;font-family:inherit;cursor:pointer;}
 .il2-seg button:last-child{border-right:none;}
 .il2-seg button.on{background:rgba(251,191,36,0.14);color:var(--il-amber);}
 .il2-seg.dis{opacity:0.35;pointer-events:none;}
@@ -2995,21 +3051,21 @@ const IL_CSS = `
 .il2-segbtn.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,0.10);}
 .il2-act{display:flex;justify-content:flex-end;margin-top:8px;}
 .il-fxall{background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;color:var(--il-txt);cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:42px;}
-.il-fxall.on{border-color:var(--il-green);box-shadow:0 0 0 1px rgba(168,232,120,0.35) inset;}
+.il-fxall.on{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,0.30) inset;}
 /* MIDIラーン待ち受けの点滅（MASTER等・他のラーンと同じ作法） */
 .il-blink{animation:il-learn-blink 0.7s infinite;}
 /* ヘッダの生存ランプ（MIDI入力・出力） */
 .il-lamp{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--il-dim);margin-right:8px;font-family:'JetBrains Mono',monospace;letter-spacing:0.04em;user-select:none;}
 .il-lamp i{width:8px;height:8px;border-radius:50%;background:var(--il-line);border:0.5px solid rgba(255,255,255,0.15);}
-.il-lamp i.on{background:var(--il-green);border-color:var(--il-green);box-shadow:0 0 5px rgba(168,232,120,0.7);}
+.il-lamp i.on{background:var(--il-green);border-color:var(--il-green);}
 /* PLAY上部の本番ボタン（当たり判定は大きめ・色は据え置き） */
 .il-livebtns{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;}
 .il-livebtn{background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-txt);border-radius:6px;padding:13px 4px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:0.06em;min-height:46px;}
 .il-livebtn:hover{border-color:var(--il-dim);}
 .il-livebtn.blackout:hover{border-color:var(--il-amber);color:var(--il-amber);}
 .il-livebtn.panic:hover{border-color:var(--il-red);color:var(--il-red);}
-.il-livebtn.full:hover{border-color:var(--il-green);color:var(--il-green);}
-.il-livebtn.undo:hover{border-color:var(--il-cyan);color:var(--il-cyan);}
+.il-livebtn.full:hover{border-color:var(--il-dim);color:var(--il-dim);}
+.il-livebtn.undo:hover{border-color:var(--il-dim);color:var(--il-dim);}
 /* ソロ/ミュート中の注意＋押すと全解除 */
 .il-msnotice{width:100%;background:rgba(96,165,250,0.08);border:0.5px solid var(--il-cyan);color:var(--il-cyan);border-radius:6px;padding:8px 10px;cursor:pointer;font-size:11.5px;font-family:inherit;text-align:center;letter-spacing:0.02em;}
 .il-msnotice:hover{background:var(--il-cyan);color:#111;}
@@ -3030,7 +3086,7 @@ const IL_CSS = `
 .il2hud-master{display:flex;align-items:center;gap:8px;}
 .il2hud-mlbl{font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:0.12em;color:var(--il-dim);flex-shrink:0;}
 .il2hud-master input[type=range]{flex:1;}
-.il2hud-mval{font-family:'JetBrains Mono',monospace;font-size:19px;color:var(--il-amber);min-width:46px;text-align:right;line-height:1;}
+.il2hud-mval{font-family:'JetBrains Mono',monospace;font-size:19px;color:var(--il-amber);min-width:46px;text-align:right;line-height:1;font-feature-settings:'tnum';}
 .il2hud-mval i{font-style:normal;font-size:11px;color:var(--il-faint);}
 .il2hud-tabs{display:flex;}
 .il2hud-tab{flex:1;background:none;border:none;border-bottom:2px solid transparent;color:var(--il-faint);font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:0.1em;padding:8px 0 6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;}

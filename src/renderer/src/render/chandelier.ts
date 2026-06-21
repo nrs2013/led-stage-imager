@@ -11,12 +11,12 @@ import { bulbHueIntensity, type RGB } from './bulb'
  */
 
 export const CHANDELIER_DEFAULT_DIAMETER = 1000 // 全体幅 1m
-const ARMS_LOWER = 10
-const ARMS_UPPER = 6
-const CROWN = 13 // クラウンのクリスタル束
-const CASCADE = 10 // 柱まわりに垂れる滝の束
-const BASKET = 13 // 底のバスケットの束
-const ARM_DROPS = 7 // 1腕あたりの雫の本数
+const ARMS_LOWER = 12
+const ARMS_UPPER = 7
+const CROWN = 15 // クラウンのクリスタル束
+const CASCADE = 12 // 柱まわりに垂れる滝の束
+const BASKET = 15 // 底のバスケットの束
+const ARM_DROPS = 8 // 1腕あたりの雫の本数
 
 export const chandelierDiameter = (s: Pick<Shape, 'diameter'>): number =>
   s.diameter ?? CHANDELIER_DEFAULT_DIAMETER
@@ -122,6 +122,39 @@ function sparkle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number,
 
 const qpt = (a: number, c: number, b: number, t: number): number =>
   (1 - t) * (1 - t) * a + 2 * (1 - t) * t * c + t * t * b
+
+/** ガラスのクリスタル1粒を一度だけ offscreen に焼く。毎フレームは drawImage で安く撒けて、
+ *  単なる円塗りより「中心が冴え→ICE→透明＋上左のスペキュラ光沢」のガラス質感が出る。 */
+let crystalSprite: HTMLCanvasElement | null = null
+function crystal(): HTMLCanvasElement {
+  if (crystalSprite) return crystalSprite
+  const s = 48
+  const cv = document.createElement('canvas')
+  cv.width = s
+  cv.height = s
+  const c = cv.getContext('2d')!
+  const m = s / 2
+  const body = c.createRadialGradient(m, m, 0, m, m, m)
+  body.addColorStop(0, 'rgba(255,255,255,1)')
+  body.addColorStop(0.22, 'rgba(236,245,255,0.92)')
+  body.addColorStop(0.55, 'rgba(208,226,255,0.36)')
+  body.addColorStop(1, 'rgba(198,218,255,0)')
+  c.fillStyle = body
+  c.beginPath()
+  c.arc(m, m, m, 0, Math.PI * 2)
+  c.fill()
+  const hx = m - m * 0.3
+  const hy = m - m * 0.3
+  const hi = c.createRadialGradient(hx, hy, 0, hx, hy, m * 0.42)
+  hi.addColorStop(0, 'rgba(255,255,255,0.95)')
+  hi.addColorStop(1, 'rgba(255,255,255,0)')
+  c.fillStyle = hi
+  c.beginPath()
+  c.arc(hx, hy, m * 0.42, 0, Math.PI * 2)
+  c.fill()
+  crystalSprite = cv
+  return cv
+}
 
 /* ----------------------------- editor schematic ----------------------------- */
 
@@ -321,23 +354,31 @@ function strandLit(
   pendant = true
 ): void {
   const len = Math.hypot(x1 - x0, y1 - y0) + Math.hypot(cx0 - x0, cy0 - y0)
-  const n = Math.max(3, Math.round(len / (r * 2.4)))
-  ctx.fillStyle = rgba(ICE, 0.46 * I)
+  const n = Math.max(3, Math.round(len / (r * 2.2)))
+  const sp = crystal()
+  const sz = r * 3.0
+  const prevA = ctx.globalAlpha
+  ctx.globalAlpha = 0.5 * I
   for (let i = 0; i <= n; i++) {
     const t = i / n
-    ctx.beginPath()
-    ctx.arc(qpt(x0, cx0, x1, t), qpt(y0, cy0, y1, t), r, 0, Math.PI * 2)
-    ctx.fill()
+    const bx = qpt(x0, cx0, x1, t)
+    const by = qpt(y0, cy0, y1, t)
+    ctx.drawImage(sp, bx - sz / 2, by - sz / 2, sz, sz)
   }
+  ctx.globalAlpha = prevA
   if (pendant) {
-    ctx.fillStyle = rgba(mix(ICE, W, 0.3), 0.55 * I)
+    // 涙型クリスタル：本体＋ガラスのスペキュラ＋きらめき
+    ctx.fillStyle = rgba(mix(ICE, W, 0.35), 0.5 * I)
     ctx.beginPath()
-    ctx.moveTo(x1, y1 - r * 1.6)
-    ctx.quadraticCurveTo(x1 - r * 1.7, y1 + r, x1, y1 + r * 2.6)
-    ctx.quadraticCurveTo(x1 + r * 1.7, y1 + r, x1, y1 - r * 1.6)
+    ctx.moveTo(x1, y1 - r * 1.7)
+    ctx.quadraticCurveTo(x1 - r * 1.8, y1 + r, x1, y1 + r * 2.8)
+    ctx.quadraticCurveTo(x1 + r * 1.8, y1 + r, x1, y1 - r * 1.7)
     ctx.closePath()
     ctx.fill()
-    sparkle(ctx, x1, y1 + r * 0.6, r * 2, 0.4 * I)
+    ctx.globalAlpha = 0.6 * I
+    ctx.drawImage(sp, x1 - r * 1.4, y1 - r * 0.5, r * 2.8, r * 2.8)
+    ctx.globalAlpha = prevA
+    sparkle(ctx, x1, y1 + r * 0.7, r * 2.2, 0.45 * I)
   }
 }
 
@@ -414,6 +455,13 @@ export function drawChandelierLit(
   ctx.quadraticCurveTo(cx + f.colW * 0.3, cy, cx + f.colW / 2, f.colTopY)
   ctx.closePath()
   ctx.fill()
+  // 柱のガラス光沢（左寄りの縦の明るい筋）
+  ctx.strokeStyle = rgba(mix(hue, W, 0.85), 0.22 * I)
+  ctx.lineWidth = Math.max(0.5, f.colW * 0.12)
+  ctx.beginPath()
+  ctx.moveTo(cx - f.colW * 0.14, f.colTopY + d * 0.01)
+  ctx.quadraticCurveTo(cx - f.colW * 0.18, cy, cx - f.colW * 0.2, f.colBotY - d * 0.01)
+  ctx.stroke()
   // column cascade of crystals
   for (let k = 0; k < CASCADE; k++) {
     const t = (k / (CASCADE - 1)) * 2 - 1
@@ -432,6 +480,13 @@ export function drawChandelierLit(
       ctx.stroke()
       ctx.strokeStyle = rgba(mix(goldCol, W, 0.5), 0.28 * I)
       ctx.lineWidth = Math.max(0.5, d * 0.0035)
+      ctx.beginPath()
+      ctx.moveTo(cx, tier.hubY)
+      ctx.quadraticCurveTo((cx + b.x) / 2, b.y + d * 0.07, b.x, b.y)
+      ctx.stroke()
+      // メタリックなハイライト芯（細く明るい金＝光沢）
+      ctx.strokeStyle = rgba(mix(goldCol, W, 0.82), 0.42 * I)
+      ctx.lineWidth = Math.max(0.5, d * 0.0016)
       ctx.beginPath()
       ctx.moveTo(cx, tier.hubY)
       ctx.quadraticCurveTo((cx + b.x) / 2, b.y + d * 0.07, b.x, b.y)
