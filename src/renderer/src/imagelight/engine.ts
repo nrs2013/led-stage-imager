@@ -422,6 +422,8 @@ export class ImageLightEngine {
   lightOnly = false
   /** 立体感(深度ライティング)の強さ 0..1。0=今と完全一致(無効果)。 */
   depthStrength = 0
+  /** 彫りの太さ 0..1（小=細部/大=面で太く）。depthShade のDoG基準半径に対応。 */
+  depthWidth = 0.4
   /** 深度確認ビュー: ON で編集画面に「AIが読んだ奥行きマップ」を表示（出力は通常のまま）。 */
   showDepth = false
   /** 深度生成を1枚ずつ直列化（torch多重起動でのOOM回避）。 */
@@ -1066,7 +1068,7 @@ export class ImageLightEngine {
         const dshade = this.activeScene >= 0 ? this.scenes[this.activeScene]?.depthShade : null
         if (dshade && this.depthStrength > 0) {
           wc.setTransform(Q, 0, 0, Q, 0, 0)
-          wc.globalCompositeOperation = 'overlay'
+          wc.globalCompositeOperation = 'soft-light'
           wc.globalAlpha = this.depthStrength
           wc.drawImage(dshade, b.x, b.y, b.w, b.h)
           wc.globalAlpha = 1
@@ -1092,7 +1094,7 @@ export class ImageLightEngine {
       if (dshadeL && this.depthStrength > 0 && this.box) {
         const lb = this.box
         fc.setTransform(Q, 0, 0, Q, 0, 0)
-        fc.globalCompositeOperation = 'overlay'
+        fc.globalCompositeOperation = 'soft-light'
         fc.globalAlpha = this.depthStrength
         fc.drawImage(dshadeL, lb.x, lb.y, lb.w, lb.h)
         fc.globalAlpha = 1
@@ -1270,7 +1272,7 @@ export class ImageLightEngine {
       // 立体感: 光だけ出力にも彫り(影)を乗せる（mat空間→出力）。Arena側 映像×光 で映像に影が出る。
       const dshadeLO = this.activeScene >= 0 ? this.scenes[this.activeScene]?.depthShade : null
       if (dshadeLO && this.depthStrength > 0) {
-        oc.globalCompositeOperation = 'overlay'
+        oc.globalCompositeOperation = 'soft-light'
         oc.globalAlpha = this.depthStrength
         oc.drawImage(dshadeLO, 0, 0, ow, oh)
         oc.globalAlpha = 1
@@ -1318,7 +1320,7 @@ export class ImageLightEngine {
     // 立体感: 深度レリーフ(彫り)を写真と同寸(mat空間→出力)で overlay で1回重ねる。出力(Syphon/Arena)にも反映。
     const dshadeOut = this.activeScene >= 0 ? this.scenes[this.activeScene]?.depthShade : null
     if (dshadeOut && this.depthStrength > 0) {
-      oc.globalCompositeOperation = 'overlay'
+      oc.globalCompositeOperation = 'soft-light'
       oc.globalAlpha = this.depthStrength
       oc.drawImage(dshadeOut, 0, 0, ow, oh)
       oc.globalAlpha = 1
@@ -2008,6 +2010,21 @@ export class ImageLightEngine {
     this.bump()
   }
 
+  /** 彫りの太さを設定（0=細部/1=面で太く）。表示中シーンの彫りを焼き直して即反映。 */
+  setDepthWidth(v: number): void {
+    this.depthWidth = Math.max(0, Math.min(1, v))
+    const s = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (s?.depth) s.depthShade = this.buildShadeFor(s.depth)
+    this.bump()
+  }
+
+  /** 現在の設定(強さの天井gain・彫り幅)で 深度canvas → 立体感ゲイン(彫り) を焼く。 */
+  private buildShadeFor(dc: HTMLCanvasElement): HTMLCanvasElement {
+    const baseFrac = 0.04 + this.depthWidth * 0.16 // 4%..20%（大きいほど面で太く）
+    const baseRadius = Math.max(8, Math.round(Math.min(dc.width, dc.height) * baseFrac))
+    return buildDepthShadeCanvas(dc, { gain: 8, baseRadius })
+  }
+
   /** 深度確認ビューの ON/OFF（編集画面にAIが読んだ奥行きを表示）。 */
   setShowDepth(v: boolean): void {
     this.showDepth = v
@@ -2055,7 +2072,7 @@ export class ImageLightEngine {
         dc.getContext('2d')!.drawImage(dimg, 0, 0, dc.width, dc.height)
         scene.depth = dc
         scene.depthSrc = res.depthDataUrl
-        scene.depthShade = buildDepthShadeCanvas(dc, { gain: 7 })
+        scene.depthShade = this.buildShadeFor(dc)
         scene.depthStatus = 'ready'
         console.log('[depth] 計算完了', scene.name)
         if (this.activeScene >= 0 && this.scenes[this.activeScene] === scene) this.bump()

@@ -1584,6 +1584,19 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   />
                   <span className="il2-pv">{Math.round(engine.depthStrength * 100)}</span>
                 </div>
+                <div className="il2-segrow">
+                  <span className="il2-seglbl">彫り幅</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round(engine.depthWidth * 100)}
+                    onChange={(e) => engine.setDepthWidth(+e.target.value / 100)}
+                    title="彫りの太さ。小さい=細部(窓枠/フチ)中心、大きい=柱など面で太く出る。動かすと即反映。"
+                    style={{ flex: 1 }}
+                  />
+                  <span className="il2-pv">{Math.round(engine.depthWidth * 100)}</span>
+                </div>
                 <button
                   className={'il2-switch' + (engine.showDepth ? ' on' : '')}
                   onClick={() => engine.setShowDepth(!engine.showDepth)}

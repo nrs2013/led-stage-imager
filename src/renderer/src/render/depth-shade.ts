@@ -17,6 +17,8 @@ export interface DepthShadeOpts {
   baseRadius?: number
   /** 出っ張り/凹みを反転（素材で奥行きが逆の時）。 */
   invert?: boolean
+  /** 明側(出っ張り)の効きの倍率 0..1。小さいほど白飛びしにくい（暗側=影はそのまま）。既定 0.55。 */
+  highlightScale?: number
 }
 
 /** A(細部側) と B(基準側) の差から「立体感レリーフ」を作る純関数＝テスト対象。
@@ -26,12 +28,15 @@ export function reliefHighpassData(
   b: Uint8ClampedArray,
   out: Uint8ClampedArray,
   gain = 5,
-  invert = false
+  invert = false,
+  highlightScale = 0.55
 ): void {
   for (let i = 0; i < a.length; i += 4) {
     let hp = (a[i] - b[i]) / 255 // 中間スケールの凹凸（出っ張り>0 / 凹み<0 / 平ら・全体グラデ=0）
     if (invert) hp = -hp
-    const v = Math.max(0, Math.min(255, Math.round(128 + gain * hp * 255)))
+    let val = gain * hp
+    if (val > 0) val *= highlightScale // 明側(出っ張り)は控えめ＝白飛び防止。暗側(凹み/影)はそのまま。
+    const v = Math.max(0, Math.min(255, Math.round(128 + val * 255)))
     out[i] = v
     out[i + 1] = v
     out[i + 2] = v
@@ -67,7 +72,7 @@ export function buildDepthShadeCanvas(
   const base = blurredData(depth, rBase) // 全体グラデ(下が近い)を表す基準
   const out = new ImageData(w, h)
   // relief = 細部 − 基準：中間スケールの凹凸だけ残る（全体グラデも細かいノイズも消える）。
-  reliefHighpassData(fine, base, out.data, gain, !!opts.invert)
+  reliefHighpassData(fine, base, out.data, gain, !!opts.invert, opts.highlightScale ?? 0.55)
   const c = document.createElement('canvas')
   c.width = w
   c.height = h
