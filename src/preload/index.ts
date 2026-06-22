@@ -4,6 +4,9 @@ import { electronAPI } from '@electron-toolkit/preload'
 // Custom APIs for renderer
 const api = {
   openImage: (): Promise<string | null> => ipcRenderer.invoke('dialog:openImage'),
+  // 画像照明モード: 背景写真(dataURL) → 単眼深度マップ(8bitグレー・near=明)。立体ライティング用。
+  generateDepth: (dataUrl: string): Promise<{ depthDataUrl?: string; error?: string }> =>
+    ipcRenderer.invoke('depth:generate', dataUrl),
   onDmx: (cb: (pkt: { universe: number; sequence: number; data: Uint8Array }) => void): void => {
     ipcRenderer.on('artnet:dmx', (_e, pkt) => cb(pkt))
   },

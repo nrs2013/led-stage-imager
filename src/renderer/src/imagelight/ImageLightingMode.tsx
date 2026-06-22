@@ -856,6 +856,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const masterPct = Math.round(engine.st.master * 100)
   const outCapLabel = engine.outCap >= 3840 ? '高精細' : engine.outCap >= 2560 ? 'バランス' : 'なめらか'
   const falloffLabel = engine.falloffPow >= 4 ? 'きつめ' : engine.falloffPow >= 2.5 ? '標準' : 'ソフト'
+  const depthStat = engine.activeDepthStatus()
+  const depthStatLabel =
+    depthStat === 'ready'
+      ? '計算済み'
+      : depthStat === 'pending'
+        ? '計算中…'
+        : depthStat === 'failed'
+          ? '生成できず'
+          : 'なし'
   const ms = engine.muteSoloCount() // ソロ/ミュート中の台数（注意表示・全解除ボタン用）
   const curCue = engine.activePattern >= 0 ? engine.patterns[engine.activePattern] : null // 今アクティブな明かり
 
@@ -1555,6 +1564,43 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <span className="il2-sw-nm">LIGHT ONLY<i>光だけ</i></span>
                   <span className="il2-sw-st">{engine.lightOnly ? 'ON' : 'OFF'}</span>
                 </button>
+              </div>
+
+              <div className="il2-sec">
+                <div className="il2-eb">
+                  <span className="il2-kind">立体</span>
+                  <b>DEPTH</b>
+                </div>
+                <div className="il2-segrow">
+                  <span className="il2-seglbl">立体感</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round(engine.depthStrength * 100)}
+                    onChange={(e) => engine.setDepthStrength(+e.target.value / 100)}
+                    title="背景写真の奥行きで光の乗り方を変える（0=今まで通り／上げるほど手前が明るく奥が落ちて立体的に見える）。写真を読み込むと自動で奥行きを計算します。"
+                    style={{ flex: 1 }}
+                  />
+                  <span className="il2-pv">{Math.round(engine.depthStrength * 100)}</span>
+                </div>
+                <button
+                  className={'il2-switch' + (engine.showDepth ? ' on' : '')}
+                  onClick={() => engine.setShowDepth(!engine.showDepth)}
+                  title="ON=立体感に実際に使う“彫り(凹凸)”を強調表示。中立=灰/出っ張り=明/凹み=暗。柱や窓が浮けば効いてる証拠。AIの生グラデ(下が明るい)は使ってないのでここにも出ない。出力(Syphon)は通常のまま。"
+                >
+                  <span className="il2-sw-track">
+                    <span className="il2-sw-knob" />
+                  </span>
+                  <span className="il2-sw-nm">
+                    彫りを見る<i>確認</i>
+                  </span>
+                  <span className="il2-sw-st">{engine.showDepth ? 'ON' : 'OFF'}</span>
+                </button>
+                <div className="il2-segrow">
+                  <span className="il2-seglbl">状態</span>
+                  <span className="il2-pv">{depthStatLabel}</span>
+                </div>
               </div>
 
               <div className="il2-sec">
