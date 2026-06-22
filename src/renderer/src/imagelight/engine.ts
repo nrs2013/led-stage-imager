@@ -1430,6 +1430,94 @@ export class ImageLightEngine {
     }
     return { mute, solo }
   }
+  // --- 整列（選んだ灯体をパワーポイント風にそろえる）。位置を動かすので必ず rigCustomized=true（写真下端への自動吸着＝データ事故を防ぐ）。1クリック＝1回のundo（pushHistory）。 ---
+  private _selValid(): number[] {
+    return this.selected.filter((i) => i >= 0 && i < this.beams.length && !!this.beams[i])
+  }
+  alignLeft(): void {
+    const s = this._selValid()
+    if (s.length < 2) return
+    this.pushHistory()
+    this.rigCustomized = true
+    const v = Math.min(...s.map((i) => this.beams[i].x))
+    for (const i of s) this.beams[i].x = v
+    this.bump()
+  }
+  alignRight(): void {
+    const s = this._selValid()
+    if (s.length < 2) return
+    this.pushHistory()
+    this.rigCustomized = true
+    const v = Math.max(...s.map((i) => this.beams[i].x))
+    for (const i of s) this.beams[i].x = v
+    this.bump()
+  }
+  alignCenterX(): void {
+    const s = this._selValid()
+    if (s.length < 2) return
+    this.pushHistory()
+    this.rigCustomized = true
+    const xs = s.map((i) => this.beams[i].x)
+    const c = (Math.min(...xs) + Math.max(...xs)) / 2
+    for (const i of s) this.beams[i].x = c
+    this.bump()
+  }
+  alignTop(): void {
+    const s = this._selValid()
+    if (s.length < 2) return
+    this.pushHistory()
+    this.rigCustomized = true
+    const v = Math.min(...s.map((i) => this.beams[i].y))
+    for (const i of s) this.beams[i].y = v
+    this.bump()
+  }
+  alignBottom(): void {
+    const s = this._selValid()
+    if (s.length < 2) return
+    this.pushHistory()
+    this.rigCustomized = true
+    const v = Math.max(...s.map((i) => this.beams[i].y))
+    for (const i of s) this.beams[i].y = v
+    this.bump()
+  }
+  alignMiddle(): void {
+    const s = this._selValid()
+    if (s.length < 2) return
+    this.pushHistory()
+    this.rigCustomized = true
+    const ys = s.map((i) => this.beams[i].y)
+    const c = (Math.min(...ys) + Math.max(...ys)) / 2
+    for (const i of s) this.beams[i].y = c
+    this.bump()
+  }
+  distributeX(): void {
+    const s = this._selValid()
+    if (s.length < 3) return
+    this.pushHistory()
+    this.rigCustomized = true
+    const sorted = [...s].sort((a, b) => this.beams[a].x - this.beams[b].x)
+    const x0 = this.beams[sorted[0]].x
+    const x1 = this.beams[sorted[sorted.length - 1]].x
+    const step = (x1 - x0) / (sorted.length - 1)
+    sorted.forEach((i, k) => {
+      this.beams[i].x = x0 + step * k
+    })
+    this.bump()
+  }
+  distributeY(): void {
+    const s = this._selValid()
+    if (s.length < 3) return
+    this.pushHistory()
+    this.rigCustomized = true
+    const sorted = [...s].sort((a, b) => this.beams[a].y - this.beams[b].y)
+    const y0 = this.beams[sorted[0]].y
+    const y1 = this.beams[sorted[sorted.length - 1]].y
+    const step = (y1 - y0) / (sorted.length - 1)
+    sorted.forEach((i, k) => {
+      this.beams[i].y = y0 + step * k
+    })
+    this.bump()
+  }
   addFixtureAt(x: number, y: number): void {
     if (this.beams.length >= MAX_BEAMS) return
     this.pushHistory()

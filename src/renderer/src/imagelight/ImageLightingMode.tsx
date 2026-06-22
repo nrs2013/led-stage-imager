@@ -1534,7 +1534,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <div className="il2-sec">
                 <div className="il2-eb">
                   <span className="il2-kind">量</span>
-                  <b>SMOKE</b>
+                  <b>スモーク</b>
                 </div>
                 <div className="il2-fader">
                   <span className="il2-nm">LEVEL</span>
@@ -1982,7 +1982,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <b>SELECTED</b>
                   </div>
                   <RigRow
-                    label="THROAT"
+                    label="出口幅"
                     min={8}
                     max={180}
                     value={ref?.w0 ?? 40}
@@ -1991,7 +1991,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     learnId="rig.w0"
                   />
                   <RigRow
-                    label="SPREAD"
+                    label="広がり"
                     min={20}
                     max={700}
                     value={ref?.w1 ?? 260}
@@ -2000,7 +2000,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     learnId="rig.w1"
                   />
                   <RigRow
-                    label="LENGTH"
+                    label="伸び"
                     min={80}
                     max={1000}
                     value={ref?.len ?? 600}
@@ -2087,6 +2087,17 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <span className="nm">＋</span>
                   </button>
                 )}
+              </div>
+              <div className="il-lbl" style={{ marginTop: 8 }}>整列（選んだ灯体をそろえる）</div>
+              <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                <button className="il-mini" title="左ぞろえ（選んだ灯体の左端にそろえる）" onClick={() => engine.alignLeft()}>左</button>
+                <button className="il-mini" title="左右の中央でそろえる" onClick={() => engine.alignCenterX()}>左右中央</button>
+                <button className="il-mini" title="右ぞろえ" onClick={() => engine.alignRight()}>右</button>
+                <button className="il-mini" title="上ぞろえ" onClick={() => engine.alignTop()}>上</button>
+                <button className="il-mini" title="上下の中央でそろえる" onClick={() => engine.alignMiddle()}>上下中央</button>
+                <button className="il-mini" title="下ぞろえ" onClick={() => engine.alignBottom()}>下</button>
+                <button className="il-mini" title="横に等間隔でならべる（3つ以上選ぶ）" onClick={() => engine.distributeX()}>横に等間隔</button>
+                <button className="il-mini" title="縦に等間隔でならべる（3つ以上選ぶ）" onClick={() => engine.distributeY()}>縦に等間隔</button>
               </div>
               <div className="il-lbl" style={{ marginTop: 6 }}>Add</div>
             <div className="il-frow" style={{ gap: 4, flexWrap: 'wrap' }}>
