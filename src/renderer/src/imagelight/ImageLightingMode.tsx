@@ -1597,6 +1597,19 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   />
                   <span className="il2-pv">{Math.round(engine.depthWidth * 100)}</span>
                 </div>
+                <div className="il2-segrow">
+                  <span className="il2-seglbl">影</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round(engine.depthShadow * 100)}
+                    onChange={(e) => engine.setDepthShadow(+e.target.value / 100)}
+                    title="出っ張りの上に落ちる影。0=自然(影なし)。上げると下から光のリアルな落ち影。上げ過ぎると作り物っぽくなるので控えめが◎。"
+                    style={{ flex: 1 }}
+                  />
+                  <span className="il2-pv">{Math.round(engine.depthShadow * 100)}</span>
+                </div>
                 <button
                   className={'il2-switch' + (engine.showDepth ? ' on' : '')}
                   onClick={() => engine.setShowDepth(!engine.showDepth)}

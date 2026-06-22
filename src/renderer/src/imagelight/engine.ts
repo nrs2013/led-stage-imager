@@ -424,6 +424,8 @@ export class ImageLightEngine {
   depthStrength = 0
   /** 彫りの太さ 0..1（小=細部/大=面で太く）。depthShade のDoG基準半径に対応。 */
   depthWidth = 0.4
+  /** 出っ張りの上の影の強さ 0..1（0=自然/上げると落ち影・上げ過ぎると作り物っぽい）。 */
+  depthShadow = 0
   /** 深度確認ビュー: ON で編集画面に「AIが読んだ奥行きマップ」を表示（出力は通常のまま）。 */
   showDepth = false
   /** 深度生成を1枚ずつ直列化（torch多重起動でのOOM回避）。 */
@@ -2018,11 +2020,19 @@ export class ImageLightEngine {
     this.bump()
   }
 
-  /** 現在の設定(強さの天井gain・彫り幅)で 深度canvas → 立体感ゲイン(彫り) を焼く。 */
+  /** 出っ張りの上の影の強さを設定（0=自然/上げると落ち影）。表示中シーンを焼き直して即反映。 */
+  setDepthShadow(v: number): void {
+    this.depthShadow = Math.max(0, Math.min(1, v))
+    const s = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (s?.depth) s.depthShade = this.buildShadeFor(s.depth)
+    this.bump()
+  }
+
+  /** 現在の設定(強さの天井gain・彫り幅・影)で 深度canvas → 立体感ゲイン(彫り) を焼く。 */
   private buildShadeFor(dc: HTMLCanvasElement): HTMLCanvasElement {
     const baseFrac = 0.04 + this.depthWidth * 0.16 // 4%..20%（大きいほど面で太く）
     const baseRadius = Math.max(8, Math.round(Math.min(dc.width, dc.height) * baseFrac))
-    return buildDepthShadeCanvas(dc, { gain: 8, baseRadius })
+    return buildDepthShadeCanvas(dc, { gain: 8, baseRadius, shadowGain: this.depthShadow * 6 })
   }
 
   /** 深度確認ビューの ON/OFF（編集画面にAIが読んだ奥行きを表示）。 */
