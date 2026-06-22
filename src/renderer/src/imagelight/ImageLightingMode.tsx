@@ -381,6 +381,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         )
       })
     })
+    // 選択灯体の PAN/TILT/ZOOM・寸法も物理つまみ(MIDI CC)で動かせるよう登録
+    map.set('pose.pan', (v01) => engine.setPan(Math.round(-90 + 180 * v01)))
+    map.set('pose.tilt', (v01) => engine.setTilt(Math.round(-180 + 360 * v01)))
+    map.set('pose.zoom', (v01) => engine.setZoom((15 + (400 - 15) * v01) / 100))
+    map.set('rig.w0', (v01) => engine.setRig('w0', Math.round(8 + (180 - 8) * v01)))
+    map.set('rig.w1', (v01) => engine.setRig('w1', Math.round(20 + (700 - 20) * v01)))
+    map.set('rig.len', (v01) => engine.setRig('len', Math.round(80 + (1000 - 80) * v01)))
     engine.setParamApply(map)
   }, [engine])
 
@@ -987,7 +994,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           onClick={() => setShowKeys(true)}
           title="操作キーの一覧を開く（? キーでも開きます）"
         >
-          Keys
+          SHORTCUT
         </button>
         <button className="il-mini" onClick={saveShow} title="公演まるごとフォルダに保存（写真/動画も一緒）">
           保存
@@ -1980,6 +1987,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     max={180}
                     value={ref?.w0 ?? 40}
                     onChange={(v) => engine.setRig('w0', v)}
+                    engine={engine}
+                    learnId="rig.w0"
                   />
                   <RigRow
                     label="SPREAD"
@@ -1987,6 +1996,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     max={700}
                     value={ref?.w1 ?? 260}
                     onChange={(v) => engine.setRig('w1', v)}
+                    engine={engine}
+                    learnId="rig.w1"
                   />
                   <RigRow
                     label="LENGTH"
@@ -1994,6 +2005,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     max={1000}
                     value={ref?.len ?? 600}
                     onChange={(v) => engine.setRig('len', v)}
+                    engine={engine}
+                    learnId="rig.len"
                   />
                   <div className="il2-act">
                     <button
@@ -2259,6 +2272,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               value={ref?.pan ?? 0}
               fmt={(v) => v + '°'}
               onChange={(v) => engine.setPan(v)}
+              engine={engine}
+              learnId="pose.pan"
             />
             <PoseRow
               label="TILT"
@@ -2267,6 +2282,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               value={ref?.tilt ?? 0}
               fmt={(v) => v + '°'}
               onChange={(v) => engine.setTilt(v)}
+              engine={engine}
+              learnId="pose.tilt"
             />
             <PoseRow
               label="ZOOM"
@@ -2275,6 +2292,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               value={Math.round((ref?.zoom ?? 1) * 100)}
               fmt={(v) => '×' + (v / 100).toFixed(2)}
               onChange={(v) => engine.setZoom(v / 100)}
+              engine={engine}
+              learnId="pose.zoom"
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button className="il-mini" onClick={() => engine.home()}>
@@ -2593,7 +2612,9 @@ function PoseRow({
   max,
   value,
   fmt,
-  onChange
+  onChange,
+  engine,
+  learnId
 }: {
   label: string
   min: number
@@ -2601,7 +2622,11 @@ function PoseRow({
   value: number
   fmt: (v: number) => string
   onChange: (v: number) => void
+  engine?: ImageLightEngine
+  learnId?: string
 }): React.JSX.Element {
+  const learning = !!engine && !!learnId && engine.learnParam === learnId
+  const cc = engine && learnId ? engine.paramMidi[learnId] : undefined
   return (
     <div className="il-frow">
       <span className="il-lbl" style={{ width: 34 }}>
@@ -2615,6 +2640,19 @@ function PoseRow({
         onChange={(e) => onChange(+e.target.value)}
       />
       <div className="il-val small">{fmt(value)}</div>
+      {engine && learnId && (
+        <button
+          className={'il-cc' + (learning ? ' learnon' : cc != null ? ' set' : '')}
+          title="MIDIつまみに割り当て（押してから物理つまみを回す／右クリックで解除）"
+          onClick={() => engine.setLearnParam(learning ? null : learnId)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            engine.clearParamMidi(learnId)
+          }}
+        >
+          {learning ? '…' : cc != null ? 'CC' + cc : '◎'}
+        </button>
+      )}
     </div>
   )
 }
@@ -2624,14 +2662,20 @@ function RigRow({
   min,
   max,
   value,
-  onChange
+  onChange,
+  engine,
+  learnId
 }: {
   label: string
   min: number
   max: number
   value: number
   onChange: (v: number) => void
+  engine?: ImageLightEngine
+  learnId?: string
 }): React.JSX.Element {
+  const learning = !!engine && !!learnId && engine.learnParam === learnId
+  const cc = engine && learnId ? engine.paramMidi[learnId] : undefined
   return (
     <div className="il-frow" style={{ marginTop: 4 }}>
       <span className="il-lbl" style={{ width: 52 }}>
@@ -2645,6 +2689,19 @@ function RigRow({
         onChange={(e) => onChange(+e.target.value)}
       />
       <div className="il-val small">{Math.round(value)}</div>
+      {engine && learnId && (
+        <button
+          className={'il-cc' + (learning ? ' learnon' : cc != null ? ' set' : '')}
+          title="MIDIつまみに割り当て（押してから物理つまみを回す／右クリックで解除）"
+          onClick={() => engine.setLearnParam(learning ? null : learnId)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            engine.clearParamMidi(learnId)
+          }}
+        >
+          {learning ? '…' : cc != null ? 'CC' + cc : '◎'}
+        </button>
+      )}
     </div>
   )
 }

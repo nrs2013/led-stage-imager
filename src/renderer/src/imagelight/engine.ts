@@ -3169,6 +3169,12 @@ export class ImageLightEngine {
   setParamApply(map: Map<string, (v01: number) => void>): void {
     this.paramApply = map
   }
+  /** パラメータの MIDI CC 割当を解除（◎ボタン右クリック）。 */
+  clearParamMidi(id: string): void {
+    delete this.paramMidi[id]
+    if (this.learnParam === id) this.learnParam = null
+    this.bump()
+  }
   /** 特別ストロボのON/OFF（1回目=今の出力を全体点滅／2回目=元のシーンに戻る・非破壊）。 */
   toggleStrobeOverride(): void {
     this.strobeOverride = !this.strobeOverride
