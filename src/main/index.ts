@@ -17,7 +17,7 @@ import {
   resolveNdiLibPath
 } from './output/ndi-direct'
 import { startMidiInput, stopMidiInput, getMidiPorts } from './midi/midi-input'
-import { generateDepthMap } from './depth/depth-engine'
+import { runDepth } from './depth/depth-engine'
 
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
@@ -300,36 +300,10 @@ app.whenReady().then(() => {
     return `data:image/${mime};base64,${readFileSync(file).toString('base64')}`
   })
 
-  // 画像照明モード: 背景写真(dataURL) → 単眼深度マップ(8bitグレー・near=明)。立体ライティング用。
-  // まずは外部 Python(Depth Anything V2 Small) 経由。失敗してもエラーは握りつぶし、機能はそっと無効。
-  ipcMain.handle('depth:generate', async (_e, dataUrl: string) => {
-    try {
-      const m = /^data:image\/[^;]+;base64,(.+)$/.exec(dataUrl)
-      if (!m) return { error: 'bad-dataurl' }
-      const tmp = app.getPath('temp')
-      const stamp = `${Date.now()}_${Math.round(Math.random() * 1e6)}`
-      const inPath = join(tmp, `lsi_depth_in_${stamp}.png`)
-      const outPath = join(tmp, `lsi_depth_out_${stamp}.png`)
-      writeFileSync(inPath, Buffer.from(m[1], 'base64'))
-      const r = await generateDepthMap(inPath, outPath)
-      let depthDataUrl: string | undefined
-      if (r.ok && existsSync(outPath)) {
-        depthDataUrl = `data:image/png;base64,${readFileSync(outPath).toString('base64')}`
-      }
-      try {
-        unlinkSync(inPath)
-      } catch {
-        /* ignore */
-      }
-      try {
-        unlinkSync(outPath)
-      } catch {
-        /* ignore */
-      }
-      return depthDataUrl ? { depthDataUrl } : { error: r.error || 'depth-failed' }
-    } catch (e) {
-      return { error: String(e) }
-    }
+  // 画像照明モード: 前処理済みテンソル(1x3xHxW float32) → 生深度(float32 H*W)。
+  // 完全同梱の onnxruntime-node(Depth Anything V2 Small)で推論。Python/ComfyUI 不要。
+  ipcMain.handle('depth:run', async (_e, input: Float32Array, w: number, h: number) => {
+    return await runDepth(input, w, h)
   })
 
   // Text fields need native clipboard ops (the menu items above are app-level).

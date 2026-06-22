@@ -39,6 +39,7 @@
     "@fontsource/tilt-neon": "^5.2.10",
     "jszip": "^3.10.1",
     "koffi": "^2.16.2",
+    "onnxruntime-node": "1.27.0",
     "zustand": "^5.0.14"
   },
   "optionalDependencies": {

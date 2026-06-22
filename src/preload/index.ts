@@ -4,9 +4,13 @@ import { electronAPI } from '@electron-toolkit/preload'
 // Custom APIs for renderer
 const api = {
   openImage: (): Promise<string | null> => ipcRenderer.invoke('dialog:openImage'),
-  // 画像照明モード: 背景写真(dataURL) → 単眼深度マップ(8bitグレー・near=明)。立体ライティング用。
-  generateDepth: (dataUrl: string): Promise<{ depthDataUrl?: string; error?: string }> =>
-    ipcRenderer.invoke('depth:generate', dataUrl),
+  // 画像照明モード: 前処理済みテンソル(1x3xHxW float32) → 生深度(float32 H*W)。立体ライティング用。
+  runDepth: (
+    input: Float32Array,
+    w: number,
+    h: number
+  ): Promise<{ depth?: Float32Array; w?: number; h?: number; error?: string }> =>
+    ipcRenderer.invoke('depth:run', input, w, h),
   onDmx: (cb: (pkt: { universe: number; sequence: number; data: Uint8Array }) => void): void => {
     ipcRenderer.on('artnet:dmx', (_e, pkt) => cb(pkt))
   },

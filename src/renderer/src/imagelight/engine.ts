@@ -329,15 +329,6 @@ function mk(w: number, h: number, readback = false): HTMLCanvasElement {
   return c
 }
 
-/** dataURL → 読み込み済み Image（深度PNGをcanvas化するため）。 */
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const im = new Image()
-    im.onload = (): void => resolve(im)
-    im.onerror = (): void => reject(new Error('image load failed'))
-    im.src = src
-  })
-}
 
 /** 写真アルベド(mat)の作業解像度上限。Syphon 出力(outCv)はこの mat 解像度で
  *  アリーナへ送る（編集画面のフレームは別途 1920×1080 固定なので編集は軽いまま）。
@@ -2054,13 +2045,19 @@ export class ImageLightEngine {
     if (scene.kind !== 'photo' || scene.depthShade) return
     const api = (
       globalThis as unknown as {
-        api?: { generateDepth?: (u: string) => Promise<{ depthDataUrl?: string; error?: string }> }
+        api?: {
+          runDepth?: (
+            input: Float32Array,
+            w: number,
+            h: number
+          ) => Promise<{ depth?: Float32Array; w?: number; h?: number; error?: string }>
+        }
       }
     ).api
-    const gen = api?.generateDepth
-    if (!gen) {
+    const run = api?.runDepth
+    if (!run) {
       scene.depthStatus = 'failed'
-      console.warn('[depth] エンジン未接続（generateDepth が無い）')
+      console.warn('[depth] エンジン未接続（runDepth が無い）')
       return
     }
     scene.depthStatus = 'pending'
@@ -2069,19 +2066,53 @@ export class ImageLightEngine {
     this.depthChain = this.depthChain.then(async () => {
       if (scene.depthShade) return
       try {
-        const srcUrl = scene.mat.toDataURL('image/png') // mat=作業解像度(ALBEDO_MAX上限)で生成
-        const res = await gen(srcUrl)
-        if (!res?.depthDataUrl) {
+        const S = 518 // モデル入力(14の倍数)。アスペクトは後で mat へ伸ばし直すので固定でOK。
+        // 前処理: mat → 518×518 → ÷255 → ImageNet正規化 → NCHW float32
+        const pre = mk(S, S, true)
+        const pctx = pre.getContext('2d', { willReadFrequently: true })!
+        pctx.drawImage(scene.mat, 0, 0, S, S)
+        const px = pctx.getImageData(0, 0, S, S).data
+        const mean = [0.485, 0.456, 0.406]
+        const std = [0.229, 0.224, 0.225]
+        const plane = S * S
+        const input = new Float32Array(3 * plane)
+        for (let p = 0; p < plane; p++) {
+          const i = p * 4
+          input[p] = (px[i] / 255 - mean[0]) / std[0]
+          input[plane + p] = (px[i + 1] / 255 - mean[1]) / std[1]
+          input[2 * plane + p] = (px[i + 2] / 255 - mean[2]) / std[2]
+        }
+        const res = await run(input, S, S)
+        if (!res?.depth) {
           scene.depthStatus = 'failed'
           console.warn('[depth] 生成失敗', scene.name, res?.error || '')
           if (this.activeScene >= 0 && this.scenes[this.activeScene] === scene) this.bump()
           return
         }
-        const dimg = await loadImage(res.depthDataUrl)
+        // 後処理: 生深度(near=大) → 0..255 グレー(near=明)の518×518 → mat サイズへ拡大
+        const depth = res.depth
+        let mn = Infinity
+        let mx = -Infinity
+        for (let i = 0; i < depth.length; i++) {
+          const v = depth[i]
+          if (v < mn) mn = v
+          if (v > mx) mx = v
+        }
+        const range = mx - mn || 1
+        const dimg = new ImageData(S, S)
+        for (let p = 0; p < plane; p++) {
+          const g = Math.max(0, Math.min(255, Math.round(((depth[p] - mn) / range) * 255)))
+          const i = p * 4
+          dimg.data[i] = g
+          dimg.data[i + 1] = g
+          dimg.data[i + 2] = g
+          dimg.data[i + 3] = 255
+        }
+        const small = mk(S, S)
+        small.getContext('2d')!.putImageData(dimg, 0, 0)
         const dc = mk(scene.mat.width, scene.mat.height)
-        dc.getContext('2d')!.drawImage(dimg, 0, 0, dc.width, dc.height)
+        dc.getContext('2d')!.drawImage(small, 0, 0, dc.width, dc.height)
         scene.depth = dc
-        scene.depthSrc = res.depthDataUrl
         scene.depthShade = this.buildShadeFor(dc)
         scene.depthStatus = 'ready'
         console.log('[depth] 計算完了', scene.name)

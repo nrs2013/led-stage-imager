@@ -1,88 +1,77 @@
-// 深度推定エンジン（暫定・外部 Python 経由）。
-// 画像 → 単眼深度マップ(8bit グレー・near=明/far=暗) を作る。
-// まずは「最短で立体を体感」するため、既に動く ComfyUI venv の Python
-// （Depth Anything V2 Small＝Apache-2.0＝商用OK）を子プロセスで呼ぶ。
-// 後で onnxruntime-node による“完全同梱”版へ差し替える（呼び口 generateDepthMap は据え置く）。
-//
-// 失敗しても throw しない＝深度が作れないだけで、アプリは今まで通り（立体感オフ）動く。
-import { spawn } from 'child_process'
+// 深度推定エンジン（完全同梱・Python/ComfyUI 不要）。
+// onnxruntime-node で Depth Anything V2 Small(Apache-2.0) の ONNX をアプリ内蔵モデルから実行。
+// Mac は CoreML(Neural Engine/GPU)優先・無理なら CPU。前処理/後処理はレンダラ側で行い、
+// ここは「前処理済みテンソル(1x3xHxW float32) → 生深度(float32 H*W)」だけを担う。
+// 失敗しても throw しない＝深度が作れないだけでアプリは通常動作（立体感オフ相当）。
+import { InferenceSession, Tensor } from 'onnxruntime-node'
 import { existsSync } from 'fs'
-import { homedir } from 'os'
 import { join } from 'path'
 
-// Depth Anything V2 Small で深度PNGを書き出すだけの小さなスクリプト（near=明/far=暗の 8bit L）。
-const PY = `
-import sys
-try:
-    from transformers import pipeline
-    from PIL import Image
-    inp, outp = sys.argv[1], sys.argv[2]
-    try:
-        pipe = pipeline('depth-estimation', model='depth-anything/Depth-Anything-V2-Small-hf', device='mps')
-    except Exception:
-        pipe = pipeline('depth-estimation', model='depth-anything/Depth-Anything-V2-Small-hf', device='cpu')
-    img = Image.open(inp).convert('RGB')
-    res = pipe(img)
-    res['depth'].save(outp)
-    print('OK')
-except Exception as e:
-    sys.stderr.write(repr(e))
-    sys.exit(1)
-`
+let session: InferenceSession | null = null
+let loading: Promise<InferenceSession | null> | null = null
 
-/** torch+transformers が入った Python を探す。env DECOR_DEPTH_PYTHON で上書き可。無ければ null。 */
-function resolvePython(): string | null {
+/** 同梱モデルの絶対パス（パッケージ方式の差を候補で吸収・dev は project の resources）。 */
+function modelPath(): string | null {
+  const res = process.resourcesPath || ''
+  const name = 'depth-anything-v2-small.onnx'
   const cands = [
-    process.env.DECOR_DEPTH_PYTHON,
-    join(homedir(), 'Codex', 'local-tools', 'ComfyUI', '.venv', 'bin', 'python')
-  ].filter((p): p is string => !!p)
+    join(res, 'app.asar.unpacked', 'resources', 'models', name),
+    join(res, 'resources', 'models', name),
+    join(res, 'models', name),
+    join(process.cwd(), 'resources', 'models', name)
+  ]
   return cands.find((p) => existsSync(p)) ?? null
 }
 
-/** 深度エンジンが使えるか（対応 Python が見つかるか）。 */
-export function depthEngineAvailable(): boolean {
-  return resolvePython() != null
+async function getSession(): Promise<InferenceSession | null> {
+  if (session) return session
+  if (loading) return loading
+  loading = (async () => {
+    const p = modelPath()
+    if (!p) {
+      console.warn('[depth] 同梱モデルが見つからない')
+      return null
+    }
+    const tryCreate = async (eps: string[]): Promise<InferenceSession> =>
+      InferenceSession.create(p, { executionProviders: eps })
+    try {
+      session = await tryCreate(process.platform === 'darwin' ? ['coreml', 'cpu'] : ['cpu'])
+      console.log('[depth] onnx session ready:', p)
+    } catch (e) {
+      console.warn('[depth] CoreML失敗→CPUで再試行', e)
+      try {
+        session = await tryCreate(['cpu'])
+      } catch (e2) {
+        console.error('[depth] session作成失敗', e2)
+        session = null
+      }
+    }
+    return session
+  })()
+  return loading
 }
 
-/** 画像(inPath) → 深度PNG(outPath)。成否を返す（失敗しても throw しない）。 */
-export function generateDepthMap(
-  inPath: string,
-  outPath: string
-): Promise<{ ok: boolean; error?: string }> {
-  return new Promise((resolve) => {
-    const py = resolvePython()
-    if (!py) {
-      resolve({ ok: false, error: 'depth-python-not-found' })
-      return
-    }
-    const child = spawn(py, ['-c', PY, inPath, outPath], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        // MPS 未対応の演算は CPU に逃がす（落とさない）。HF の注意書きや進捗バーはログに留める。
-        PYTORCH_ENABLE_MPS_FALLBACK: '1',
-        HF_HUB_DISABLE_PROGRESS_BARS: '1',
-        TRANSFORMERS_VERBOSITY: 'error',
-        TOKENIZERS_PARALLELISM: 'false'
-      }
-    })
-    let err = ''
-    child.stderr?.on('data', (b: Buffer) => {
-      err += b.toString()
-    })
-    // 初回だけモデル取得(~数十秒)が走り得るので長めの保険。通常は数秒。
-    const timer = setTimeout(() => {
-      child.kill()
-      resolve({ ok: false, error: 'depth-timeout' })
-    }, 120000)
-    child.on('exit', (code) => {
-      clearTimeout(timer)
-      if (code === 0 && existsSync(outPath)) resolve({ ok: true })
-      else resolve({ ok: false, error: `depth-failed(code=${code}) ${err.slice(-300)}` })
-    })
-    child.on('error', (e) => {
-      clearTimeout(timer)
-      resolve({ ok: false, error: String(e) })
-    })
-  })
+/** 深度エンジンが使えるか（同梱モデルが在るか）。 */
+export function depthEngineAvailable(): boolean {
+  return modelPath() != null
+}
+
+/** 前処理済みテンソル(NCHW float32, 1x3xHxW) → 生深度(float32, H*W)。失敗で {error}。 */
+export async function runDepth(
+  input: Float32Array,
+  w: number,
+  h: number
+): Promise<{ depth?: Float32Array; w?: number; h?: number; error?: string }> {
+  try {
+    const sess = await getSession()
+    if (!sess) return { error: 'depth-model-missing' }
+    const t = new Tensor('float32', input, [1, 3, h, w])
+    const feeds: Record<string, Tensor> = {}
+    feeds[sess.inputNames[0]] = t
+    const out = await sess.run(feeds)
+    const o = out[sess.outputNames[0]]
+    return { depth: o.data as Float32Array, w, h }
+  } catch (e) {
+    return { error: String(e) }
+  }
 }
