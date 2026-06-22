@@ -9,12 +9,12 @@ export const FX_BUTTONS: { key: FxKey; label: string }[] = [
   { key: 'strobe', label: 'STROBE' },
   { key: 'rndstrobe', label: 'RND STROBE' },
   { key: 'colorchase', label: 'COLOR CHASE' },
-  { key: 'breath', label: '呼吸 BREATH' },
-  { key: 'fire', label: '炎 FIRE' },
-  { key: 'wave', label: '波 WAVE' },
-  { key: 'bolt', label: '雷 BOLT' },
-  { key: 'rainbow', label: '虹 RAINBOW' },
-  { key: 'zoompulse', label: '開閉 ZOOM' }
+  { key: 'breath', label: 'BREATH' },
+  { key: 'fire', label: 'FIRE' },
+  { key: 'wave', label: 'WAVE' },
+  { key: 'bolt', label: 'BOLT' },
+  { key: 'rainbow', label: 'RAINBOW' },
+  { key: 'zoompulse', label: 'ZOOM' }
 ]
 
 export const FX_LABEL: Record<FxKey, string> = {
@@ -24,12 +24,12 @@ export const FX_LABEL: Record<FxKey, string> = {
   strobe: 'STROBE',
   rndstrobe: 'RND STROBE',
   colorchase: 'COLOR CHASE',
-  breath: '呼吸',
-  fire: '炎',
-  wave: '波',
-  bolt: '雷',
-  rainbow: '虹',
-  zoompulse: '開閉'
+  breath: 'BREATH',
+  fire: 'FIRE',
+  wave: 'WAVE',
+  bolt: 'BOLT',
+  rainbow: 'RAINBOW',
+  zoompulse: 'ZOOM'
 }
 
 export interface FxParamDef {
@@ -44,7 +44,7 @@ export interface FxParamDef {
 export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   search: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 5,
       max: 120,
       get: (e) => Math.round(e.fxp.search.speed * 100),
@@ -52,7 +52,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => (100 / v).toFixed(1) + 's'
     },
     {
-      lbl: '幅',
+      lbl: 'WIDTH',
       min: 4,
       max: 60,
       get: (e) => e.fxp.search.width,
@@ -62,7 +62,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   rndsearch: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 5,
       max: 120,
       get: (e) => Math.round(e.fxp.search.speed * 100),
@@ -70,7 +70,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => (100 / v).toFixed(1) + 's'
     },
     {
-      lbl: '幅',
+      lbl: 'WIDTH',
       min: 4,
       max: 60,
       get: (e) => e.fxp.search.width,
@@ -78,7 +78,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => '±' + v + '°'
     },
     {
-      lbl: 'ばらつき',
+      lbl: 'VARY',
       min: 0,
       max: 100,
       get: (e) => e.fxp.rndsearch.vari,
@@ -88,7 +88,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   chase: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 20,
       max: 300,
       get: (e) => Math.round(e.fxp.chase.speed * 100),
@@ -96,7 +96,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => '×' + (v / 100).toFixed(1)
     },
     {
-      lbl: 'やわらか',
+      lbl: 'SOFT',
       min: 0,
       max: 100,
       get: (e) => e.fxp.chase.soft,
@@ -106,7 +106,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   strobe: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 1,
       max: 15,
       get: (e) => e.fxp.strobe.speed,
@@ -114,7 +114,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => v + 'Hz'
     },
     {
-      lbl: '点灯率',
+      lbl: 'DUTY',
       min: 10,
       max: 70,
       get: (e) => e.fxp.strobe.duty,
@@ -124,7 +124,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   rndstrobe: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 2,
       max: 25,
       get: (e) => e.fxp.rndstrobe.speed,
@@ -132,7 +132,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => v + '/秒'
     },
     {
-      lbl: '密度',
+      lbl: 'DENSITY',
       min: 5,
       max: 60,
       get: (e) => e.fxp.rndstrobe.dens,
@@ -140,7 +140,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => v + '%'
     },
     {
-      lbl: '流れ',
+      lbl: 'FLOW',
       min: 0,
       max: 100,
       get: (e) => e.fxp.rndstrobe.flow ?? 40,
@@ -150,7 +150,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   colorchase: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 20,
       max: 600,
       get: (e) => Math.round(e.fxp.colorchase.speed * 100),
@@ -158,7 +158,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => (v / 100).toFixed(1) + '色/秒'
     },
     {
-      lbl: 'なじみ',
+      lbl: 'BLEND',
       min: 0,
       max: 100,
       get: (e) => e.fxp.colorchase.blend,
@@ -168,7 +168,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   breath: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 5,
       max: 80,
       get: (e) => Math.round(e.fxp.breath.speed * 100),
@@ -176,7 +176,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => (100 / v).toFixed(1) + 's'
     },
     {
-      lbl: '深さ',
+      lbl: 'DEPTH',
       min: 20,
       max: 100,
       get: (e) => e.fxp.breath.depth,
@@ -186,7 +186,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   fire: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 30,
       max: 250,
       get: (e) => Math.round(e.fxp.fire.speed * 100),
@@ -194,7 +194,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => '×' + (v / 100).toFixed(1)
     },
     {
-      lbl: '揺れ',
+      lbl: 'FLICKER',
       min: 10,
       max: 100,
       get: (e) => e.fxp.fire.amount,
@@ -204,7 +204,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   wave: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 5,
       max: 100,
       get: (e) => Math.round(e.fxp.wave.speed * 100),
@@ -212,7 +212,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => (100 / v).toFixed(1) + 's'
     },
     {
-      lbl: '波の長さ',
+      lbl: 'LENGTH',
       min: 10,
       max: 100,
       get: (e) => e.fxp.wave.length,
@@ -222,7 +222,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   bolt: [
     {
-      lbl: '頻度',
+      lbl: 'RATE',
       min: 10,
       max: 200,
       get: (e) => Math.round(e.fxp.bolt.rate * 100),
@@ -230,7 +230,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => '×' + (v / 100).toFixed(1)
     },
     {
-      lbl: '強さ',
+      lbl: 'POWER',
       min: 30,
       max: 150,
       get: (e) => e.fxp.bolt.strength,
@@ -240,7 +240,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   rainbow: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 3,
       max: 80,
       get: (e) => Math.round(e.fxp.rainbow.speed * 100),
@@ -248,7 +248,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => (1 / (v / 100)).toFixed(1) + 's/周'
     },
     {
-      lbl: 'ばらし',
+      lbl: 'SPREAD',
       min: 0,
       max: 100,
       get: (e) => e.fxp.rainbow.spread,
@@ -258,7 +258,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
   ],
   zoompulse: [
     {
-      lbl: '速さ',
+      lbl: 'SPEED',
       min: 5,
       max: 100,
       get: (e) => Math.round(e.fxp.zoompulse.speed * 100),
@@ -266,7 +266,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
       fmt: (v) => (100 / v).toFixed(1) + 's'
     },
     {
-      lbl: '開き幅',
+      lbl: 'AMOUNT',
       min: 10,
       max: 100,
       get: (e) => e.fxp.zoompulse.amount,

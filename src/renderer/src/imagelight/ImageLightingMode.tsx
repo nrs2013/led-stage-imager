@@ -859,12 +859,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const depthStat = engine.activeDepthStatus()
   const depthStatLabel =
     depthStat === 'ready'
-      ? '計算済み'
+      ? 'READY'
       : depthStat === 'pending'
-        ? '計算中…'
+        ? 'COMPUTING…'
         : depthStat === 'failed'
-          ? '生成できず'
-          : 'なし'
+          ? 'FAILED'
+          : '—'
   const ms = engine.muteSoloCount() // ソロ/ミュート中の台数（注意表示・全解除ボタン用）
   const curCue = engine.activePattern >= 0 ? engine.patterns[engine.activePattern] : null // 今アクティブな明かり
 
@@ -1298,27 +1298,24 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <>
                 <hr />
                 <div className="il-lbl">MOTIF</div>
-                <div className="il-lbl" style={{ marginTop: -2, marginBottom: 4 }}>
-                  <em>モチーフ（街灯・電球など）の明るさと点滅をここで</em>
-                </div>
                 <div className="il-frow" style={{ gap: 4, marginBottom: 6 }}>
                   <span style={{ width: 64, fontSize: 11, color: 'var(--il-txt)', flexShrink: 0 }}>
-                    チェイス
+                    Chase
                   </span>
                   <button
                     className={'il-mini' + (engine.motifChase ? ' learnon' : '')}
                     style={{ flex: 1, padding: '2px 6px', fontSize: 11 }}
                     onClick={() => engine.setMotifChase(!engine.motifChase)}
                   >
-                    {engine.motifChase ? '流れ中（押して停止）' : 'モチーフを順に点滅'}
+                    {engine.motifChase ? 'Running (tap to stop)' : 'Chase motifs'}
                   </button>
                 </div>
                 {engine.beams.map((b, i) => {
                   if (!b.motif) return null
                   const label: Record<string, string> = {
-                    streetlamp: '街灯', chandelier: 'シャンデリア', marquee: 'マーキー', image: '画像',
-                    bulb: 'ボール球', parlight: 'PAR', blinder: 'ミニブル', patt: 'PAT', pixelpatt: 'PixelPAT',
-                    stars: '星', festoon: '垂れ幕'
+                    streetlamp: 'Street', chandelier: 'Chandelier', marquee: 'Marquee', image: 'Image',
+                    bulb: 'Bulb', parlight: 'PAR', blinder: 'Mini', patt: 'PAT', pixelpatt: 'PixelPAT',
+                    stars: 'Star', festoon: 'Banner'
                   }
                   return (
                     <div key={i} className="il-frow" style={{ gap: 4, marginBottom: 3 }}>
@@ -1522,7 +1519,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       style={{ flex: 1, padding: '2px 6px', fontSize: 11 }}
                       onClick={() => engine.setMotifChase(!engine.motifChase)}
                     >
-                      {engine.motifChase ? '流れ中（押して停止）' : 'モチーフを順に点滅'}
+                      {engine.motifChase ? 'Running (tap to stop)' : 'Chase motifs'}
                     </button>
                   </div>
                 )}
@@ -1533,7 +1530,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <b>SMOKE</b>
                 </div>
                 <div className="il2-fader">
-                  <span className="il2-nm">スモーク</span>
+                  <span className="il2-nm">LEVEL</span>
                   <input
                     type="range"
                     min={0}
@@ -1572,7 +1569,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <b>DEPTH</b>
                 </div>
                 <div className="il2-segrow">
-                  <span className="il2-seglbl">立体感</span>
+                  <span className="il2-seglbl">3D</span>
                   <input
                     type="range"
                     min={0}
@@ -1585,7 +1582,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <span className="il2-pv">{Math.round(engine.depthStrength * 100)}</span>
                 </div>
                 <div className="il2-segrow">
-                  <span className="il2-seglbl">彫り幅</span>
+                  <span className="il2-seglbl">WIDTH</span>
                   <input
                     type="range"
                     min={0}
@@ -1598,7 +1595,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <span className="il2-pv">{Math.round(engine.depthWidth * 100)}</span>
                 </div>
                 <div className="il2-segrow">
-                  <span className="il2-seglbl">影</span>
+                  <span className="il2-seglbl">SHADOW</span>
                   <input
                     type="range"
                     min={0}
@@ -1619,12 +1616,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <span className="il2-sw-knob" />
                   </span>
                   <span className="il2-sw-nm">
-                    彫りを見る<i>確認</i>
+                    DEPTH MAP<i>確認</i>
                   </span>
                   <span className="il2-sw-st">{engine.showDepth ? 'ON' : 'OFF'}</span>
                 </button>
                 <div className="il2-segrow">
-                  <span className="il2-seglbl">状態</span>
+                  <span className="il2-seglbl">STATUS</span>
                   <span className="il2-pv">{depthStatLabel}</span>
                 </div>
               </div>
@@ -1926,7 +1923,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 {presetOpen && (
                   <div className="il2-presetbody">
                     <div className="il2-segrow">
-                      <span className="il2-seglbl">解像度</span>
+                      <span className="il2-seglbl">RES</span>
                       <div className="il2-seg">
                         {(
                           [
@@ -1947,7 +1944,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       </div>
                     </div>
                     <div className="il2-segrow">
-                      <span className="il2-seglbl">落ち込み</span>
+                      <span className="il2-seglbl">FALLOFF</span>
                       <div className="il2-seg">
                         {(
                           [
@@ -1978,21 +1975,21 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <b>SELECTED</b>
                   </div>
                   <RigRow
-                    label="出口幅"
+                    label="THROAT"
                     min={8}
                     max={180}
                     value={ref?.w0 ?? 40}
                     onChange={(v) => engine.setRig('w0', v)}
                   />
                   <RigRow
-                    label="広がり"
+                    label="SPREAD"
                     min={20}
                     max={700}
                     value={ref?.w1 ?? 260}
                     onChange={(v) => engine.setRig('w1', v)}
                   />
                   <RigRow
-                    label="伸び"
+                    label="LENGTH"
                     min={80}
                     max={1000}
                     value={ref?.len ?? 600}
@@ -2004,7 +2001,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       onClick={() => engine.removeSelected()}
                       title="Delete / Backspace キーでも消せます"
                     >
-                      灯体を削除（Del）
+                      Delete  (Del)
                     </button>
                   </div>
                 </div>
@@ -2017,10 +2014,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 
             <div className="il-card">
               <div className="il-cardhd">
-                <span className="il-stepn">1</span>灯体を選ぶ
-              </div>
-              <div className="il-lbl" style={{ marginTop: 4, marginBottom: 5 }}>
-                <em>番号=灯体／Shift+クリックで複数選択／M=消す・S=これだけ</em>
+                <span className="il-stepn">1</span>Select
               </div>
               <div className="il-strip">
                 <button
@@ -2081,19 +2075,19 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   </button>
                 )}
               </div>
-              <div className="il-lbl" style={{ marginTop: 6 }}>増やす</div>
+              <div className="il-lbl" style={{ marginTop: 6 }}>Add</div>
             <div className="il-frow" style={{ gap: 4, flexWrap: 'wrap' }}>
               {([
-                { type: 'streetlamp' as const, label: '街灯' },
-                { type: 'chandelier' as const, label: 'シャンデリア' },
-                { type: 'marquee' as const, label: 'マーキー' },
-                { type: 'bulb' as const, label: 'ボール球' },
+                { type: 'streetlamp' as const, label: 'Street' },
+                { type: 'chandelier' as const, label: 'Chandelier' },
+                { type: 'marquee' as const, label: 'Marquee' },
+                { type: 'bulb' as const, label: 'Bulb' },
                 { type: 'parlight' as const, label: 'PAR' },
-                { type: 'blinder' as const, label: 'ミニブル' },
+                { type: 'blinder' as const, label: 'Mini' },
                 { type: 'patt' as const, label: 'PAT' },
                 { type: 'pixelpatt' as const, label: 'PixelPAT' },
-                { type: 'stars' as const, label: '星' },
-                { type: 'festoon' as const, label: '垂れ幕' },
+                { type: 'stars' as const, label: 'Star' },
+                { type: 'festoon' as const, label: 'Banner' },
               ]).map(({ type, label }) => (
                 <button
                   key={type}
@@ -2117,7 +2111,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 
             <div className="il-card">
               <div className="il-cardhd">
-                <span className="il-stepn">2</span>この灯体を作る
+                <span className="il-stepn">2</span>Build
               </div>
             {ref?.motif && (
               <>
@@ -2284,14 +2278,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button className="il-mini" onClick={() => engine.home()}>
-                HOME（置いた姿）
+                Home
               </button>
             </div>
             </div>
 
             <div className="il-card">
               <div className="il-cardhd">
-                <span className="il-stepn">3</span>エフェクト
+                <span className="il-stepn">3</span>Effect
               </div>
             <div className="il-fxgrid">
               {FX_BUTTONS.map((b) => {
@@ -2556,7 +2550,7 @@ function StrobeSpecial({ engine }: { engine: ImageLightEngine }): React.JSX.Elem
           onClick={() => engine.toggleStrobeOverride()}
           title="今の絵に上からランダムストロボ。もう一度押すと元のシーンに戻る"
         >
-          ランダムストロボ
+          Random Strobe
         </button>
         <button
           className={'il-fx-learn' + (learning ? ' on' : assigned ? ' assigned' : '')}
@@ -2580,7 +2574,7 @@ function StrobeSpecial({ engine }: { engine: ImageLightEngine }): React.JSX.Elem
         </button>
       </div>
       <div className="il-frow">
-        <span className="il-falloff-lbl">速さ</span>
+        <span className="il-falloff-lbl">Speed</span>
         <input
           type="range"
           min={0}
@@ -3010,7 +3004,7 @@ const IL_CSS = `
 .il-hex{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--il-dim);flex:1;}
 .il-fxgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
 .il-fxcell{position:relative;}
-.il-fxcell .il-fxbtn{width:100%;background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-txt);padding:11px 0 10px;border-radius:5px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:1px;}
+.il-fxcell .il-fxbtn{width:100%;background:rgba(255,255,255,0.02);border:0.5px solid var(--il-line);color:var(--il-dim);padding:11px 0 10px;border-radius:6px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:1px;}
 .il-fxcell.on .il-fxbtn{border-color:var(--il-amber);color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,0.3) inset;}
 .il-fx-led{position:absolute;top:4px;left:5px;width:5px;height:5px;border-radius:50%;background:var(--il-line);pointer-events:none;}
 .il-fxcell.on .il-fx-led{background:var(--il-green);}
@@ -3068,11 +3062,12 @@ const IL_CSS = `
 .il-stepn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:transparent;border:0.5px solid var(--il-amber);color:var(--il-amber);font-family:'Bebas Neue',sans-serif;font-size:13px;line-height:1;flex-shrink:0;}
 .il-card .il-lbl{border-bottom:none;padding-bottom:0;}
 .il2-console{display:flex;flex-direction:column;border:0.5px solid var(--il-line);border-radius:9px;background:rgba(0,0,0,0.18);padding:0 11px;}
-.il2-sec{padding:8px 0;border-top:0.5px solid var(--il-line);}
+.il2-sec{padding:11px 0 9px;border-top:none;}
 .il2-sec:first-child{border-top:none;}
-.il2-eb{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
-.il2-kind{font-size:10px;color:var(--il-faint);background:none;border:0.5px solid var(--il-line);border-radius:4px;padding:1.5px 6px;letter-spacing:0.04em;}
-.il2-eb b{font-family:'Bebas Neue',sans-serif;font-weight:400;font-size:13px;letter-spacing:0.16em;color:var(--il-txt);}
+.il2-eb{display:flex;align-items:center;gap:10px;margin-bottom:9px;}
+.il2-kind{display:none;}
+.il2-eb b{font-family:'Bebas Neue',sans-serif;font-weight:400;font-size:11px;letter-spacing:0.24em;color:var(--il-faint);text-transform:uppercase;}
+.il2-eb::after{content:"";flex:1;height:0.5px;background:var(--il-line);}
 .il2-fader{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
 .il2-fader:last-child{margin-bottom:0;}
 .il2-fader .il2-nm{font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:0.1em;color:var(--il-dim);min-width:54px;}
@@ -3086,13 +3081,13 @@ const IL_CSS = `
 .il2-switch.on .il2-sw-track{border-color:var(--il-amber);background:rgba(251,191,36,0.14);}
 .il2-switch.on .il2-sw-knob{left:28px;background:var(--il-amber);}
 .il2-sw-nm{font-size:13px;color:var(--il-dim);}
-.il2-sw-nm i{font-style:normal;font-size:9px;color:var(--il-faint);margin-left:5px;}
+.il2-sw-nm i{display:none;}
 .il2-sw-st{margin-left:auto;font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:0.12em;color:var(--il-faint);}
 .il2-switch.on .il2-sw-st{color:var(--il-amber);}
 .il2-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(86px,1fr));gap:6px;}
 .il2-fxgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(86px,1fr));gap:6px;margin-top:8px;}
-.il2-tile{padding:7px 4px;border:0.5px solid var(--il-line);border-radius:8px;background:var(--il-inset);color:var(--il-dim);cursor:pointer;font-size:11px;letter-spacing:0.02em;font-family:inherit;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.il2-tile.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,0.12);box-shadow:0 0 0 1px rgba(251,191,36,0.25) inset;}
+.il2-tile{padding:8px 5px;border:0.5px solid var(--il-line);border-radius:7px;background:rgba(255,255,255,0.02);color:var(--il-dim);cursor:pointer;font-size:11px;letter-spacing:0.02em;font-family:inherit;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.il2-tile.on{border-color:var(--il-amber);color:var(--il-amber);background:transparent;box-shadow:none;}
 .il2-minirow{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
 .il2-fxpick{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;border:0.5px solid var(--il-line);border-radius:9px;background:rgba(255,255,255,0.012);cursor:pointer;font-family:inherit;text-align:left;margin-top:8px;}
 .il2-fxpick .ab{font-family:'Bebas Neue',sans-serif;letter-spacing:0.05em;color:var(--il-amber);min-width:56px;font-size:14px;}
@@ -3108,7 +3103,7 @@ const IL_CSS = `
 .il2-seg{display:flex;border:0.5px solid var(--il-line);border-radius:9px;overflow:hidden;margin-top:8px;}
 .il2-seg button{flex:1;background:rgba(255,255,255,0.012);border:none;border-right:0.5px solid var(--il-line);color:var(--il-dim);padding:8px 0;font-size:11px;letter-spacing:0.02em;font-family:inherit;cursor:pointer;}
 .il2-seg button:last-child{border-right:none;}
-.il2-seg button.on{background:rgba(251,191,36,0.14);color:var(--il-amber);}
+.il2-seg button.on{background:transparent;color:var(--il-amber);box-shadow:0 -1px 0 var(--il-amber) inset;}
 .il2-seg.dis{opacity:0.35;pointer-events:none;}
 .il2-preset{display:flex;align-items:center;gap:16px;width:100%;padding:10px 12px;border:0.5px solid var(--il-line);border-radius:9px;background:rgba(255,255,255,0.012);cursor:pointer;font-family:inherit;text-align:left;}
 .il2-pi{display:flex;align-items:baseline;gap:6px;}
@@ -3119,8 +3114,8 @@ const IL_CSS = `
 .il2-segrow{display:flex;align-items:center;gap:8px;}
 .il2-seglbl{font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:0.1em;color:var(--il-dim);min-width:50px;}
 .il2-seg{display:flex;gap:5px;flex:1;}
-.il2-segbtn{flex:1;background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-dim);padding:7px 4px;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit;}
-.il2-segbtn.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,0.10);}
+.il2-segbtn{flex:1;background:rgba(255,255,255,0.02);border:0.5px solid var(--il-line);color:var(--il-dim);padding:8px 4px;border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit;}
+.il2-segbtn.on{border-color:var(--il-amber);color:var(--il-amber);background:transparent;}
 .il2-act{display:flex;justify-content:flex-end;margin-top:8px;}
 .il-fxall{background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;color:var(--il-txt);cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:42px;}
 .il-fxall.on{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,0.30) inset;}
@@ -3132,7 +3127,7 @@ const IL_CSS = `
 .il-lamp i.on{background:var(--il-green);border-color:var(--il-green);}
 /* PLAY上部の本番ボタン（当たり判定は大きめ・色は据え置き） */
 .il-livebtns{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;}
-.il-livebtn{background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-txt);border-radius:6px;padding:13px 4px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:0.06em;min-height:46px;}
+.il-livebtn{background:rgba(255,255,255,0.02);border:0.5px solid var(--il-line);color:var(--il-txt);border-radius:7px;padding:13px 4px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:0.06em;min-height:46px;}
 .il-livebtn:hover{border-color:var(--il-dim);}
 .il-livebtn.blackout:hover{border-color:var(--il-amber);color:var(--il-amber);}
 .il-livebtn.panic:hover{border-color:var(--il-red);color:var(--il-red);}
@@ -3162,7 +3157,7 @@ const IL_CSS = `
 .il2hud-mval i{font-style:normal;font-size:11px;color:var(--il-faint);}
 .il2hud-tabs{display:flex;}
 .il2hud-tab{flex:1;background:none;border:none;border-bottom:2px solid transparent;color:var(--il-faint);font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:0.1em;padding:8px 0 6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;}
-.il2hud-tab i{font-style:normal;font-family:'Noto Sans JP',sans-serif;font-size:9px;letter-spacing:0.06em;color:var(--il-faint);}
+.il2hud-tab i{display:none;}
 .il2hud-tab.on{color:var(--il-amber);border-bottom-color:var(--il-amber);}
 .il2hud-tab.on i{color:var(--il-dim);}
 .il2hud-scroll{flex:1;overflow-y:auto;padding:7px 10px 9px;display:flex;flex-direction:column;gap:6px;}
