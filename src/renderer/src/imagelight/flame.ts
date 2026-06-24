@@ -11,7 +11,9 @@ export interface FlameParams {
   thick: number // 胴の太さ
   dense: number // 迫力(密度)
   churn: number // ゆらぎ(内部の乱れ)
-  speed: number // 速さ
+  speed: number // 速さ(内部のゆらぎ時間)
+  height: number // 背丈(炎の届く高さ)＝粒の上昇量
+  dur: number // 燃えてる時間(一発の持続)
 }
 
 interface Shot {
@@ -105,7 +107,7 @@ export const DEFAULT_ROW = [0.17, 0.42, 0.63, 0.79]
 const ROW_STR = [1.0, 1.08, 0.85, 0.78]
 
 export class FlameFX {
-  params: FlameParams = { thick: 1.1, dense: 1.6, churn: 0.75, speed: 1.5 }
+  params: FlameParams = { thick: 1.1, dense: 1.6, churn: 0.75, speed: 1.5, height: 1, dur: 1 }
 
   private heat = new Float32Array(GW * GH)
   private noise = new Float32Array(NW * NH)
@@ -232,7 +234,7 @@ export class FlameFX {
         sp: (Math.random() - 0.5) * bw,
         y: s.by - Math.random() * 5,
         vx: (Math.random() - 0.5) * 0.1,
-        vy: -(7.4 + Math.random() * 3.4) * st * climb,
+        vy: -(7.4 + Math.random() * 3.4) * st * climb * 2 * this.params.height, // 立ち上がり×2(今くらい)×背丈
         age: 0,
         max: 52 + Math.random() * 26,
         en: 6.8 + Math.random() * 1.8,
@@ -261,20 +263,21 @@ export class FlameFX {
     const sp = this.params.speed
     const churn = this.params.churn
     const h = this.heat
-    for (let i = 0; i < h.length; i++) h[i] *= 0.83
+    for (let i = 0; i < h.length; i++) h[i] *= 0.78 // 消える速さ＝今くらい(従来0.83より少し速く引く)
 
     // shots: 発射タイミング・サスティン・残炎の寿命管理
     for (let si = this.shots.length - 1; si >= 0; si--) {
       const s = this.shots[si]
       const ms = (this.frame - s.t0) * 16.67
       if (ms < 0) continue
-      const emitting = s.held ? true : s.rel ? false : ms <= 560
+      const dur = this.params.dur // 燃えてる時間＝一発の持続をスケール
+      const emitting = s.held ? true : s.rel ? false : ms <= 560 * dur
       if (emitting) this.emit(s, ms)
       const dead = s.held
         ? false
         : s.rel
-          ? (this.frame - s.rel) * 16.67 > 820
-          : ms > 1300
+          ? (this.frame - s.rel) * 16.67 > 820 * dur
+          : ms > 1300 * dur
       if (dead) this.shots.splice(si, 1)
     }
 

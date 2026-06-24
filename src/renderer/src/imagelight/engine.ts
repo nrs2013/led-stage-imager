@@ -390,11 +390,9 @@ export class ImageLightEngine {
   /** 配置した炎の位置(0..1のfx,fy)＝照明の「灯体」のように複数置く。 */
   flamePoints: { fx: number; fy: number }[] = []
   flameChaseOn = false
-  flameChasePattern: 'seq' | 'all' | 'alt' | 'pingpong' | 'random' = 'seq'
+  flameChasePattern: 'random' | 'all' | 'inout' | 'outin' = 'inout'
   flameChaseMs = 420
   private chaseIdx = 0
-  private chaseDir = 1
-  private chasePhase = 0
   private lastChaseAt = 0
   /** 特効の有効/無効。OFF の間は renderFrame で炎を一切触らない＝従来と完全に同じ。 */
   setFlameEnabled(on: boolean): void {
@@ -415,6 +413,81 @@ export class ImageLightEngine {
     this.flamePoints.pop()
     this.bump()
   }
+  // ---- 炎を「灯体と同じ操作」にするための選択・編集 ----
+  flameSel: number[] = [] // 選択中の炎インデックス
+  isFlameSelected(i: number): boolean {
+    return this.flameSel.includes(i)
+  }
+  selectFlame(i: number): void {
+    this.flameSel = [i]
+    this.bump()
+  }
+  toggleSelectFlame(i: number): void {
+    const k = this.flameSel.indexOf(i)
+    if (k >= 0) this.flameSel.splice(k, 1)
+    else this.flameSel.push(i)
+    this.bump()
+  }
+  clearFlameSel(): void {
+    if (this.flameSel.length) {
+      this.flameSel = []
+      this.bump()
+    }
+  }
+  /** 選択中の炎を削除（Deleteキー＝灯体と同じ）。 */
+  removeSelectedFlames(): void {
+    if (!this.flameSel.length) return
+    const sel = new Set(this.flameSel)
+    this.flamePoints = this.flamePoints.filter((_, i) => !sel.has(i))
+    this.flameSel = []
+    this.bump()
+  }
+  /** 選択中の炎を相対移動（矢印キー＝灯体と同じ。fx,fy単位）。 */
+  moveSelectedFlamesBy(dfx: number, dfy: number): void {
+    if (!this.flameSel.length) return
+    for (const i of this.flameSel) {
+      const p = this.flamePoints[i]
+      if (!p) continue
+      p.fx = Math.max(0, Math.min(1, p.fx + dfx))
+      p.fy = Math.max(0, Math.min(1, p.fy + dfy))
+    }
+    this.bump()
+  }
+  /** 炎の整列（選択が無ければ全部）。mode=left/centerX/right/top/middle/bottom。 */
+  alignFlames(mode: 'left' | 'centerX' | 'right' | 'top' | 'middle' | 'bottom'): void {
+    const idx = this.flameSel.length ? this.flameSel : this.flamePoints.map((_, i) => i)
+    if (idx.length < 2) return
+    const pts = idx.map((i) => this.flamePoints[i])
+    const xs = pts.map((p) => p.fx)
+    const ys = pts.map((p) => p.fy)
+    const minX = Math.min(...xs)
+    const maxX = Math.max(...xs)
+    const minY = Math.min(...ys)
+    const maxY = Math.max(...ys)
+    pts.forEach((p) => {
+      if (mode === 'left') p.fx = minX
+      else if (mode === 'centerX') p.fx = (minX + maxX) / 2
+      else if (mode === 'right') p.fx = maxX
+      else if (mode === 'top') p.fy = minY
+      else if (mode === 'middle') p.fy = (minY + maxY) / 2
+      else if (mode === 'bottom') p.fy = maxY
+    })
+    this.bump()
+  }
+  /** 炎を等間隔に（選択3つ以上が無ければ全部）。axis=x/y。 */
+  distributeFlames(axis: 'x' | 'y'): void {
+    const idx = this.flameSel.length ? this.flameSel : this.flamePoints.map((_, i) => i)
+    if (idx.length < 3) return
+    const key: 'fx' | 'fy' = axis === 'x' ? 'fx' : 'fy'
+    const sorted = idx.slice().sort((a, b) => this.flamePoints[a][key] - this.flamePoints[b][key])
+    const lo = this.flamePoints[sorted[0]][key]
+    const hi = this.flamePoints[sorted[sorted.length - 1]][key]
+    const step = (hi - lo) / (sorted.length - 1)
+    sorted.forEach((i, k) => {
+      this.flamePoints[i][key] = lo + step * k
+    })
+    this.bump()
+  }
   /** 置いた炎を全部いっぺんに発射（無ければ標準4本）。 */
   flameFireAll(): void {
     this.flameEnabled = true
@@ -426,11 +499,9 @@ export class ImageLightEngine {
     this.flameChaseOn = on
     this.lastChaseAt = 0
     this.chaseIdx = 0
-    this.chaseDir = 1
-    this.chasePhase = 0
     this.bump()
   }
-  setFlameChasePattern(p: 'seq' | 'all' | 'alt' | 'pingpong' | 'random'): void {
+  setFlameChasePattern(p: 'random' | 'all' | 'inout' | 'outin'): void {
     this.flameChasePattern = p
     this.bump()
   }
@@ -455,27 +526,15 @@ export class ImageLightEngine {
     const pat = this.flameChasePattern
     if (pat === 'all') {
       pts.forEach((p) => this.flame.fire(p.fx, p.fy))
-    } else if (pat === 'alt') {
-      pts.forEach((p, i) => {
-        if (i % 2 === this.chasePhase) this.flame.fire(p.fx, p.fy)
-      })
-      this.chasePhase ^= 1
     } else if (pat === 'random') {
       const p = pts[Math.floor(this.rnd() * n) % n]
       this.flame.fire(p.fx, p.fy)
-    } else if (pat === 'pingpong') {
-      const p = pts[Math.max(0, Math.min(n - 1, this.chaseIdx))]
-      this.flame.fire(p.fx, p.fy)
-      this.chaseIdx += this.chaseDir
-      if (this.chaseIdx >= n - 1) {
-        this.chaseIdx = n - 1
-        this.chaseDir = -1
-      } else if (this.chaseIdx <= 0) {
-        this.chaseIdx = 0
-        this.chaseDir = 1
-      }
     } else {
-      const p = pts[this.chaseIdx % n]
+      // 内→外(inout)/外→内(outin): 画面中央(fx=0.5)からの距離で並べ、1つずつ順に発火
+      const order = pts
+        .map((p, i) => ({ i, d: Math.abs(p.fx - 0.5) }))
+        .sort((a, b) => (pat === 'outin' ? b.d - a.d : a.d - b.d))
+      const p = pts[order[this.chaseIdx % n].i]
       this.flame.fire(p.fx, p.fy)
       this.chaseIdx = (this.chaseIdx + 1) % n
     }
@@ -522,7 +581,8 @@ export class ImageLightEngine {
     const sw = box.w * Q * kx
     const sh = box.h * Q * ky
     oc.setTransform(1, 0, 0, 1, 0, 0)
-    oc.globalCompositeOperation = 'lighter'
+    // source-over: 炎本体の芯(不透明)が背景を隠して「前にある」感を出す（加算だと透けて発光オーバーレイ化して浮く）
+    oc.globalCompositeOperation = 'source-over'
     oc.globalAlpha = 1
     oc.drawImage(bd, sx, sy, sw, sh, 0, 0, this.outW, this.outH)
     oc.globalCompositeOperation = 'source-over'
@@ -1337,7 +1397,8 @@ export class ImageLightEngine {
     // 特効: 炎本体を最前面に重ねる（前面レイヤー＝写真/光/モチーフ/電飾の上）
     if (flameLit) {
       fc.setTransform(1, 0, 0, 1, 0, 0)
-      fc.globalCompositeOperation = 'lighter'
+      // source-over: 芯が不透明で背景を隠す＝前面にある炎。加算(lighter)だと透けて浮く
+      fc.globalCompositeOperation = 'source-over'
       fc.globalAlpha = 1
       fc.drawImage(this.flame.body, 0, 0, this.flame.body.width, this.flame.body.height, 0, 0, QW, QH)
       fc.globalCompositeOperation = 'source-over'
