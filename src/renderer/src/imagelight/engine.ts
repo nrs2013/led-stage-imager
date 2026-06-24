@@ -7,6 +7,7 @@
  * （screen混色・アルベド乗算・色比保持トーン・パン非対称・Smoke連動）。
  */
 import { WHITE, COLORS, sameRgb, hexToRgb, type RGB3 } from './colors'
+import { FlameFX, type FlameParams } from './flame'
 import {
   buildDecorLeds,
   decorChannelColor,
@@ -381,6 +382,151 @@ export class ImageLightEngine {
   private fc = this.frame.getContext('2d')!
   private lc = this.lightCv.getContext('2d', { willReadFrequently: true })!
   private wc = this.workCv.getContext('2d', { willReadFrequently: true })!
+
+  // ---- スペシャルエフェクト(特効): プロシージャル炎(フレーマー) ----
+  // flame.glow を光マップに足す→既存の写真×光で「セットが炎に照らされる」。flame.body は前面に重ねる。
+  readonly flame = new FlameFX()
+  flameEnabled = false
+  /** 配置した炎の位置(0..1のfx,fy)＝照明の「灯体」のように複数置く。 */
+  flamePoints: { fx: number; fy: number }[] = []
+  flameChaseOn = false
+  flameChasePattern: 'seq' | 'all' | 'alt' | 'pingpong' | 'random' = 'seq'
+  flameChaseMs = 420
+  private chaseIdx = 0
+  private chaseDir = 1
+  private chasePhase = 0
+  private lastChaseAt = 0
+  /** 特効の有効/無効。OFF の間は renderFrame で炎を一切触らない＝従来と完全に同じ。 */
+  setFlameEnabled(on: boolean): void {
+    this.flameEnabled = on
+    this.bump()
+  }
+  /** 写真クリックで炎を1つ置く（fx,fy=0..1）。 */
+  addFlamePoint(fx: number, fy: number): void {
+    this.flameEnabled = true
+    this.flamePoints.push({ fx: Math.max(0, Math.min(1, fx)), fy: Math.max(0, Math.min(1, fy)) })
+    this.bump()
+  }
+  clearFlamePoints(): void {
+    this.flamePoints = []
+    this.bump()
+  }
+  removeLastFlamePoint(): void {
+    this.flamePoints.pop()
+    this.bump()
+  }
+  /** 置いた炎を全部いっぺんに発射（無ければ標準4本）。 */
+  flameFireAll(): void {
+    this.flameEnabled = true
+    if (this.flamePoints.length) this.flamePoints.forEach((p) => this.flame.fire(p.fx, p.fy))
+    else this.flame.fireRow()
+    this.bump()
+  }
+  setFlameChase(on: boolean): void {
+    this.flameChaseOn = on
+    this.lastChaseAt = 0
+    this.chaseIdx = 0
+    this.chaseDir = 1
+    this.chasePhase = 0
+    this.bump()
+  }
+  setFlameChasePattern(p: 'seq' | 'all' | 'alt' | 'pingpong' | 'random'): void {
+    this.flameChasePattern = p
+    this.bump()
+  }
+  setFlameChaseMs(ms: number): void {
+    this.flameChaseMs = ms
+  }
+  /** チェイス進行（renderFrame から now を渡して毎フレーム呼ぶ）。置いた点を順番/全部/交互/往復/ランダムで発火。 */
+  private tickFlameChase(now: number): void {
+    if (!this.flameChaseOn) return
+    const pts = this.flamePoints.length
+      ? this.flamePoints
+      : [
+          { fx: 0.17, fy: 1 },
+          { fx: 0.42, fy: 1 },
+          { fx: 0.63, fy: 1 },
+          { fx: 0.79, fy: 1 }
+        ]
+    const n = pts.length
+    if (!n) return
+    if (this.lastChaseAt && now - this.lastChaseAt < this.flameChaseMs) return
+    this.lastChaseAt = now
+    const pat = this.flameChasePattern
+    if (pat === 'all') {
+      pts.forEach((p) => this.flame.fire(p.fx, p.fy))
+    } else if (pat === 'alt') {
+      pts.forEach((p, i) => {
+        if (i % 2 === this.chasePhase) this.flame.fire(p.fx, p.fy)
+      })
+      this.chasePhase ^= 1
+    } else if (pat === 'random') {
+      const p = pts[Math.floor(this.rnd() * n) % n]
+      this.flame.fire(p.fx, p.fy)
+    } else if (pat === 'pingpong') {
+      const p = pts[Math.max(0, Math.min(n - 1, this.chaseIdx))]
+      this.flame.fire(p.fx, p.fy)
+      this.chaseIdx += this.chaseDir
+      if (this.chaseIdx >= n - 1) {
+        this.chaseIdx = n - 1
+        this.chaseDir = -1
+      } else if (this.chaseIdx <= 0) {
+        this.chaseIdx = 0
+        this.chaseDir = 1
+      }
+    } else {
+      const p = pts[this.chaseIdx % n]
+      this.flame.fire(p.fx, p.fy)
+      this.chaseIdx = (this.chaseIdx + 1) % n
+    }
+  }
+  setFlameParams(p: Partial<FlameParams>): void {
+    this.flame.params = { ...this.flame.params, ...p }
+    this.bump()
+  }
+  getFlameParams(): FlameParams {
+    return { ...this.flame.params }
+  }
+  /** 一発(単発)。fx,fy は 0..1（未指定は中央・床）。 */
+  flameFire(fx = 0.5, fy = 1): void {
+    this.flameEnabled = true
+    this.flame.fire(fx, fy)
+    this.bump()
+  }
+  /** 標準4本を時間差で一斉発射(単発)。 */
+  flameFireRow(): void {
+    this.flameEnabled = true
+    this.flame.fireRow()
+    this.bump()
+  }
+  /** 長押し開始(サスティン)。releaseで終わる。fx,fy は 0..1。 */
+  flameHoldStart(fx = 0.5, fy = 1): void {
+    this.flameEnabled = true
+    this.flame.startHold(fx, fy)
+    this.bump()
+  }
+  flameHoldRelease(): void {
+    this.flame.release()
+    this.bump()
+  }
+  /** 出力(outCv)へ炎本体を重ねる（box領域→出力解像度へ写像）。glowは光マップ経由で既にcomposeOutputに入る。 */
+  private drawFlameOnOutput(): void {
+    if (this.lightOnly || !this.box || this.outW <= 16) return
+    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const box = this.box
+    const bd = this.flame.body
+    const kx = bd.width / IW
+    const ky = bd.height / IH
+    const sx = box.x * Q * kx
+    const sy = box.y * Q * ky
+    const sw = box.w * Q * kx
+    const sh = box.h * Q * ky
+    oc.setTransform(1, 0, 0, 1, 0, 0)
+    oc.globalCompositeOperation = 'lighter'
+    oc.globalAlpha = 1
+    oc.drawImage(bd, sx, sy, sw, sh, 0, 0, this.outW, this.outH)
+    oc.globalCompositeOperation = 'source-over'
+  }
   private ac = this.airCv.getContext('2d')!
 
   // 状態
@@ -684,6 +830,7 @@ export class ImageLightEngine {
     this.fading ||
     this.motifChase ||
     this.decorAnimating() ||
+    (this.flameEnabled && (this.flame.active || this.flameChaseOn)) ||
     this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars')
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
@@ -981,6 +1128,12 @@ export class ImageLightEngine {
     const lc = this.lc
     const wc = this.wc
     const fc = this.fc
+    // 特効: チェイス進行→炎を1フレーム進める（OFF時は一切触らない＝従来と完全に同じ）
+    if (this.flameEnabled) {
+      this.tickFlameChase(now)
+      this.flame.tick()
+    }
+    const flameLit = this.flameEnabled && this.flame.active
 
     // ---- 光マップ
     lc.setTransform(1, 0, 0, 1, 0, 0)
@@ -1027,10 +1180,19 @@ export class ImageLightEngine {
       }
     }
 
+    // 特効: 炎の灯り(glow)を光マップに足す → 下のセット(写真)が炎で照らされる(既存の写真×光に乗る)
+    if (flameLit) {
+      lc.setTransform(1, 0, 0, 1, 0, 0)
+      lc.globalCompositeOperation = 'lighter'
+      lc.globalAlpha = 1
+      lc.drawImage(this.flame.glow, 0, 0, this.flame.glow.width, this.flame.glow.height, 0, 0, QW, QH)
+      lc.globalCompositeOperation = 'source-over'
+    }
+
     // ---- 写真 × 光（座組の最大ゲージで露出が決まる＝出荷仕様）
     wc.setTransform(1, 0, 0, 1, 0, 0)
     wc.clearRect(0, 0, QW, QH)
-    if (maxI > 0.004 && this.mat && this.box) {
+    if ((maxI > 0.004 || flameLit) && this.mat && this.box) {
       const b = this.box
       const tone = Math.max(0, (0.5 - maxI) / 0.5) * 0.85
       wc.setTransform(Q, 0, 0, Q, 0, 0)
@@ -1172,6 +1334,15 @@ export class ImageLightEngine {
       }
     }
 
+    // 特効: 炎本体を最前面に重ねる（前面レイヤー＝写真/光/モチーフ/電飾の上）
+    if (flameLit) {
+      fc.setTransform(1, 0, 0, 1, 0, 0)
+      fc.globalCompositeOperation = 'lighter'
+      fc.globalAlpha = 1
+      fc.drawImage(this.flame.body, 0, 0, this.flame.body.width, this.flame.body.height, 0, 0, QW, QH)
+      fc.globalCompositeOperation = 'source-over'
+    }
+
     // 深度確認ビュー: ON のとき編集画面に「AIが読んだ奥行きマップ」を表示（手前=明/奥=暗）。
     // 出力(Syphon)は通常のまま＝あくまで画面での確認用。
     if (this.showDepth) {
@@ -1200,6 +1371,8 @@ export class ImageLightEngine {
     this.drawMotifsOnOutput(beams, Is, ms)
     // 出力にも電飾パターンを重ねる（編集画面と同じ絵を Arena へ）。
     this.drawDecorOnOutput(decorT)
+    // 特効: 出力にも炎本体を重ねる（glowは光マップ経由でcomposeOutputに既に反映済み）
+    if (flameLit) this.drawFlameOnOutput()
   }
 
   /** 出力(outCv)にモチーフを重ねる。outCv は box 領域を出力解像度に伸ばしたものなので、
@@ -1225,6 +1398,7 @@ export class ImageLightEngine {
    *  ソフトな光は lightCv の box 領域を引き伸ばす（写真だけシャープに保つ）。編集画面とは別物。 */
   private composeOutput(maxI: number): void {
     const OUT_CAP = this.outCap // 出力上限幅（可変：なめらか1920/バランス2560/高精細3840）
+    const flameLit = this.flameEnabled && this.flame.active // 特効: 炎だけでも出力する
     // 光だけ出力モード: 写真を使わず光マップ(lightCv)を出力。Arena側で 映像×光(Multiply)。
     // 出力サイズも光の枠取りも「写真モードと完全に同じ」にする（写真を描かない・切り抜かない
     // だけの違い）。これで光だけに切り替えても解像度・位置が一切変わらず、Arena の映像×光が
@@ -1273,7 +1447,7 @@ export class ImageLightEngine {
       }
       return
     }
-    if (!this.mat || !this.box || maxI <= 0.004) {
+    if (!this.mat || !this.box || (maxI <= 0.004 && !flameLit)) {
       // 写真無し or 無灯 → 透明な小フレーム（Add合成で何も乗らない）
       if (this.outCv.width !== 16) {
         this.outCv.width = 16
@@ -3480,6 +3654,13 @@ export class ImageLightEngine {
     // 同一セッション中に作ったリグだけ復元（モード切替で消えないように）。
     // アプリ再起動後は sessionRig=null＝初期状態のまま＝まっさら。
     if (sessionRig) this.applyRig(sessionRig)
+  }
+
+  /** 自動保存してよい“本物の中身”があるか。写真(scene)もマスクも無く配置も未編集
+   *  （＝起動直後のデフォルト灯体だけ）なら false＝中身なし扱い。冷間起動のデフォルト
+   *  状態で前回データ(il-autosave)を上書きする事故を防ぐためのガード。 */
+  hasSaveableContent(): boolean {
+    return this.scenes.length > 0 || !!this.maskImage || this.rigCustomized
   }
 
   /** 公演まるごとの書き出し材料を作る（リグ＋シーン一覧＋メディアのファイル）。

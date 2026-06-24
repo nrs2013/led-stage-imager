@@ -240,7 +240,21 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   useEffect(() => {
     showKeysRef.current = showKeys
   }, [showKeys])
-  const [hudTab, setHudTab] = useState<'cue' | 'light' | 'decor' | 'setup'>('cue') // 編集モード右パネルのタブ
+  const [hudTab, setHudTab] = useState<'cue' | 'light' | 'decor' | 'setup' | 'sfx'>('cue') // 編集モード右パネルのタブ
+  // 特効(スペシャルエフェクト=炎)タブの状態
+  const [sfxOn, setSfxOn] = useState(false)
+  const [sfxThick, setSfxThick] = useState(1.1)
+  const [sfxDense, setSfxDense] = useState(1.6)
+  const [sfxChurn, setSfxChurn] = useState(0.75)
+  const [sfxSpeed, setSfxSpeed] = useState(1.5)
+  const [sfxChaseOn, setSfxChaseOn] = useState(false)
+  const [sfxPattern, setSfxPattern] = useState<'seq' | 'all' | 'alt' | 'pingpong' | 'random'>('seq')
+  const [sfxInterval, setSfxInterval] = useState(420)
+  const hudTabRef = useRef(hudTab)
+  useEffect(() => {
+    hudTabRef.current = hudTab
+    forceRenderRef.current = true // タブ切替で特効マーカー表示が変わる→1回描き直す
+  }, [hudTab])
   useEffect(() => {
     const api = getApi()
     if (!api?.getStatus) return // getStatus が無くてもデフォルト true のまま＝送る
@@ -330,6 +344,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           ctx.fillRect(x, y, Math.abs(rb.x1 - rb.x0), Math.abs(rb.y1 - rb.y0))
         }
         drawSnapGuides(ctx, engine, scale)
+        if (hudTabRef.current === 'sfx') drawFlamePoints(ctx, engine)
       }
       // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更は即送る）。
       // フェイルオープン：未接続が確証できる時だけ省く。
@@ -556,6 +571,11 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const onStageDown = (e: React.PointerEvent): void => {
     if (uiMode !== 'build') return // PLAYではステージは触らない（写真は下の棚をクリック）
     const p = evPos(e)
+    // 特効タブ: 写真クリックで炎(灯体)を配置する
+    if (hudTab === 'sfx') {
+      engine.addFlamePoint(p.x / LW, p.y / LH)
+      return
+    }
     // 0a. ピース作成モード — 写真の box 内ドラッグで新規ピース矩形を切り出す
     if (engine.pieceCreating) {
       const wb0 = engine.box
@@ -1452,11 +1472,184 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 >
                   SETUP<i>設定</i>
                 </button>
+                <button
+                  className={'il2hud-tab' + (hudTab === 'sfx' ? ' on' : '')}
+                  onClick={() => setHudTab('sfx')}
+                >
+                  SFX<i>特効</i>
+                </button>
               </div>
             </div>
 
             <div className="il2hud-scroll">
             <div className="il2-console">
+              {hudTab === 'sfx' && (
+                <div className="il2-sec">
+                  <div className="il2-eb">
+                    <span className="il2-kind">特効</span>
+                    <b>SFX</b>
+                  </div>
+                  <button
+                    className={'il2-switch' + (sfxOn ? ' on' : '')}
+                    onClick={() => {
+                      const v = !sfxOn
+                      setSfxOn(v)
+                      engine.setFlameEnabled(v)
+                    }}
+                    title="炎(フレーマー)を有効にする。下のセット(写真)が炎で照らされます"
+                  >
+                    <span className="il2-sw-track">
+                      <span className="il2-sw-knob" />
+                    </span>
+                    <span className="il2-sw-nm">
+                      FLAME<i>炎</i>
+                    </span>
+                    <span className="il2-sw-st">{sfxOn ? 'ON' : 'OFF'}</span>
+                  </button>
+                  <div className="il-lbl" style={{ marginTop: 8 }}>配置（写真をクリックで炎を置く）</div>
+                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                    <span style={{ fontSize: 12, opacity: 0.8, alignSelf: 'center' }}>
+                      置いた数: {engine.flamePoints.length}
+                    </span>
+                    <button
+                      className="il-mini"
+                      onClick={() => engine.removeLastFlamePoint()}
+                      title="最後に置いた炎を1つ消す"
+                    >
+                      1つ消す
+                    </button>
+                    <button className="il-mini" onClick={() => engine.clearFlamePoints()} title="置いた炎を全部消す">
+                      全消し
+                    </button>
+                  </div>
+                  <div className="il-lbl" style={{ marginTop: 8 }}>発射</div>
+                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                    <button
+                      className="il-mini"
+                      onClick={() => engine.flameFireAll()}
+                      title="置いた炎を全部いっぺんに(無ければ標準4本)"
+                    >
+                      全部
+                    </button>
+                    <button className="il-mini" onClick={() => engine.flameFireRow()} title="標準4本を一斉に">
+                      4本
+                    </button>
+                    <button
+                      className="il-mini"
+                      onPointerDown={() => engine.flameHoldStart(0.5)}
+                      onPointerUp={() => engine.flameHoldRelease()}
+                      onPointerLeave={() => engine.flameHoldRelease()}
+                      title="押している間ずっと出る(離すと終わる)＝MIDIホールド想定"
+                    >
+                      長押し
+                    </button>
+                  </div>
+                  <div className="il-lbl" style={{ marginTop: 8 }}>チェイス（自動で動かす）</div>
+                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                    <button
+                      className={'il-mini' + (sfxChaseOn ? ' on' : '')}
+                      onClick={() => {
+                        const v = !sfxChaseOn
+                        setSfxChaseOn(v)
+                        engine.setFlameChase(v)
+                      }}
+                      title="置いた炎を自動で順番に発火"
+                    >
+                      {sfxChaseOn ? 'チェイス ON' : 'チェイス OFF'}
+                    </button>
+                  </div>
+                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                    {(
+                      [
+                        ['seq', '順送り'],
+                        ['all', '全部同時'],
+                        ['alt', '交互'],
+                        ['pingpong', '往復'],
+                        ['random', 'ランダム']
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        className={'il-mini' + (sfxPattern === key ? ' on' : '')}
+                        onClick={() => {
+                          setSfxPattern(key)
+                          engine.setFlameChasePattern(key)
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="il-lbl" style={{ marginTop: 6 }}>チェイス間隔 {Math.round(sfxInterval)}ms</div>
+                  <input
+                    type="range"
+                    min="80"
+                    max="1200"
+                    step="10"
+                    value={sfxInterval}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      setSfxInterval(v)
+                      engine.setFlameChaseMs(v)
+                    }}
+                  />
+                  <div className="il-lbl" style={{ marginTop: 8 }}>胴の太さ {sfxThick.toFixed(2)}</div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.4"
+                    step="0.05"
+                    value={sfxThick}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      setSfxThick(v)
+                      engine.setFlameParams({ thick: v })
+                    }}
+                  />
+                  <div className="il-lbl" style={{ marginTop: 6 }}>迫力 {sfxDense.toFixed(2)}</div>
+                  <input
+                    type="range"
+                    min="0.7"
+                    max="2.2"
+                    step="0.05"
+                    value={sfxDense}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      setSfxDense(v)
+                      engine.setFlameParams({ dense: v })
+                    }}
+                  />
+                  <div className="il-lbl" style={{ marginTop: 6 }}>ゆらぎ {sfxChurn.toFixed(2)}</div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1.6"
+                    step="0.05"
+                    value={sfxChurn}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      setSfxChurn(v)
+                      engine.setFlameParams({ churn: v })
+                    }}
+                  />
+                  <div className="il-lbl" style={{ marginTop: 6 }}>速さ {sfxSpeed.toFixed(2)}</div>
+                  <input
+                    type="range"
+                    min="0.6"
+                    max="2.6"
+                    step="0.05"
+                    value={sfxSpeed}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      setSfxSpeed(v)
+                      engine.setFlameParams({ speed: v })
+                    }}
+                  />
+                  <div className="il-lbl" style={{ marginTop: 8, opacity: 0.7 }}>
+                    ※下のセット(写真)が炎で照らされます。出力(Syphon)にも反映。
+                  </div>
+                </div>
+              )}
               {hudTab === 'cue' && (
                 <>
               <div className="il2-sec">
@@ -2828,6 +3021,31 @@ function ThumbCanvas({ thumb }: { thumb: HTMLCanvasElement }): React.JSX.Element
 }
 
 /** ステージ上の編集マーカー（番号＋M/S・本番出力には出ない）。論理座標→表示座標。 */
+function drawFlamePoints(ctx: CanvasRenderingContext2D, engine: ImageLightEngine): void {
+  const pts = engine.flamePoints
+  if (!pts.length) return
+  ctx.save()
+  for (const p of pts) {
+    const x = p.fx * LW
+    const y = p.fy * LH
+    const s = 22
+    ctx.beginPath()
+    ctx.moveTo(x, y - s)
+    ctx.lineTo(x - s * 0.42, y)
+    ctx.lineTo(x + s * 0.42, y)
+    ctx.closePath()
+    ctx.fillStyle = 'rgba(255,150,40,0.85)'
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(x, y, 4, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(255,236,180,0.95)'
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = 'rgba(255,210,120,0.9)'
+    ctx.stroke()
+  }
+  ctx.restore()
+}
 function drawMarkers(ctx: CanvasRenderingContext2D, engine: ImageLightEngine, scale: number): void {
   const { ox, oy } = viewFromEngine(ctx)
   ctx.setTransform(scale, 0, 0, scale, ox, oy)
@@ -3044,7 +3262,7 @@ const IL_CSS = `
 .il-lbl{font-family:'Bebas Neue',sans-serif;font-size:12px;letter-spacing:0.16em;color:var(--il-dim);border-bottom:0.5px solid var(--il-line);padding-bottom:3px;margin-top:1px;}
 .il-lbl em{font-style:normal;color:var(--il-faint);letter-spacing:0;margin-left:6px;font-family:'Noto Sans JP',sans-serif;font-size:9.5px;}
 /* CONSOLE: 機能をまとめる細枠ベイ */
-.il-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;}
+.il-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;}
 .il-strip button{background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;color:var(--il-txt);padding:4px 2px 3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:42px;justify-content:center;}
 .il-strip button.on{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,0.30) inset;}
 .il-strip button.addfx{border-style:dashed;color:var(--il-dim);}
