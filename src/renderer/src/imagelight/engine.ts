@@ -118,6 +118,7 @@ export interface Beam {
     | 'stars'
     | 'festoon'
     | 'image'
+    | 'flame'
   motifDiam?: number
   imageSrc?: string // 画像灯体（リアルな発光画像・dataURL）。色は持たず明るさだけで光る
   motifText?: string
@@ -386,111 +387,24 @@ export class ImageLightEngine {
   // ---- スペシャルエフェクト(特効): プロシージャル炎(フレーマー) ----
   // flame.glow を光マップに足す→既存の写真×光で「セットが炎に照らされる」。flame.body は前面に重ねる。
   readonly flame = new FlameFX()
-  flameEnabled = false
-  /** 配置した炎の位置(0..1のfx,fy)＝照明の「灯体」のように複数置く。 */
-  flamePoints: { fx: number; fy: number }[] = []
+  /** 炎の灯体(motif='flame'・点灯中)の位置を 0..1 で返す＝発射/チェイスの的。
+   *  配置・選択・移動・整列・削除・ミュートは灯体の仕組みがそのまま担当する。 */
+  get flamePoints(): { fx: number; fy: number }[] {
+    return this.beams
+      .filter((b) => b.motif === 'flame' && this.isLit(b))
+      .map((b) => ({ fx: b.x / LW, fy: b.y / LH }))
+  }
+  /** 炎の灯体が1つでもあれば特効ON（個別の入切はミュート＝灯体と同じ）。 */
+  get flameEnabled(): boolean {
+    return this.beams.some((b) => b.motif === 'flame')
+  }
   flameChaseOn = false
   flameChasePattern: 'random' | 'all' | 'inout' | 'outin' = 'inout'
   flameChaseMs = 420
   private chaseIdx = 0
   private lastChaseAt = 0
-  /** 特効の有効/無効。OFF の間は renderFrame で炎を一切触らない＝従来と完全に同じ。 */
-  setFlameEnabled(on: boolean): void {
-    this.flameEnabled = on
-    this.bump()
-  }
-  /** 写真クリックで炎を1つ置く（fx,fy=0..1）。 */
-  addFlamePoint(fx: number, fy: number): void {
-    this.flameEnabled = true
-    this.flamePoints.push({ fx: Math.max(0, Math.min(1, fx)), fy: Math.max(0, Math.min(1, fy)) })
-    this.bump()
-  }
-  clearFlamePoints(): void {
-    this.flamePoints = []
-    this.bump()
-  }
-  removeLastFlamePoint(): void {
-    this.flamePoints.pop()
-    this.bump()
-  }
-  // ---- 炎を「灯体と同じ操作」にするための選択・編集 ----
-  flameSel: number[] = [] // 選択中の炎インデックス
-  isFlameSelected(i: number): boolean {
-    return this.flameSel.includes(i)
-  }
-  selectFlame(i: number): void {
-    this.flameSel = [i]
-    this.bump()
-  }
-  toggleSelectFlame(i: number): void {
-    const k = this.flameSel.indexOf(i)
-    if (k >= 0) this.flameSel.splice(k, 1)
-    else this.flameSel.push(i)
-    this.bump()
-  }
-  clearFlameSel(): void {
-    if (this.flameSel.length) {
-      this.flameSel = []
-      this.bump()
-    }
-  }
-  /** 選択中の炎を削除（Deleteキー＝灯体と同じ）。 */
-  removeSelectedFlames(): void {
-    if (!this.flameSel.length) return
-    const sel = new Set(this.flameSel)
-    this.flamePoints = this.flamePoints.filter((_, i) => !sel.has(i))
-    this.flameSel = []
-    this.bump()
-  }
-  /** 選択中の炎を相対移動（矢印キー＝灯体と同じ。fx,fy単位）。 */
-  moveSelectedFlamesBy(dfx: number, dfy: number): void {
-    if (!this.flameSel.length) return
-    for (const i of this.flameSel) {
-      const p = this.flamePoints[i]
-      if (!p) continue
-      p.fx = Math.max(0, Math.min(1, p.fx + dfx))
-      p.fy = Math.max(0, Math.min(1, p.fy + dfy))
-    }
-    this.bump()
-  }
-  /** 炎の整列（選択が無ければ全部）。mode=left/centerX/right/top/middle/bottom。 */
-  alignFlames(mode: 'left' | 'centerX' | 'right' | 'top' | 'middle' | 'bottom'): void {
-    const idx = this.flameSel.length ? this.flameSel : this.flamePoints.map((_, i) => i)
-    if (idx.length < 2) return
-    const pts = idx.map((i) => this.flamePoints[i])
-    const xs = pts.map((p) => p.fx)
-    const ys = pts.map((p) => p.fy)
-    const minX = Math.min(...xs)
-    const maxX = Math.max(...xs)
-    const minY = Math.min(...ys)
-    const maxY = Math.max(...ys)
-    pts.forEach((p) => {
-      if (mode === 'left') p.fx = minX
-      else if (mode === 'centerX') p.fx = (minX + maxX) / 2
-      else if (mode === 'right') p.fx = maxX
-      else if (mode === 'top') p.fy = minY
-      else if (mode === 'middle') p.fy = (minY + maxY) / 2
-      else if (mode === 'bottom') p.fy = maxY
-    })
-    this.bump()
-  }
-  /** 炎を等間隔に（選択3つ以上が無ければ全部）。axis=x/y。 */
-  distributeFlames(axis: 'x' | 'y'): void {
-    const idx = this.flameSel.length ? this.flameSel : this.flamePoints.map((_, i) => i)
-    if (idx.length < 3) return
-    const key: 'fx' | 'fy' = axis === 'x' ? 'fx' : 'fy'
-    const sorted = idx.slice().sort((a, b) => this.flamePoints[a][key] - this.flamePoints[b][key])
-    const lo = this.flamePoints[sorted[0]][key]
-    const hi = this.flamePoints[sorted[sorted.length - 1]][key]
-    const step = (hi - lo) / (sorted.length - 1)
-    sorted.forEach((i, k) => {
-      this.flamePoints[i][key] = lo + step * k
-    })
-    this.bump()
-  }
   /** 置いた炎を全部いっぺんに発射（無ければ標準4本）。 */
   flameFireAll(): void {
-    this.flameEnabled = true
     if (this.flamePoints.length) this.flamePoints.forEach((p) => this.flame.fire(p.fx, p.fy))
     else this.flame.fireRow()
     this.bump()
@@ -548,19 +462,16 @@ export class ImageLightEngine {
   }
   /** 一発(単発)。fx,fy は 0..1（未指定は中央・床）。 */
   flameFire(fx = 0.5, fy = 1): void {
-    this.flameEnabled = true
     this.flame.fire(fx, fy)
     this.bump()
   }
   /** 標準4本を時間差で一斉発射(単発)。 */
   flameFireRow(): void {
-    this.flameEnabled = true
     this.flame.fireRow()
     this.bump()
   }
   /** 長押し開始(サスティン)。releaseで終わる。fx,fy は 0..1。 */
   flameHoldStart(fx = 0.5, fy = 1): void {
-    this.flameEnabled = true
     this.flame.startHold(fx, fy)
     this.bump()
   }
@@ -1794,6 +1705,7 @@ export class ImageLightEngine {
       | 'pixelpatt'
       | 'stars'
       | 'festoon'
+      | 'flame'
   ): void {
     if (this.beams.length >= MAX_BEAMS) return
     // 同種モチーフの最後の位置から右にずらす、なければ中央上寄りに配置
@@ -1828,7 +1740,8 @@ export class ImageLightEngine {
         type === 'patt' ? 20 :         // 50cm
         type === 'pixelpatt' ? 28 :    // 70cm
         type === 'stars' ? 400 :       // 星空フィールド 10m角
-        type === 'festoon' ? 240 : 200, // 垂れ幕 6m幅
+        type === 'festoon' ? 240 :     // 垂れ幕 6m幅
+        type === 'flame' ? 64 : 200,   // 炎 1.6m
       ...(type === 'marquee' ? { motifText: 'LIVE', motifSpeed: 8 } : {}),
       ...(type === 'stars' ? { motifSeed: Math.floor(this.rnd() * 1e6) + 1 } : {})
     })

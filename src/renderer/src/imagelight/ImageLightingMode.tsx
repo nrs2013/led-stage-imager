@@ -242,7 +242,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   }, [showKeys])
   const [hudTab, setHudTab] = useState<'cue' | 'light' | 'decor' | 'setup' | 'sfx'>('cue') // 編集モード右パネルのタブ
   // 特効(スペシャルエフェクト=炎)タブの状態
-  const [sfxOn, setSfxOn] = useState(false)
   const [sfxThick, setSfxThick] = useState(1.1)
   const [sfxChaseOn, setSfxChaseOn] = useState(false)
   const [sfxPattern, setSfxPattern] = useState<'random' | 'all' | 'inout' | 'outin'>('inout')
@@ -342,7 +341,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           ctx.fillRect(x, y, Math.abs(rb.x1 - rb.x0), Math.abs(rb.y1 - rb.y0))
         }
         drawSnapGuides(ctx, engine, scale)
-        if (hudTabRef.current === 'sfx') drawFlamePoints(ctx, engine)
       }
       // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更は即送る）。
       // フェイルオープン：未接続が確証できる時だけ省く。
@@ -480,17 +478,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
-      // SFXタブ: Delete で選択中の炎を削除（灯体と同じ操作）
-      if (
-        (e.code === 'Delete' || e.code === 'Backspace') &&
-        uiModeRef.current === 'build' &&
-        hudTabRef.current === 'sfx' &&
-        engine.flameSel.length > 0
-      ) {
-        engine.removeSelectedFlames()
-        e.preventDefault()
-        return
-      }
       // BUILD: Delete / Backspace で選択中の灯体を削除（PLAY中・全選択(ALL)時は無効＝誤爆防止）
       if (
         (e.code === 'Delete' || e.code === 'Backspace') &&
@@ -525,9 +512,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         const step = e.shiftKey ? 10 : 1
         const dx = e.code === 'ArrowLeft' ? -step : e.code === 'ArrowRight' ? step : 0
         const dy = e.code === 'ArrowUp' ? -step : e.code === 'ArrowDown' ? step : 0
-        if (hudTabRef.current === 'sfx' && engine.flameSel.length)
-          engine.moveSelectedFlamesBy(dx / LW, dy / LH)
-        else engine.moveSelectedBy(dx, dy)
+        engine.moveSelectedBy(dx, dy)
         e.preventDefault()
         return
       }
@@ -582,27 +567,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const onStageDown = (e: React.PointerEvent): void => {
     if (uiMode !== 'build') return // PLAYではステージは触らない（写真は下の棚をクリック）
     const p = evPos(e)
-    // 特効タブ: 灯体と同じ操作。⌘+クリックで配置／クリックで選択／Shiftで複数／空きで解除
-    if (hudTab === 'sfx') {
-      let fhit = -1
-      for (let i = engine.flamePoints.length - 1; i >= 0; i--) {
-        const fp = engine.flamePoints[i]
-        if (Math.abs(p.x - fp.fx * LW) < 26 && Math.abs(p.y - fp.fy * LH) < 26) {
-          fhit = i
-          break
-        }
-      }
-      if (fhit >= 0) {
-        if (e.shiftKey) engine.toggleSelectFlame(fhit)
-        else engine.selectFlame(fhit)
-      } else if (e.metaKey || e.ctrlKey) {
-        engine.addFlamePoint(p.x / LW, p.y / LH)
-        engine.selectFlame(engine.flamePoints.length - 1)
-      } else {
-        engine.clearFlameSel()
-      }
-      return
-    }
     // 0a. ピース作成モード — 写真の box 内ドラッグで新規ピース矩形を切り出す
     if (engine.pieceCreating) {
       const wb0 = engine.box
@@ -1516,39 +1480,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <span className="il2-kind">特効</span>
                     <b>SFX</b>
                   </div>
-                  <button
-                    className={'il2-switch' + (sfxOn ? ' on' : '')}
-                    onClick={() => {
-                      const v = !sfxOn
-                      setSfxOn(v)
-                      engine.setFlameEnabled(v)
-                    }}
-                    title="炎(フレーマー)を有効にする。下のセット(写真)が炎で照らされます"
-                  >
-                    <span className="il2-sw-track">
-                      <span className="il2-sw-knob" />
-                    </span>
-                    <span className="il2-sw-nm">
-                      FLAME<i>炎</i>
-                    </span>
-                    <span className="il2-sw-st">{sfxOn ? 'ON' : 'OFF'}</span>
-                  </button>
-                  <div className="il-lbl" style={{ marginTop: 8 }}>
-                    配置（⌘+クリックで置く・クリックで選択・Deleteで削除）
+                  <div className="il-lbl" style={{ marginTop: 6, opacity: 0.85 }}>
+                    炎は LIGHT タブの「増やす → 炎」で置く。選択・移動・整列・削除・ミュートは灯体と同じ操作。ここは出し方と効果だけ。
                   </div>
-                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
-                    <span style={{ fontSize: 12, opacity: 0.8, alignSelf: 'center' }}>
-                      置いた数: {engine.flamePoints.length}　選択: {engine.flameSel.length}
-                    </span>
-                    <button className="il-mini" onClick={() => engine.clearFlamePoints()} title="置いた炎を全部消す">
-                      全消し
-                    </button>
-                  </div>
-                  <div className="il-lbl" style={{ marginTop: 8 }}>整頓（選んだ炎／無ければ全部）</div>
-                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
-                    <button className="il-mini" onClick={() => engine.alignFlames('bottom')} title="下ぞろえ（床にそろえる）">下ぞろえ</button>
-                    <button className="il-mini" onClick={() => engine.distributeFlames('x')} title="横に等間隔（3つ以上）">横等間隔</button>
-                  </div>
+                  <div className="il-lbl" style={{ marginTop: 6 }}>置いた炎: {engine.flamePoints.length}</div>
                   <div className="il-lbl" style={{ marginTop: 8 }}>発射</div>
                   <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
                     <button className="il-mini" onClick={() => engine.flameFireAll()} title="置いた炎を全部いっぺんに">
@@ -2298,6 +2233,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 { type: 'pixelpatt' as const, label: 'PixelPAT' },
                 { type: 'stars' as const, label: 'Star' },
                 { type: 'festoon' as const, label: 'Banner' },
+                { type: 'flame' as const, label: 'Flame' },
               ]).map(({ type, label }) => (
                 <button
                   key={type}
@@ -3014,41 +2950,6 @@ function ThumbCanvas({ thumb }: { thumb: HTMLCanvasElement }): React.JSX.Element
 }
 
 /** ステージ上の編集マーカー（番号＋M/S・本番出力には出ない）。論理座標→表示座標。 */
-function drawFlamePoints(ctx: CanvasRenderingContext2D, engine: ImageLightEngine): void {
-  const pts = engine.flamePoints
-  if (!pts.length) return
-  ctx.save()
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i]
-    const x = p.fx * LW
-    const y = p.fy * LH
-    const s = 22
-    const sel = engine.isFlameSelected(i)
-    if (sel) {
-      // 選択中は灯体と同じ緑リングで囲う
-      ctx.beginPath()
-      ctx.arc(x, y - s * 0.4, s * 0.95, 0, Math.PI * 2)
-      ctx.lineWidth = 2
-      ctx.strokeStyle = 'rgba(120,255,160,0.95)'
-      ctx.stroke()
-    }
-    ctx.beginPath()
-    ctx.moveTo(x, y - s)
-    ctx.lineTo(x - s * 0.42, y)
-    ctx.lineTo(x + s * 0.42, y)
-    ctx.closePath()
-    ctx.fillStyle = 'rgba(255,150,40,0.85)'
-    ctx.fill()
-    ctx.beginPath()
-    ctx.arc(x, y, 4, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(255,236,180,0.95)'
-    ctx.fill()
-    ctx.lineWidth = 2
-    ctx.strokeStyle = sel ? 'rgba(120,255,160,0.95)' : 'rgba(255,210,120,0.9)'
-    ctx.stroke()
-  }
-  ctx.restore()
-}
 function drawMarkers(ctx: CanvasRenderingContext2D, engine: ImageLightEngine, scale: number): void {
   const { ox, oy } = viewFromEngine(ctx)
   ctx.setTransform(scale, 0, 0, scale, ox, oy)
