@@ -243,6 +243,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const [hudTab, setHudTab] = useState<'cue' | 'light' | 'decor' | 'setup' | 'sfx'>('cue') // 編集モード右パネルのタブ
   // 特効(スペシャルエフェクト=炎)タブの状態
   const [sfxThick, setSfxThick] = useState(1.1)
+  // 今 ⌘+クリックで置く特効の種類（これからスパークラー等を足す）
+  const [sfxType, setSfxType] = useState<'flame'>('flame')
   const [sfxChaseOn, setSfxChaseOn] = useState(false)
   const [sfxPattern, setSfxPattern] = useState<'random' | 'all' | 'inout' | 'outin'>('inout')
   const [sfxHeight, setSfxHeight] = useState(1)
@@ -694,7 +696,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         dragStartRef.current = p
       }
     } else if ((e.metaKey || e.ctrlKey) && beams.length < MAX_BEAMS) {
-      engine.addFixtureAt(p.x, p.y) // ⌘+クリックでだけ追加（誤爆防止）
+      // タブ連動: SFXタブなら選んでる特効を、それ以外は照明を ⌘+クリックで追加（誤爆防止）
+      if (hudTab === 'sfx') engine.addMotifAuto(sfxType, p.x, p.y)
+      else engine.addFixtureAt(p.x, p.y)
       engine.beginDrag()
       draggingRef.current = true
       dragStartRef.current = p
@@ -1480,8 +1484,23 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <span className="il2-kind">特効</span>
                     <b>SFX</b>
                   </div>
-                  <div className="il-lbl" style={{ marginTop: 6, opacity: 0.85 }}>
-                    炎は LIGHT タブの「増やす → 炎」で置く。選択・移動・整列・削除・ミュートは灯体と同じ操作。ここは出し方と効果だけ。
+                  <div className="il-lbl" style={{ marginTop: 6 }}>種類（⌘+クリックで写真に置く）</div>
+                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                    <button
+                      className={'il-mini' + (sfxType === 'flame' ? ' on' : '')}
+                      onClick={() => setSfxType('flame')}
+                    >
+                      炎
+                    </button>
+                  </div>
+                  <div className="il-lbl" style={{ marginTop: 6, opacity: 0.8 }}>
+                    SFXタブで ⌘+クリック → 選んだ特効を置く。選択・移動・削除・ミュートは灯体と同じ。
+                  </div>
+                  <div className="il-lbl" style={{ marginTop: 8 }}>整列（選んだ特効）</div>
+                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                    <button className="il-mini" onClick={() => engine.alignBottom()} title="下ぞろえ（床にそろえる）">下ぞろえ</button>
+                    <button className="il-mini" onClick={() => engine.distributeX()} title="横に等間隔（3つ以上）">横等間隔</button>
+                    <button className="il-mini" onClick={() => engine.alignMiddle()} title="上下の中央でそろえる">上下中央</button>
                   </div>
                   <div className="il-lbl" style={{ marginTop: 6 }}>置いた炎: {engine.flamePoints.length}</div>
                   <div className="il-lbl" style={{ marginTop: 8 }}>発射</div>
@@ -2233,7 +2252,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 { type: 'pixelpatt' as const, label: 'PixelPAT' },
                 { type: 'stars' as const, label: 'Star' },
                 { type: 'festoon' as const, label: 'Banner' },
-                { type: 'flame' as const, label: 'Flame' },
               ]).map(({ type, label }) => (
                 <button
                   key={type}

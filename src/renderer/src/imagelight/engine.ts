@@ -1102,7 +1102,7 @@ export class ImageLightEngine {
     // 特効: チェイス進行→炎を1フレーム進める（OFF時は一切触らない＝従来と完全に同じ）
     if (this.flameEnabled) {
       this.tickFlameChase(now)
-      this.flame.tick()
+      this.flame.tick(now)
     }
     const flameLit = this.flameEnabled && this.flame.active
 
@@ -1705,15 +1705,17 @@ export class ImageLightEngine {
       | 'pixelpatt'
       | 'stars'
       | 'festoon'
-      | 'flame'
+      | 'flame',
+    atX?: number,
+    atY?: number
   ): void {
     if (this.beams.length >= MAX_BEAMS) return
-    // 同種モチーフの最後の位置から右にずらす、なければ中央上寄りに配置
+    // atX/atY 指定（⌘+クリック地点）があればそこ。無ければ同種の最後から右にずらして自動配置。
     const same = this.beams.filter((b) => b.motif === type)
     const last = same[same.length - 1]
-    let x = last ? last.x + 220 : 800
-    let y = last ? last.y : 380
-    if (x > 1460) { x = 200 + ((same.length * 180) % 1200); y += 180 }
+    let x = atX ?? (last ? last.x + 220 : 800)
+    let y = atY ?? (last ? last.y : 380)
+    if (atX === undefined && x > 1460) { x = 200 + ((same.length * 180) % 1200); y += 180 }
     this.pushHistory()
     this.rigCustomized = true
     const warm: RGB3 = [255, 190, 100]

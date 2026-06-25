@@ -107,7 +107,7 @@ export const DEFAULT_ROW = [0.17, 0.42, 0.63, 0.79]
 const ROW_STR = [1.0, 1.08, 0.85, 0.78]
 
 export class FlameFX {
-  params: FlameParams = { thick: 1.1, dense: 1.6, churn: 0.75, speed: 1.5, height: 1, dur: 1 }
+  params: FlameParams = { thick: 1.1, dense: 1.6, churn: 0.75, speed: 2.4, height: 1, dur: 1 }
 
   private heat = new Float32Array(GW * GH)
   private noise = new Float32Array(NW * NH)
@@ -221,9 +221,9 @@ export class FlameFX {
     }
   }
 
-  private emit(s: Shot, ms: number): void {
+  private emit(s: Shot, ms: number, step: number): void {
     const st = s.str
-    const rate = Math.round((ms < 100 ? 40 : 27) * this.params.dense)
+    const rate = Math.round((ms < 100 ? 40 : 27) * this.params.dense * step)
     const climb = ms < 100 ? 1.1 : 1
     const bw = (7 + this.params.thick * 26) * st * s.wmul
     for (let i = 0; i < rate; i++) {
@@ -234,7 +234,7 @@ export class FlameFX {
         sp: (Math.random() - 0.5) * bw,
         y: s.by - Math.random() * 5,
         vx: (Math.random() - 0.5) * 0.1,
-        vy: -(7.4 + Math.random() * 3.4) * st * climb * 2 * this.params.height, // 立ち上がり×2(今くらい)×背丈
+        vy: -(7.4 + Math.random() * 3.4) * st * climb * this.params.height, // 立ち上がり(元v19)×背丈。×2は突き抜けて細い筋になるのでやめた
         age: 0,
         max: 52 + Math.random() * 26,
         en: 6.8 + Math.random() * 1.8,
@@ -258,21 +258,28 @@ export class FlameFX {
   }
 
   /** 1フレーム進める＋ body / glow を更新する。engine の renderFrame から毎フレーム呼ぶ。 */
-  tick(): void {
-    this.frame++
+  private lastNow = 0
+  tick(now: number): void {
+    // 実時間ベース: 描画が30fpsに間引かれても/CPUが落ちても、"決めた速さ"で動かす。
+    // step = 直前tickからの経過を60fpsコマ換算（0.3〜4でクランプ＝初回やカクつきで暴れない）。
+    const step = this.lastNow ? Math.min(4, Math.max(0.3, (now - this.lastNow) / 16.67)) : 1
+    this.lastNow = now
+    this.frame += step
     const sp = this.params.speed
     const churn = this.params.churn
     const h = this.heat
-    for (let i = 0; i < h.length; i++) h[i] *= 0.78 // 消える速さ＝今くらい(従来0.83より少し速く引く)
+    const dec = Math.pow(0.78, step) // 消える速さ（実時間）
+    const depK = (1 - dec) / 0.22 // fpsが変わっても炎の明るさ(熱の釣り合い)を保つ補正
+    for (let i = 0; i < h.length; i++) h[i] *= dec
 
-    // shots: 発射タイミング・サスティン・残炎の寿命管理
+    // shots: 発射タイミング・サスティン・残炎の寿命管理（frameが実時間なのでmsも実時間）
     for (let si = this.shots.length - 1; si >= 0; si--) {
       const s = this.shots[si]
       const ms = (this.frame - s.t0) * 16.67
       if (ms < 0) continue
       const dur = this.params.dur // 燃えてる時間＝一発の持続をスケール
       const emitting = s.held ? true : s.rel ? false : ms <= 560 * dur
-      if (emitting) this.emit(s, ms)
+      if (emitting) this.emit(s, ms, step)
       const dead = s.held
         ? false
         : s.rel
@@ -283,12 +290,14 @@ export class FlameFX {
 
     // particles
     const cap = 7000
+    const vxDamp = Math.pow(0.9, step)
+    const vyDamp = Math.pow(0.975, step)
     for (let i = this.parts.length - 1; i >= 0; i--) {
       const p = this.parts[i]
-      p.age++
+      p.age += step
       const tt = p.age / p.max
       if (tt >= 1) {
-        if (Math.random() < 0.09)
+        if (Math.random() < 0.09 * step)
           this.smoke.push({
             x: p.x,
             y: p.y,
@@ -308,27 +317,27 @@ export class FlameFX {
       const widthMul = Math.max(0.68, 1 + wob * 0.85 * churn)
       const target = p.cx + cshift * 3.5 * churn + p.sp * env * widthMul
       const amp = (0.05 + tt * tt * 0.38) * sp
-      p.vx += (Math.random() - 0.5) * amp + (target - p.x) * 0.06 * (1 - tt * 0.3)
-      p.vx *= 0.9
-      p.vy *= 0.975
-      p.x += p.vx
-      p.y += p.vy
+      p.vx += ((Math.random() - 0.5) * amp + (target - p.x) * 0.06 * (1 - tt * 0.3)) * step
+      p.vx *= vxDamp
+      p.vy *= vyDamp
+      p.x += p.vx * step
+      p.y += p.vy * step
       const nf = 1 - churn * 0.55 * (1 - this.nz(p.x, p.y, p.no))
       const en = p.en * (1 - tt * 0.4) * p.bri * nf
-      this.dep(p.x, p.y, en)
+      this.dep(p.x, p.y, en * depK)
     }
     if (this.parts.length > cap) this.parts.splice(0, this.parts.length - cap)
 
     for (let i = this.smoke.length - 1; i >= 0; i--) {
       const m = this.smoke[i]
-      m.age++
+      m.age += step
       if (m.age >= m.max) {
         this.smoke.splice(i, 1)
         continue
       }
-      m.x += m.vx
-      m.y += m.vy
-      m.r += 0.4
+      m.x += m.vx * step
+      m.y += m.vy * step
+      m.r += 0.4 * step
     }
 
     // heat -> 色(等倍 off)
