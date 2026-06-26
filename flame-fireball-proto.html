@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>FIREBALL 調整ツール — 単発/長押し・多数つまみ</title>
+<style>
+  :root{ --line:#2a201d; --ink:#f3e7df; --sub:#b9a79c; --accent:#ff7a33; --accent2:#ffb066; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#000;color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;}
+  #stage{position:fixed;inset:0;overflow:hidden;background:#000;cursor:crosshair}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #fx{pointer-events:none;mix-blend-mode:screen}
+  #panel{position:fixed;top:12px;left:12px;width:268px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow:auto;
+    background:rgba(22,16,15,.86);backdrop-filter:blur(10px);
+    border:1px solid var(--line);border-radius:14px;padding:12px 12px 10px;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);z-index:10;user-select:none}
+  #panel h1{font-size:12px;letter-spacing:.04em;margin:0 0 2px;color:var(--accent2);font-weight:700}
+  #panel .sub{font-size:10px;color:var(--sub);margin:0 0 8px;line-height:1.5}
+  .grp{font-size:10px;color:var(--accent2);margin:10px 0 2px;border-top:1px solid var(--line);padding-top:6px;letter-spacing:.05em}
+  .row{margin:6px 0}
+  .row label{display:flex;justify-content:space-between;font-size:11px;color:var(--sub);margin-bottom:2px}
+  .row label b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600}
+  input[type=range]{width:100%;height:18px;-webkit-appearance:none;background:transparent;margin:0}
+  input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:3px;background:linear-gradient(90deg,#5a2a16,#ff7a33)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+    background:var(--accent2);margin-top:-6px;box-shadow:0 0 0 3px rgba(255,122,51,.22);cursor:grab}
+  .btns{display:flex;gap:8px;margin:10px 0 2px}
+  button{flex:1;border:1px solid var(--line);background:#221715;color:var(--ink);
+    border-radius:10px;padding:10px 6px;font-size:12px;font-weight:600;cursor:pointer}
+  button:hover{border-color:var(--accent);color:var(--accent2)}
+  button.fire{background:linear-gradient(180deg,#ff7a33,#d8480f);border-color:#ff8a4a;color:#1a0d06}
+  .mini{display:flex;gap:6px;margin-top:6px}
+  .mini button{font-size:10px;padding:6px 4px;flex:1}
+  .hint{font-size:10px;color:var(--sub);line-height:1.6;margin-top:8px;border-top:1px solid var(--line);padding-top:7px}
+  .hint kbd{background:#2a201d;border:1px solid #3a2c27;border-radius:4px;padding:1px 5px;color:var(--accent2)}
+  #fps{position:fixed;bottom:10px;right:12px;font-size:10px;color:#6b5950;z-index:10;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="gl"></canvas><canvas id="fx"></canvas></div>
+
+<div id="panel">
+  <h1>🔥 FIREBALL 調整ツール</h1>
+  <p class="sub">画面クリック/長押しで発火（押した位置が火元）。<kbd>Space</kbd>長押し・<kbd>F</kbd>単発。つまみは自動保存。</p>
+  <div class="btns"><button id="btnSingle">単発</button><button id="btnHold" class="fire">長押し（押す間ずっと）</button></div>
+
+  <div class="grp">■ 形</div>
+  <div class="row"><label>高さ <b id="vheight">2.49</b></label><input id="height" type="range" min="0.8" max="3.6" step="0.01" value="2.49"></div>
+  <div class="row"><label>太さ（全体） <b id="vwidth">1.08</b></label><input id="width" type="range" min="0.4" max="2.2" step="0.01" value="1.08"></div>
+  <div class="row"><label>根元の細さ <b id="vneck">0.023</b></label><input id="neck" type="range" min="0.004" max="0.08" step="0.001" value="0.023"></div>
+  <div class="row"><label>頭の太さ（火球の膨らみ） <b id="vheadPeak">0.27</b></label><input id="headPeak" type="range" min="0.10" max="0.40" step="0.005" value="0.27"></div>
+
+  <div class="grp">■ 動き・寿命</div>
+  <div class="row"><label>立ち上がりの速さ（小=速い） <b id="vbloomT">0.22</b></label><input id="bloomT" type="range" min="0.06" max="0.6" step="0.01" value="0.22"></div>
+  <div class="row"><label>消え始め（秒） <b id="vlifeStart">0.30</b></label><input id="lifeStart" type="range" min="0.3" max="1.6" step="0.01" value="0.30"></div>
+  <div class="row"><label>消える速さ（小=速い・秒） <b id="vclearDur">0.91</b></label><input id="clearDur" type="range" min="0.25" max="1.6" step="0.01" value="0.91"></div>
+  <div class="row"><label>流れの速さ（churn） <b id="vchurn">1.40</b></label><input id="churn" type="range" min="0.4" max="2.6" step="0.01" value="1.40"></div>
+
+  <div class="grp">■ 質感・色</div>
+  <div class="row"><label>モコモコ（カリフラワー） <b id="vroil">1.36</b></label><input id="roil" type="range" min="0" max="2.0" step="0.01" value="1.36"></div>
+  <div class="row"><label>乱流の細かさ <b id="vroilFreq">1.57</b></label><input id="roilFreq" type="range" min="0.5" max="2.0" step="0.01" value="1.57"></div>
+  <div class="row"><label>オレンジ量（大=橙多） <b id="vorange">0.76</b></label><input id="orange" type="range" min="0" max="1" step="0.01" value="0.76"></div>
+  <div class="row"><label>暖色 ←赤 / 黄→ <b id="vwarm">1.00</b></label><input id="warm" type="range" min="0" max="1" step="0.01" value="1.00"></div>
+  <div class="row"><label>明るさ <b id="vbright">0.70</b></label><input id="bright" type="range" min="0.3" max="2.2" step="0.01" value="0.70"></div>
+  <div class="row"><label>火花の量 <b id="vspark">0.56</b></label><input id="spark" type="range" min="0" max="1.5" step="0.01" value="0.56"></div>
+
+  <div class="mini"><button id="btnReset">つまみ初期化</button><button id="btnAuto">連続発火 ON/OFF</button></div>
+  <div class="hint"><kbd>クリック/長押し</kbd>発火 ・ <kbd>Space</kbd>長押し ・ <kbd>F</kbd>単発 ・ <kbd>R</kbd>初期化</div>
+</div>
+<div id="fps">—</div>
+
+<script>
+const glc=document.getElementById('gl'), fxc=document.getElementById('fx');
+const gl=glc.getContext('webgl',{antialias:false,premultipliedAlpha:false});
+const fx=fxc.getContext('2d');
+const DPR=Math.min(2,window.devicePixelRatio||1);
+
+const VS=`attribute vec2 a; void main(){ gl_Position=vec4(a,0.,1.); }`;
+const FS=`
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime,uAge,uHeight,uWidth,uNeck,uHeadPeak,uBloomT,uLifeStart,uClearDur,uChurn,uRoil,uRoilFreq,uOrange,uWarm,uBright,uPytop,uBaseX;
+float hash(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);
+ float a=hash(i),b=hash(i+vec2(1.,0.)),c=hash(i+vec2(0.,1.)),d=hash(i+vec2(1.,1.));
+ return mix(mix(a,b,u.x),mix(c,d,u.x),u.y);}
+float fbm(vec2 p){float v=0.,a=0.55;for(int i=0;i<6;i++){v+=a*noise(p);p=p*2.02+vec2(1.7,9.2);a*=0.5;}return v;}
+float fbm4(vec2 p){float v=0.,a=0.55;for(int i=0;i<4;i++){v+=a*noise(p);p=p*2.02+vec2(1.7,9.2);a*=0.5;}return v;}
+vec2 curl(vec2 p){float e=0.06;
+ float x=fbm(p+vec2(0.,e))-fbm(p-vec2(0.,e)); float y=fbm(p+vec2(e,0.))-fbm(p-vec2(e,0.));
+ return vec2(x,-y)/(2.*e);}
+
+vec3 fireball(float px, float py){
+ float age=uAge;
+ float bloom=smoothstep(0.0,uBloomT,age);
+ float headC=0.20+0.42*bloom;
+ float peak=mix(0.07,uHeadPeak,bloom)*uWidth;
+ float neck=uNeck*uWidth;
+ float fadeIn=smoothstep(0.02,0.10,age);
+ float h=clamp(py/(0.82*uHeight),-0.08,1.5);
+ float vsp=uHeight*uChurn;                              // 流れの速さは高さ比例（スローモー防止）
+ vec2 cc=curl(vec2(px*3.0, py*3.0 - uTime*1.8*vsp));
+ float wx=px+0.06*cc.x, wy=py+0.06*cc.y;
+ float nb=fbm(vec2(wx*4.5*uRoilFreq+3.0, wy*4.5*uRoilFreq - uTime*2.5*vsp));
+ float nb2=fbm4(vec2(wx*9.5*uRoilFreq-5.0, wy*9.5*uRoilFreq - uTime*3.6*vsp));
+ float roil=0.62*nb+0.38*nb2;
+ float widen=smoothstep(0.0,headC,h);
+ float taper=1.0-smoothstep(headC+0.12,headC+0.55,h);
+ float halfw=max(neck+(peak-neck)*widen*(0.35+0.65*taper),0.012);
+ float xr=px/halfw; float radial=exp(-2.5*xr*xr);
+ float headw=smoothstep(0.25,0.85,h);
+ float dens=clamp(radial*(0.85+(0.4+0.5*headw)*(roil-0.5)*2.0*uRoil)
+                  - smoothstep(0.30,1.05,abs(xr))*(1.0-roil)*(0.9+0.8*headw), 0.0, 1.7);
+ float base_on=smoothstep(-0.07,0.03,h);
+ float fray=smoothstep(headC+0.15+0.30*roil, headC+0.62, h);
+ float vert=base_on*(1.0-fray);
+ // 下から消える（前線はroilでジッター＝線にしない）。上には伸びない。
+ float clearFront=-0.18+2.0*smoothstep(uLifeStart, uLifeStart+uClearDur, age);
+ float hj=h+(roil-0.5)*0.42;
+ float clearGate=smoothstep(clearFront-0.04, clearFront+0.26, hj);
+ float alive=fadeIn*clearGate;
+ dens=dens*vert*alive;
+ float coolAge=1.2-0.5*smoothstep(uLifeStart, uLifeStart+uClearDur*0.85, age);
+ float heat=pow(max(dens*(1.55-0.7*abs(xr)-0.25*headw)*coolAge,0.0),1.08);
+ float e=heat*2.6*uBright;
+ float whi_lo=1.55+0.85*uOrange, whi_hi=2.30+0.85*uOrange;
+ float w_red=1.0-smoothstep(0.10,0.55,e);
+ float w_white=smoothstep(whi_lo,whi_hi,e);
+ float w_org=clamp(1.0-w_red-w_white,0.0,1.0);
+ vec3 col=(w_red*vec3(1.20,0.25,0.04)+w_org*vec3(1.95,0.72,0.15)+w_white*vec3(2.60,2.35,2.05))*e;
+ col.r*=1.0+(0.5-uWarm)*0.30; col.b*=1.0+(uWarm-0.5)*0.40;
+ return col;
+}
+void main(){
+ vec2 uv=gl_FragCoord.xy/uRes;
+ float py=uv.y*uPytop-0.06;
+ float px=(uv.x-0.5)*(uRes.x/uRes.y)*uPytop - uBaseX;
+ vec3 o=vec3(1.0)-exp(-fireball(px,py)*1.15);
+ o=pow(o,vec3(0.4545));
+ gl_FragColor=vec4(o,1.0);
+}`;
+function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);
+ if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(x));return x;}
+const prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));
+gl.linkProgram(prog);if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const aloc=gl.getAttribLocation(prog,'a');gl.enableVertexAttribArray(aloc);gl.vertexAttribPointer(aloc,2,gl.FLOAT,false,0,0);
+const U=n=>gl.getUniformLocation(prog,n);
+const u={res:U('uRes'),time:U('uTime'),age:U('uAge'),height:U('uHeight'),width:U('uWidth'),neck:U('uNeck'),
+ headPeak:U('uHeadPeak'),bloomT:U('uBloomT'),lifeStart:U('uLifeStart'),clearDur:U('uClearDur'),churn:U('uChurn'),
+ roil:U('uRoil'),roilFreq:U('uRoilFreq'),orange:U('uOrange'),warm:U('uWarm'),bright:U('uBright'),pytop:U('uPytop'),baseX:U('uBaseX')};
+
+const DEF={height:2.49,width:1.08,neck:0.023,headPeak:0.27,bloomT:0.22,lifeStart:0.30,clearDur:0.91,churn:1.40,roil:1.36,roilFreq:1.57,orange:0.76,warm:1.0,bright:0.70,spark:0.56};
+const P=Object.assign({},DEF);
+let W=0,H=0,baseX=0.5;
+function resize(){W=innerWidth;H=innerHeight;glc.width=fxc.width=Math.round(W*DPR);glc.height=fxc.height=Math.round(H*DPR);gl.viewport(0,0,glc.width,glc.height);}
+addEventListener('resize',resize);resize();
+
+// ---- 発火ロジック：uTime=churn常時進行 / age=寿命(長押しで持続保持) ----
+let firing=false, age=0, holding=false, holdMode=false, autoFire=false, autoT=0;
+function emitSparks(n){const o={x:baseX*W,y:H*(1-0.04)};
+ for(let i=0;i<n;i++){const a=-Math.PI/2+(Math.random()-0.5)*0.5;const sp=2+Math.random()*4.5;
+  sparks.push({x:o.x+(Math.random()-0.5)*12,y:o.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp*(2.4+Math.random()*2.6),
+   life:1,decay:0.012+Math.random()*0.02,size:0.8+Math.random()*1.6,hot:Math.random()});}}
+const sparks=[];
+function fireSingle(){age=0;firing=true;holdMode=false;holding=false;emitSparks(Math.round(12*P.spark+3));}
+function pressHold(){age=0;firing=true;holdMode=true;holding=true;emitSparks(Math.round(14*P.spark+4));}
+function release(){holding=false;}
+
+function updateSparks(){fx.clearRect(0,0,fxc.width,fxc.height);fx.save();fx.scale(DPR,DPR);fx.globalCompositeOperation='lighter';
+ for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];s.vy+=0.17;s.x+=s.vx;s.y+=s.vy;s.life-=s.decay;
+  if(s.life<=0||s.y>H){sparks.splice(i,1);continue;}const a=Math.max(0,s.life);
+  fx.beginPath();fx.fillStyle=s.hot>0.6?`rgba(255,238,205,${a})`:`rgba(255,140,55,${a})`;fx.arc(s.x,s.y,s.size*(0.6+a*0.5),0,6.283);fx.fill();}
+ fx.restore();}
+
+let t0=performance.now(),last=t0,frames=0,facc=0;
+function frame(now){
+ const dt=Math.min(0.05,(now-last)/1000);last=now;
+ if(autoFire){autoT-=dt;if(autoT<=0){fireSingle();autoT=P.lifeStart+P.clearDur+0.6;}}
+ if(firing){
+  age+=dt;
+  if(holdMode&&holding){const hp=Math.max(0.05,P.lifeStart-0.05);if(age>hp)age=hp;}
+  if(age>P.lifeStart+P.clearDur+0.5)firing=false;
+  if(firing&&age<P.lifeStart&&P.spark>0&&Math.random()<P.spark*0.5)emitSparks(1);
+ }
+ updateSparks();
+ const pytop=1.35*P.height;
+ gl.uniform2f(u.res,glc.width,glc.height);
+ gl.uniform1f(u.time,(now-t0)/1000);
+ gl.uniform1f(u.age, firing?age:10.0);
+ gl.uniform1f(u.height,P.height);gl.uniform1f(u.width,P.width);gl.uniform1f(u.neck,P.neck);
+ gl.uniform1f(u.headPeak,P.headPeak);gl.uniform1f(u.bloomT,P.bloomT);gl.uniform1f(u.lifeStart,P.lifeStart);
+ gl.uniform1f(u.clearDur,P.clearDur);gl.uniform1f(u.churn,P.churn);gl.uniform1f(u.roil,P.roil);
+ gl.uniform1f(u.roilFreq,P.roilFreq);gl.uniform1f(u.orange,P.orange);gl.uniform1f(u.warm,P.warm);
+ gl.uniform1f(u.bright,P.bright);gl.uniform1f(u.pytop,pytop);
+ gl.uniform1f(u.baseX,(baseX-0.5)*(glc.width/glc.height)*pytop);
+ gl.drawArrays(gl.TRIANGLES,0,3);
+ frames++;facc+=dt;if(facc>=0.5){document.getElementById('fps').textContent=Math.round(frames/facc)+' fps';frames=0;facc=0;}
+ requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- controls + localStorage ----
+const KEYS=Object.keys(DEF);
+const LSKEY='fireballToolP';
+let saved=null; try{saved=JSON.parse(localStorage.getItem(LSKEY)||'null');}catch(e){}
+function bindAll(){KEYS.forEach(k=>{const el=document.getElementById(k),out=document.getElementById('v'+k);
+ if(saved&&saved[k]!=null) el.value=saved[k];
+ const apply=()=>{P[k]=parseFloat(el.value);out.textContent=(k==='neck'?P[k].toFixed(3):P[k].toFixed(2));
+   try{localStorage.setItem(LSKEY,JSON.stringify(P));}catch(e){}};
+ el.addEventListener('input',apply);apply();});}
+bindAll();
+function setSliders(obj){KEYS.forEach(k=>{const el=document.getElementById(k);el.value=obj[k];el.dispatchEvent(new Event('input'));});}
+document.getElementById('btnReset').addEventListener('click',e=>{e.stopPropagation();setSliders(DEF);});
+document.getElementById('btnAuto').addEventListener('click',e=>{e.stopPropagation();autoFire=!autoFire;autoT=0;});
+document.getElementById('btnSingle').addEventListener('click',e=>{e.stopPropagation();fireSingle();});
+const bh=document.getElementById('btnHold');
+bh.addEventListener('pointerdown',e=>{e.stopPropagation();pressHold();});
+addEventListener('pointerup',()=>release());
+
+function setBaseFromEvent(e){const r=glc.getBoundingClientRect();const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left;baseX=Math.min(0.97,Math.max(0.03,cx/r.width));}
+const stage=document.getElementById('stage');
+stage.addEventListener('pointerdown',e=>{setBaseFromEvent(e);pressHold();});
+addEventListener('pointercancel',()=>release());
+addEventListener('keydown',e=>{if(e.repeat)return;
+ if(e.code==='Space'){e.preventDefault();pressHold();}
+ if(e.key==='f'||e.key==='F')fireSingle();
+ if(e.key==='r'||e.key==='R')setSliders(DEF);});
+addEventListener('keyup',e=>{if(e.code==='Space')release();});
+</script>
+</body>
+</html>

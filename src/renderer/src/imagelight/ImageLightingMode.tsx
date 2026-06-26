@@ -258,14 +258,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     showKeysRef.current = showKeys
   }, [showKeys])
   const [hudTab, setHudTab] = useState<'cue' | 'light' | 'decor' | 'setup' | 'sfx'>('cue') // 編集モード右パネルのタブ
-  // 特効(スペシャルエフェクト=炎)タブの状態
-  const [sfxThick, setSfxThick] = useState(1.1)
-  // 今 ⌘+クリックで置く特効の種類（これからスパークラー等を足す）
-  const [sfxType, setSfxType] = useState<'flame'>('flame')
-  const [sfxChaseOn, setSfxChaseOn] = useState(false)
-  const [sfxPattern, setSfxPattern] = useState<'random' | 'all' | 'inout' | 'outin'>('inout')
-  const [sfxHeight, setSfxHeight] = useState(1)
-  const [sfxInterval, setSfxInterval] = useState(420)
+  // 特効(SFX)タブ。設定値は engine が唯一の正＝スライダーは engine を直接読み書きする
+  //（ローカルmirror state を持たない＝保存復元・MIDIでズレない）。UIだけの状態は下記2つ。
+  const [sfxType, setSfxType] = useState<'flame' | 'sparkler' | 'rain' | 'smoke'>('flame')
+  const [showAdv, setShowAdv] = useState(false) // 「詳しく」（細かい設定）の開閉
   const hudTabRef = useRef(hudTab)
   useEffect(() => {
     hudTabRef.current = hudTab
@@ -418,6 +414,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     map.set('rig.w0', (v01) => engine.setRig('w0', Math.round(8 + (180 - 8) * v01)))
     map.set('rig.w1', (v01) => engine.setRig('w1', Math.round(20 + (700 - 20) * v01)))
     map.set('rig.len', (v01) => engine.setRig('len', Math.round(80 + (1000 - 80) * v01)))
+    // 特効(SFX)の全ツマミも MIDI で動かせるよう登録（◎で Learn して物理つまみ/フェーダーに割当）
+    for (const grp of Object.values(SFX_PARAMS)) {
+      for (const p of [...grp.core, ...grp.more]) {
+        map.set(p.id, (v01) => p.set(engine, p.min + (p.max - p.min) * v01))
+      }
+    }
     engine.setParamApply(map)
   }, [engine])
 
@@ -713,9 +715,11 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         dragStartRef.current = p
       }
     } else if ((e.metaKey || e.ctrlKey) && beams.length < MAX_BEAMS) {
-      // タブ連動: SFXタブなら選んでる特効を、それ以外は照明を ⌘+クリックで追加（誤爆防止）
-      if (hudTab === 'sfx') engine.addMotifAuto(sfxType, p.x, p.y)
-      else engine.addFixtureAt(p.x, p.y)
+      // タブ連動: SFXタブなら選んでる特効を、それ以外は照明を ⌘+クリックで追加（誤爆防止）。
+      // 雨/雪・スモークは「受け系」で置く灯体ではない＝⌘+クリックでは何も置かない。
+      if (hudTab === 'sfx') {
+        if (sfxType === 'flame' || sfxType === 'sparkler') engine.addMotifAuto(sfxType, p.x, p.y)
+      } else engine.addFixtureAt(p.x, p.y)
       engine.beginDrag()
       draggingRef.current = true
       dragStartRef.current = p
@@ -1354,7 +1358,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   const label: Record<string, string> = {
                     streetlamp: 'Street', chandelier: 'Chandelier', marquee: 'Marquee', image: 'Image',
                     bulb: 'Bulb', parlight: 'PAR', blinder: 'Mini', patt: 'PAT', pixelpatt: 'PixelPAT',
-                    stars: 'Star', festoon: 'Banner'
+                    stars: 'Star', festoon: 'Banner', flame: 'FLAMER', sparkler: 'SPARKLER'
                   }
                   return (
                     <div key={i} className="il-frow" style={{ gap: 4, marginBottom: 3 }}>
@@ -1479,16 +1483,16 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   DECOR<i>電飾</i>
                 </button>
                 <button
-                  className={'il2hud-tab' + (hudTab === 'setup' ? ' on' : '')}
-                  onClick={() => setHudTab('setup')}
-                >
-                  SETUP<i>設定</i>
-                </button>
-                <button
                   className={'il2hud-tab' + (hudTab === 'sfx' ? ' on' : '')}
                   onClick={() => setHudTab('sfx')}
                 >
                   SFX<i>特効</i>
+                </button>
+                <button
+                  className={'il2hud-tab' + (hudTab === 'setup' ? ' on' : '')}
+                  onClick={() => setHudTab('setup')}
+                >
+                  SETUP<i>設定</i>
                 </button>
               </div>
             </div>
@@ -1501,117 +1505,68 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <span className="il2-kind">特効</span>
                     <b>SFX</b>
                   </div>
-                  <div className="il-lbl" style={{ marginTop: 6 }}>種類（⌘+クリックで写真に置く）</div>
-                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
-                    <button
-                      className={'il-mini' + (sfxType === 'flame' ? ' on' : '')}
-                      onClick={() => setSfxType('flame')}
-                    >
-                      炎
-                    </button>
+
+                  <div className="il2-subtabs">
+                    <button className={'il2-subtab' + (sfxType === 'flame' ? ' on' : '')} onClick={() => setSfxType('flame')}>FLAMER</button>
+                    <button className={'il2-subtab' + (sfxType === 'sparkler' ? ' on' : '')} onClick={() => setSfxType('sparkler')}>SPARKLER</button>
+                    <button className={'il2-subtab' + (sfxType === 'rain' ? ' on' : '')} onClick={() => setSfxType('rain')}>RAIN/SNOW</button>
+                    <button className={'il2-subtab' + (sfxType === 'smoke' ? ' on' : '')} onClick={() => setSfxType('smoke')}>SMOKE</button>
                   </div>
-                  <div className="il-lbl" style={{ marginTop: 6, opacity: 0.8 }}>
-                    SFXタブで ⌘+クリック → 選んだ特効を置く。選択・移動・削除・ミュートは灯体と同じ。
-                  </div>
-                  <div className="il-lbl" style={{ marginTop: 8 }}>整列（選んだ特効）</div>
-                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
-                    <button className="il-mini" onClick={() => engine.alignBottom()} title="下ぞろえ（床にそろえる）">下ぞろえ</button>
-                    <button className="il-mini" onClick={() => engine.distributeX()} title="横に等間隔（3つ以上）">横等間隔</button>
-                    <button className="il-mini" onClick={() => engine.alignMiddle()} title="上下の中央でそろえる">上下中央</button>
-                  </div>
-                  <div className="il-lbl" style={{ marginTop: 6 }}>置いた炎: {engine.flamePoints.length}</div>
-                  <div className="il-lbl" style={{ marginTop: 8 }}>発射</div>
-                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
-                    <button className="il-mini" onClick={() => engine.flameFireAll()} title="置いた炎を全部いっぺんに">
-                      全部
-                    </button>
-                    <button
-                      className="il-mini"
-                      onPointerDown={() => engine.flameHoldStart(0.5)}
-                      onPointerUp={() => engine.flameHoldRelease()}
-                      onPointerLeave={() => engine.flameHoldRelease()}
-                      title="押している間ずっと出る(離すと終わる)＝MIDIホールド想定"
-                    >
-                      長押し
-                    </button>
-                  </div>
-                  <div className="il-lbl" style={{ marginTop: 8 }}>チェイス（自動で動かす）</div>
-                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
-                    <button
-                      className={'il-mini' + (sfxChaseOn ? ' on' : '')}
-                      onClick={() => {
-                        const v = !sfxChaseOn
-                        setSfxChaseOn(v)
-                        engine.setFlameChase(v)
-                      }}
-                      title="置いた炎を自動で順番に発火"
-                    >
-                      {sfxChaseOn ? 'チェイス ON' : 'チェイス OFF'}
-                    </button>
-                  </div>
-                  <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                    {(
-                      [
-                        ['random', 'ランダム'],
-                        ['all', '同時(ALL)'],
-                        ['inout', '内→外'],
-                        ['outin', '外→内']
-                      ] as const
-                    ).map(([key, label]) => (
-                      <button
-                        key={key}
-                        className={'il-mini' + (sfxPattern === key ? ' on' : '')}
-                        onClick={() => {
-                          setSfxPattern(key)
-                          engine.setFlameChasePattern(key)
-                        }}
-                      >
-                        {label}
+
+                  {(sfxType === 'flame' || sfxType === 'sparkler') ? (
+                    <>
+                      <div className="il-lbl" style={{ marginTop: 6, opacity: 0.6 }}>
+                        ⌘+CLICK to place · always on while lit · PLACED {sfxType === 'flame' ? engine.flamePlacedCount : engine.sparklerPlacedCount}
+                      </div>
+                      {engine.hasSfxSelected && (
+                        <PoseRow label="TILT" min={-180} max={180} value={engine.selectedTilt}
+                          fmt={(v) => v + '°'} onChange={(v) => engine.setTilt(v)} engine={engine} learnId="pose.tilt" />
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                        {sfxType === 'rain' ? (
+                          <button className={'il-livebtn big' + (engine.rainOn ? ' on' : '')} onClick={() => engine.setRainOn(!engine.rainOn)}>
+                            {engine.rainOn ? 'ON' : 'OFF'}
+                          </button>
+                        ) : (
+                          <>
+                            <button className={'il-livebtn big' + (engine.lowSmokeOn ? ' on' : '')} onClick={() => engine.setLowSmokeOn(!engine.lowSmokeOn)}>
+                              {engine.lowSmokeOn ? 'ON' : 'OFF'}
+                            </button>
+                            <button className="il-mini" onClick={() => engine.lowSmokeRefill()} title="今すぐ満タンに溜め直す">REFILL</button>
+                          </>
+                        )}
+                      </div>
+                      <div className="il-lbl" style={{ marginTop: 4, opacity: 0.6 }}>Shows only where light hits — turn lights ON first.</div>
+                    </>
+                  )}
+
+                  {SFX_PARAMS[sfxType].core.map((p) => (
+                    <SfxRow key={p.id} engine={engine} p={p} />
+                  ))}
+
+                  {SFX_PARAMS[sfxType].more.length > 0 && (
+                    <>
+                      <button className="il-mini" style={{ marginTop: 6 }} onClick={() => setShowAdv(!showAdv)}>
+                        MORE {showAdv ? '▲' : '▼'}
                       </button>
-                    ))}
-                  </div>
-                  <div className="il-lbl" style={{ marginTop: 6 }}>チェイス間隔 {Math.round(sfxInterval)}ms</div>
-                  <input
-                    type="range"
-                    min="80"
-                    max="1200"
-                    step="10"
-                    value={sfxInterval}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value)
-                      setSfxInterval(v)
-                      engine.setFlameChaseMs(v)
-                    }}
-                  />
-                  <div className="il-lbl" style={{ marginTop: 8 }}>高さ(背丈) {sfxHeight.toFixed(2)}</div>
-                  <input
-                    type="range"
-                    min="0.4"
-                    max="2.2"
-                    step="0.05"
-                    value={sfxHeight}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value)
-                      setSfxHeight(v)
-                      engine.setFlameParams({ height: v })
-                    }}
-                  />
-                  <div className="il-lbl" style={{ marginTop: 8 }}>胴の太さ {sfxThick.toFixed(2)}</div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2.4"
-                    step="0.05"
-                    value={sfxThick}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value)
-                      setSfxThick(v)
-                      engine.setFlameParams({ thick: v })
-                    }}
-                  />
-                  <div className="il-lbl" style={{ marginTop: 8, opacity: 0.7 }}>
-                    ※下のセット(写真)が炎で照らされます。出力(Syphon)にも反映。
-                  </div>
+                      {showAdv && SFX_PARAMS[sfxType].more.map((p) => (
+                        <SfxRow key={p.id} engine={engine} p={p} />
+                      ))}
+                    </>
+                  )}
+
+                  {sfxType === 'flame' && (
+                    <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                      <button className="il-mini" onClick={() => engine.flameFireAll()} title="一発ドカンと大きく出す（任意）">BURST</button>
+                    </div>
+                  )}
+
+                  {(sfxType === 'flame' || sfxType === 'sparkler') && (
+                    <SeqGrid engine={engine} />
+                  )}
                 </div>
               )}
               {hudTab === 'cue' && (
@@ -2245,16 +2200,16 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   </button>
                 )}
               </div>
-              <div className="il-lbl" style={{ marginTop: 8 }}>整列（選んだ灯体をそろえる）</div>
+              <div className="il-lbl" style={{ marginTop: 8 }}>ALIGN（選んだ灯体をそろえる）</div>
               <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
-                <button className="il-mini" title="左ぞろえ（選んだ灯体の左端にそろえる）" onClick={() => engine.alignLeft()}>左</button>
-                <button className="il-mini" title="左右の中央でそろえる" onClick={() => engine.alignCenterX()}>左右中央</button>
-                <button className="il-mini" title="右ぞろえ" onClick={() => engine.alignRight()}>右</button>
-                <button className="il-mini" title="上ぞろえ" onClick={() => engine.alignTop()}>上</button>
-                <button className="il-mini" title="上下の中央でそろえる" onClick={() => engine.alignMiddle()}>上下中央</button>
-                <button className="il-mini" title="下ぞろえ" onClick={() => engine.alignBottom()}>下</button>
-                <button className="il-mini" title="横に等間隔でならべる（3つ以上選ぶ）" onClick={() => engine.distributeX()}>横に等間隔</button>
-                <button className="il-mini" title="縦に等間隔でならべる（3つ以上選ぶ）" onClick={() => engine.distributeY()}>縦に等間隔</button>
+                <button className="il-mini il-icn" title="左ぞろえ" onClick={() => engine.alignLeft()}><AlignIcon kind="left" /></button>
+                <button className="il-mini il-icn" title="左右中央でそろえる" onClick={() => engine.alignCenterX()}><AlignIcon kind="cx" /></button>
+                <button className="il-mini il-icn" title="右ぞろえ" onClick={() => engine.alignRight()}><AlignIcon kind="right" /></button>
+                <button className="il-mini il-icn" title="上ぞろえ" onClick={() => engine.alignTop()}><AlignIcon kind="top" /></button>
+                <button className="il-mini il-icn" title="上下中央でそろえる" onClick={() => engine.alignMiddle()}><AlignIcon kind="my" /></button>
+                <button className="il-mini il-icn" title="下ぞろえ" onClick={() => engine.alignBottom()}><AlignIcon kind="bottom" /></button>
+                <button className="il-mini il-icn" title="横に等間隔（3つ以上選ぶ）" onClick={() => engine.distributeX()}><AlignIcon kind="dx" /></button>
+                <button className="il-mini il-icn" title="縦に等間隔（3つ以上選ぶ）" onClick={() => engine.distributeY()}><AlignIcon kind="dy" /></button>
               </div>
               <div className="il-lbl" style={{ marginTop: 6 }}>Add</div>
             <div className="il-frow" style={{ gap: 4, flexWrap: 'wrap' }}>
@@ -2984,6 +2939,227 @@ function ThumbCanvas({ thumb }: { thumb: HTMLCanvasElement }): React.JSX.Element
   return <canvas ref={ref} />
 }
 
+/** SFXツマミ1個の定義（MIDI Learn・スライダー共通で使う唯一の正）。 */
+export interface SfxParamDef {
+  id: string // MIDI割当ID（'sfx.flame.height' 等）
+  label: string
+  min: number
+  max: number
+  step: number
+  get: (e: ImageLightEngine) => number
+  set: (e: ImageLightEngine, v: number) => void
+}
+const sp = (
+  id: string, label: string, min: number, max: number, step: number,
+  get: (e: ImageLightEngine) => number, set: (e: ImageLightEngine, v: number) => void
+): SfxParamDef => ({ id, label, min, max, step, get, set })
+
+/** 特効の全ツマミ（種類ごとに 主要core / 詳しくmore）。MIDI登録もUI描画もこれを使う。 */
+export const SFX_PARAMS: Record<'flame' | 'sparkler' | 'rain' | 'smoke', { core: SfxParamDef[]; more: SfxParamDef[] }> = {
+  flame: {
+    core: [
+      sp('sfx.flame.height', 'HEIGHT', 0.4, 2.2, 0.05, (e) => e.getFlameParams().height, (e, v) => e.setFlameParams({ height: v })),
+      sp('sfx.flame.thick', 'WIDTH', 0.5, 2.4, 0.05, (e) => e.getFlameParams().thick, (e, v) => e.setFlameParams({ thick: v }))
+    ],
+    more: [
+      sp('sfx.flame.dense', 'POWER', 0.4, 2, 0.05, (e) => e.getFlameParams().dense, (e, v) => e.setFlameParams({ dense: v })),
+      sp('sfx.flame.churn', 'CHURN', 0.3, 2, 0.05, (e) => e.getFlameParams().churn, (e, v) => e.setFlameParams({ churn: v })),
+      sp('sfx.flame.speed', 'SPEED', 0.3, 2, 0.05, (e) => e.getFlameParams().speed, (e, v) => e.setFlameParams({ speed: v }))
+    ]
+  },
+  sparkler: {
+    core: [
+      sp('sfx.spark.size', 'SIZE', 0.4, 2.5, 0.05, (e) => e.getSparklerParams().size, (e, v) => e.setSparklerParams({ size: v })),
+      sp('sfx.spark.rate', 'RATE', 0.4, 3, 0.05, (e) => e.getSparklerParams().rate, (e, v) => e.setSparklerParams({ rate: v })),
+      sp('sfx.spark.height', 'HEIGHT', 0.3, 2.2, 0.05, (e) => e.getSparklerParams().height, (e, v) => e.setSparklerParams({ height: v }))
+    ],
+    more: [
+      sp('sfx.spark.spread', 'SPREAD', 0, 0.6, 0.02, (e) => e.getSparklerParams().spread, (e, v) => e.setSparklerParams({ spread: v })),
+      sp('sfx.spark.trail', 'TRAIL', 0, 2, 0.05, (e) => e.getSparklerParams().trail, (e, v) => e.setSparklerParams({ trail: v })),
+      sp('sfx.spark.bright', 'BRIGHT', 0.6, 2, 0.05, (e) => e.getSparklerParams().bright, (e, v) => e.setSparklerParams({ bright: v })),
+      sp('sfx.spark.warm', 'COLOR', 0, 1, 0.02, (e) => e.getSparklerParams().warm, (e, v) => e.setSparklerParams({ warm: v }))
+    ]
+  },
+  rain: {
+    core: [
+      sp('sfx.rain.col', 'RAIN/SNOW', 0, 1, 0.02, (e) => e.getRainParams().col, (e, v) => e.setRainParams({ col: v })),
+      sp('sfx.rain.amount', 'AMOUNT', 0.2, 3, 0.05, (e) => e.getRainParams().amount, (e, v) => e.setRainParams({ amount: v })),
+      sp('sfx.rain.opacity', 'OPACITY', 0.1, 1.5, 0.05, (e) => e.getRainParams().opacity, (e, v) => e.setRainParams({ opacity: v }))
+    ],
+    more: [
+      sp('sfx.rain.speed', 'SPEED', 0.2, 2.2, 0.05, (e) => e.getRainParams().speed, (e, v) => e.setRainParams({ speed: v })),
+      sp('sfx.rain.len', 'LENGTH', 0.2, 2.5, 0.05, (e) => e.getRainParams().len, (e, v) => e.setRainParams({ len: v })),
+      sp('sfx.rain.wid', 'WIDTH', 0.4, 3, 0.05, (e) => e.getRainParams().wid, (e, v) => e.setRainParams({ wid: v })),
+      sp('sfx.rain.wind', 'WIND', -1, 1, 0.05, (e) => e.getRainParams().wind, (e, v) => e.setRainParams({ wind: v }))
+    ]
+  },
+  smoke: {
+    core: [
+      sp('sfx.smoke.density', 'DENSITY', 0.2, 2, 0.05, (e) => e.getLowSmokeParams().density, (e, v) => e.setLowSmokeParams({ density: v })),
+      sp('sfx.smoke.cx', 'POS X', 0, 1, 0.01, (e) => e.getLowSmokeParams().cx, (e, v) => e.setLowSmokeParams({ cx: v })),
+      sp('sfx.smoke.floory', 'FLOOR', 0, 0.9, 0.01, (e) => e.getLowSmokeParams().floory, (e, v) => e.setLowSmokeParams({ floory: v })),
+      sp('sfx.smoke.width', 'WIDTH', 0.05, 0.6, 0.01, (e) => e.getLowSmokeParams().width, (e, v) => e.setLowSmokeParams({ width: v })),
+      sp('sfx.smoke.top', 'HEIGHT', 0.03, 0.6, 0.01, (e) => e.getLowSmokeParams().top, (e, v) => e.setLowSmokeParams({ top: v }))
+    ],
+    more: [
+      sp('sfx.smoke.billow', 'BILLOW', 0, 0.4, 0.01, (e) => e.getLowSmokeParams().billow, (e, v) => e.setLowSmokeParams({ billow: v })),
+      sp('sfx.smoke.speed', 'DRIFT', 0.2, 2.5, 0.05, (e) => e.getLowSmokeParams().speed, (e, v) => e.setLowSmokeParams({ speed: v }))
+    ]
+  }
+}
+
+/** SFXツマミ1行（横1列＝密）。スライダー＋値＋MIDI Learn(◎)。 */
+function SfxRow({ engine, p }: { engine: ImageLightEngine; p: SfxParamDef }): React.JSX.Element {
+  const value = p.get(engine)
+  const cc = engine.paramMidi[p.id]
+  const learning = engine.learnParam === p.id
+  return (
+    <div className="il-frow">
+      <span className="il-lbl" style={{ width: 60 }}>{p.label}</span>
+      <input type="range" min={p.min} max={p.max} step={p.step} value={value}
+        onChange={(e) => p.set(engine, parseFloat(e.target.value))} />
+      <div className="il-val small">{value.toFixed(2)}</div>
+      <button
+        className={'il-cc' + (learning ? ' learnon' : cc != null ? ' set' : '')}
+        title="MIDIつまみ/フェーダーに割り当て（押して物理を動かす／右クリックで解除）"
+        onClick={() => engine.setLearnParam(learning ? null : p.id)}
+        onContextMenu={(e) => { e.preventDefault(); engine.clearParamMidi(p.id) }}
+      >
+        {learning ? '…' : cc != null ? 'CC' + cc : '◎'}
+      </button>
+    </div>
+  )
+}
+
+/** 特効ステップシーケンサー（ドラムマシン風の格子）。行＝置いた炎/火花、列＝ステップ。 */
+function SeqGrid({ engine }: { engine: ImageLightEngine }): React.JSX.Element {
+  const marks = engine.sfxMarks
+  const steps = engine.sfxSeqStepCount
+  const head = engine.sfxSeqPlaying ? engine.sfxSeqIndexNow : -1
+  const cols = Array.from({ length: steps }, (_, i) => i)
+  const seqMs = engine.sfxSeqMs
+  return (
+    <div className="il-seq">
+      <div className="il-lbl"><b>STEP SEQUENCER</b>（マスをタップ）</div>
+      <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+        <button
+          className={'il-mini' + (engine.sfxSeqPlaying ? ' on' : '')}
+          onClick={() => engine.setSfxSeqPlay(!engine.sfxSeqPlaying)}
+          title="組んだステップをテンポで自動ループ"
+        >
+          {engine.sfxSeqPlaying ? '■ STOP' : '▶ PLAY'}
+        </button>
+        <button className="il-mini" onClick={() => engine.setSfxSeqStepCount(steps - 1)} title="ステップを1つ減らす">−</button>
+        <span className="il-lbl" style={{ minWidth: 64, textAlign: 'center' }}>{steps} STEPS</span>
+        <button className="il-mini" onClick={() => engine.setSfxSeqStepCount(steps + 1)} title="ステップを1つ増やす">＋</button>
+        <button className="il-mini" onClick={() => engine.sfxSeqClearCells()} title="マスを全部消す">CLEAR</button>
+      </div>
+      <div className="il-lbl" style={{ marginTop: 6 }}>SPEED {Math.round(seqMs)}ms / step</div>
+      <input
+        type="range"
+        min="80"
+        max="1500"
+        step="10"
+        value={seqMs}
+        onChange={(e) => engine.setSfxSeqMs(parseFloat(e.target.value))}
+      />
+      {marks.length === 0 ? (
+        <div className="il-lbl" style={{ marginTop: 8, opacity: 0.7 }}>
+          Place FLAMER / SPARKLER (⌘+click) to add rows here.
+        </div>
+      ) : (
+        <div className="il-seqgrid">
+          <div className="il-seqhead">
+            {cols.map((c) => (
+              <div key={c} className={'il-seqnum' + (c === head ? ' head' : '')}>{c + 1}</div>
+            ))}
+          </div>
+          {marks.map((m) => (
+            <div className="il-seqrow" key={m.id}>
+              <div className="il-seqlbl">
+                <span style={{ color: m.motif === 'flame' ? '#ff9636' : '#e6e4b4' }}>
+                  {m.motif === 'flame' ? 'F' : 'S'}
+                </span>
+                {m.idx + 1}
+              </div>
+              {cols.map((c) => (
+                <button
+                  key={c}
+                  className={
+                    'il-cell ' +
+                    (m.motif === 'flame' ? 'flame' : 'spark') +
+                    (engine.isSfxStepOn(m.id, c) ? ' on' : '') +
+                    (c === head ? ' head' : '')
+                  }
+                  onClick={() => engine.toggleSfxStep(m.id, c)}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 整列ボタンの絵アイコン（揃った形を実際に描く＝一目で分かる）。currentColorで色追従。 */
+function AlignIcon({ kind }: { kind: 'left' | 'cx' | 'right' | 'top' | 'my' | 'bottom' | 'dx' | 'dy' }): React.JSX.Element {
+  const f = 'currentColor'
+  const guide = { stroke: f, strokeWidth: 1, opacity: 0.55, strokeDasharray: '1.5 1.5' }
+  let body: React.JSX.Element
+  switch (kind) {
+    case 'left':
+      body = (<>
+        <rect x="1.5" y="2" width="1.4" height="12" fill={f} />
+        <rect x="3.6" y="4" width="9" height="2.4" fill={f} />
+        <rect x="3.6" y="9" width="5.5" height="2.4" fill={f} />
+      </>); break
+    case 'right':
+      body = (<>
+        <rect x="13.1" y="2" width="1.4" height="12" fill={f} />
+        <rect x="3.5" y="4" width="9" height="2.4" fill={f} />
+        <rect x="7" y="9" width="5.5" height="2.4" fill={f} />
+      </>); break
+    case 'cx':
+      body = (<>
+        <line x1="8" y1="1.5" x2="8" y2="14.5" {...guide} />
+        <rect x="3.5" y="4" width="9" height="2.4" fill={f} />
+        <rect x="5.25" y="9" width="5.5" height="2.4" fill={f} />
+      </>); break
+    case 'top':
+      body = (<>
+        <rect x="2" y="1.5" width="12" height="1.4" fill={f} />
+        <rect x="4" y="3.6" width="2.4" height="9" fill={f} />
+        <rect x="9" y="3.6" width="2.4" height="5.5" fill={f} />
+      </>); break
+    case 'bottom':
+      body = (<>
+        <rect x="2" y="13.1" width="12" height="1.4" fill={f} />
+        <rect x="4" y="3.5" width="2.4" height="9" fill={f} />
+        <rect x="9" y="7" width="2.4" height="5.5" fill={f} />
+      </>); break
+    case 'my':
+      body = (<>
+        <line x1="1.5" y1="8" x2="14.5" y2="8" {...guide} />
+        <rect x="4" y="3.5" width="2.4" height="9" fill={f} />
+        <rect x="9" y="5.25" width="2.4" height="5.5" fill={f} />
+      </>); break
+    case 'dx':
+      body = (<>
+        <rect x="2.3" y="3" width="2" height="10" fill={f} />
+        <rect x="7" y="3" width="2" height="10" fill={f} />
+        <rect x="11.7" y="3" width="2" height="10" fill={f} />
+      </>); break
+    case 'dy':
+      body = (<>
+        <rect x="3" y="2.3" width="10" height="2" fill={f} />
+        <rect x="3" y="7" width="10" height="2" fill={f} />
+        <rect x="3" y="11.7" width="10" height="2" fill={f} />
+      </>); break
+  }
+  return <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">{body}</svg>
+}
+
 /** ステージ上の編集マーカー（番号＋M/S・本番出力には出ない）。論理座標→表示座標。 */
 function drawMarkers(ctx: CanvasRenderingContext2D, engine: ImageLightEngine, scale: number): void {
   const { ox, oy } = viewFromEngine(ctx)
@@ -2994,9 +3170,42 @@ function drawMarkers(ctx: CanvasRenderingContext2D, engine: ImageLightEngine, sc
   for (let i = 0; i < beams.length; i++) {
     const b = beams[i]
     const isSel = engine.isSelected(i)
-    ctx.strokeStyle = isSel ? 'rgba(120,255,160,0.95)' : 'rgba(255,255,255,0.35)'
     ctx.lineWidth = (isSel ? 2 : 1.2) / scale
-    ctx.strokeRect(b.x - 18, b.y - 10, 36, 20)
+    if (b.motif === 'flame') {
+      // FLAMER は炎(雫)の形マークで照明(四角)と区別する
+      ctx.strokeStyle = isSel ? 'rgba(120,255,160,0.95)' : 'rgba(255,150,60,0.9)'
+      ctx.beginPath()
+      ctx.moveTo(b.x, b.y - 14)
+      ctx.bezierCurveTo(b.x + 12, b.y - 1, b.x + 8, b.y + 12, b.x, b.y + 12)
+      ctx.bezierCurveTo(b.x - 8, b.y + 12, b.x - 12, b.y - 1, b.x, b.y - 14)
+      ctx.closePath()
+      ctx.stroke()
+    } else if (b.motif === 'sparkler') {
+      // SPARKLER は星(火花)マークで区別する
+      ctx.strokeStyle = isSel ? 'rgba(120,255,160,0.95)' : 'rgba(230,228,180,0.95)'
+      const R = 13
+      ctx.beginPath()
+      for (let k = 0; k < 4; k++) {
+        const a = (k * Math.PI) / 4
+        ctx.moveTo(b.x - Math.cos(a) * R, b.y - Math.sin(a) * R)
+        ctx.lineTo(b.x + Math.cos(a) * R, b.y + Math.sin(a) * R)
+      }
+      ctx.stroke()
+    } else {
+      ctx.strokeStyle = isSel ? 'rgba(120,255,160,0.95)' : 'rgba(255,255,255,0.35)'
+      ctx.strokeRect(b.x - 18, b.y - 10, 36, 20)
+    }
+    // 向き（噴き出す方向）を示す細い線（選択中の炎/火花だけ・TILTで決まる）。
+    if (isSel && (b.motif === 'flame' || b.motif === 'sparkler')) {
+      const dir = -Math.PI / 2 + ((b.tilt ?? 0) * Math.PI) / 180
+      const L = 40
+      ctx.strokeStyle = 'rgba(120,255,160,0.85)'
+      ctx.lineWidth = 1.5 / scale
+      ctx.beginPath()
+      ctx.moveTo(b.x, b.y)
+      ctx.lineTo(b.x + Math.cos(dir) * L, b.y + Math.sin(dir) * L)
+      ctx.stroke()
+    }
     ctx.font = '700 ' + 14 / scale + 'px sans-serif'
     const lit = engine.isLit(b)
     ctx.fillStyle = isSel
@@ -3281,6 +3490,9 @@ const IL_CSS = `
 .il-mini:hover{border-color:var(--il-dim);color:var(--il-txt);}
 .il-mini:disabled{opacity:0.4;cursor:default;}
 .il-mini.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
+/* 整列の絵アイコンボタン（揃った形を描画・正方形に近い当たり判定） */
+.il-mini.il-icn{min-width:32px;padding:5px 7px;line-height:0;color:var(--il-dim);display:inline-flex;align-items:center;justify-content:center;}
+.il-mini.il-icn:hover{color:var(--il-txt);}
 .il-root hr{border:none;border-top:0.5px solid var(--il-line);margin:0;}
 .il-card{border:0.5px solid var(--il-line);border-radius:8px;padding:8px 11px;display:flex;flex-direction:column;gap:6px;}
 .il-cardhd{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--il-txt);}
@@ -3385,6 +3597,27 @@ const IL_CSS = `
 .il2hud-tab i{display:none;}
 .il2hud-tab.on{color:var(--il-amber);border-bottom-color:var(--il-amber);}
 .il2hud-tab.on i{color:var(--il-dim);}
+.il2-subtabs{display:flex;gap:6px;margin:6px 0 2px;}
+.il2-subtab{flex:1;background:var(--il-inset);border:0.5px solid var(--il-line);border-bottom:2px solid transparent;color:var(--il-dim);font-family:'Bebas Neue',sans-serif;font-size:12.5px;letter-spacing:0.08em;padding:7px 0 6px;border-radius:5px 5px 0 0;cursor:pointer;}
+.il2-subtab:hover{color:var(--il-txt);border-color:var(--il-dim);}
+.il2-subtab.on{color:var(--il-amber);border-color:var(--il-amber);border-bottom-color:var(--il-amber);background:rgba(255,180,80,0.07);}
+/* 特効の使い方ガイド（常時・読みやすく） */
+.il-sfxguide{margin:7px 0 2px;padding:7px 9px;border:0.5px solid var(--il-line);border-radius:6px;background:rgba(255,180,80,0.06);color:var(--il-txt);font-size:11px;line-height:1.65;}
+/* ON など大きめ操作ボタン（当たり判定だけ大きく・文字/線は規約どおり据え置き） */
+.il-livebtn.big{padding:10px 16px;font-size:12px;border-radius:6px;}
+/* ステップシーケンサー（ドラムマシン格子）。本番でタップしやすいようマスを大きく。 */
+.il-seq{margin-top:10px;border-top:0.5px solid var(--il-line);padding-top:8px;}
+.il-seqgrid{display:flex;flex-direction:column;gap:4px;margin-top:6px;overflow-x:auto;}
+.il-seqrow{display:flex;align-items:center;gap:4px;}
+.il-seqlbl{flex:0 0 34px;font-size:11px;color:var(--il-dim);display:flex;align-items:center;gap:3px;}
+.il-cell{flex:0 0 27px;height:27px;border:0.5px solid var(--il-line);border-radius:4px;background:var(--il-inset);cursor:pointer;padding:0;}
+.il-cell.on{background:var(--il-amber);border-color:var(--il-amber);}
+.il-cell.flame.on{background:#ff9636;border-color:#ff9636;}
+.il-cell.spark.on{background:#e6e4b4;border-color:#e6e4b4;}
+.il-cell.head{box-shadow:inset 0 0 0 2px rgba(120,255,160,0.95);}
+.il-seqhead{display:flex;gap:4px;margin-left:38px;}
+.il-seqnum{flex:0 0 27px;text-align:center;font-size:10px;color:var(--il-faint);}
+.il-seqnum.head{color:rgba(120,255,160,0.95);}
 .il2hud-scroll{flex:1;overflow-y:auto;padding:7px 10px 9px;display:flex;flex-direction:column;gap:6px;}
 .il2hud-foot{flex-shrink:0;border-top:0.5px solid var(--il-line);padding:8px 10px 9px;display:flex;flex-direction:column;gap:5px;background:#0a0908;}
 `

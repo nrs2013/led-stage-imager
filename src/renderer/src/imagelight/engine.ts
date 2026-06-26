@@ -8,6 +8,9 @@
  */
 import { WHITE, COLORS, sameRgb, hexToRgb, type RGB3 } from './colors'
 import { FlameFX, type FlameParams } from './flame'
+import { SparklerFX, type SparklerParams } from './sparkler'
+import { RainFX, type RainParams } from './rain'
+import { LowSmokeFX, type LowSmokeParams } from './lowsmoke'
 import {
   buildDecorLeds,
   decorChannelColor,
@@ -119,6 +122,7 @@ export interface Beam {
     | 'festoon'
     | 'image'
     | 'flame'
+    | 'sparkler'
   motifDiam?: number
   imageSrc?: string // 画像灯体（リアルな発光画像・dataURL）。色は持たず明るさだけで光る
   motifText?: string
@@ -126,6 +130,9 @@ export interface Beam {
   motifSpeed?: number
   motifReverse?: boolean // マーキー逆方向チェイス
   motifSeed?: number // 星の散布レイアウトを固定（移動しても再シャッフルしない）
+  // 特効(炎/火花)の噴き出す向きは照明と同じ TILT（b.tilt 度）から計算する＝専用フィールドは持たない。
+  // 特効ステップシーケンサー用の安定ID（炎/火花マークに付与・並び替え/削除に強い）。
+  sfxId?: number
 }
 
 /** シーンに保存されるFXの点き具合（master/smoke は含めない＝呼び出しても親フェーダーは動かない）。 */
@@ -288,6 +295,16 @@ export interface ShowFile {
   mask?: { file: string } | null
   /** 簡単スケッチの電飾パターン設定（卓なし＝見た目だけ）。無い＝既定。 */
   decor?: DecorPattern
+  /** 特効(SFX)の設定一式（炎/火花/雨雪/煙のツマミ・ON状態・ステップシーケンサー）。無い＝既定。 */
+  sfx?: {
+    flame?: Partial<FlameParams>
+    sparkler?: Partial<SparklerParams>
+    rain?: Partial<RainParams> & { on?: boolean }
+    lowSmoke?: Partial<LowSmokeParams> & { on?: boolean }
+    seqSteps?: number[][]
+    seqMs?: number
+    flameChase?: { on?: boolean; pattern?: 'random' | 'all' | 'inout' | 'outin'; ms?: number }
+  }
 }
 
 /** blob: URL（動画）→ dataURL（保存でファイルに書き出すため）。 */
@@ -378,6 +395,8 @@ export class ImageLightEngine {
   private workCv = mk(IW, IH, true)
   private airCv = mk(IW, IH)
   private smoothCv = mk(IW, IH)
+  private vmCv = mk(IW, IH) // 受け系(雨/雪/煙)の「matter×光マップ」合成用スクラッチ（drawImageのみ）
+  private vmc = this.vmCv.getContext('2d')!
   private noiseCv = mk(IW, IH)
   private noiseTile: HTMLCanvasElement
   private fc = this.frame.getContext('2d')!
@@ -387,16 +406,144 @@ export class ImageLightEngine {
   // ---- スペシャルエフェクト(特効): プロシージャル炎(フレーマー) ----
   // flame.glow を光マップに足す→既存の写真×光で「セットが炎に照らされる」。flame.body は前面に重ねる。
   readonly flame = new FlameFX()
-  /** 炎の灯体(motif='flame'・点灯中)の位置を 0..1 で返す＝発射/チェイスの的。
-   *  配置・選択・移動・整列・削除・ミュートは灯体の仕組みがそのまま担当する。 */
-  get flamePoints(): { fx: number; fy: number }[] {
+  // 特効: コールドスパーク(火花フォンテン)。glow→光マップで「火花がセットを照らす」、bodyは前面。
+  readonly sparkler = new SparklerFX()
+  // 特効: 受け系(雨/雪・ロースモーク)。matter(白いアルファ)×光マップ＝照明が当たった所だけ光る。
+  readonly rain = new RainFX()
+  readonly lowSmoke = new LowSmokeFX()
+  setRainOn(v: boolean): void { this.rain.on = v; this.bump() }
+  get rainOn(): boolean { return this.rain.on }
+  setRainParams(p: Partial<RainParams>): void { this.rain.params = { ...this.rain.params, ...p }; this.bump() }
+  getRainParams(): RainParams { return { ...this.rain.params } }
+  setLowSmokeOn(v: boolean): void { this.lowSmoke.on = v; this.bump() }
+  get lowSmokeOn(): boolean { return this.lowSmoke.on }
+  lowSmokeRefill(): void { this.lowSmoke.refill(); this.bump() }
+  setLowSmokeParams(p: Partial<LowSmokeParams>): void { this.lowSmoke.params = { ...this.lowSmoke.params, ...p }; this.bump() }
+  getLowSmokeParams(): LowSmokeParams { return { ...this.lowSmoke.params } }
+  /** 特効マークの噴き出す向き（ラジアン）＝照明と同じ TILT から計算。
+   *  TILT=0 で真上、＋で右へ、−で左へ傾く（照明の TILT スライダーをそのまま使う）。 */
+  private dirOf(b: Beam): number {
+    return -Math.PI / 2 + ((b.tilt ?? 0) * Math.PI) / 180
+  }
+  /** 火花の灯体(motif='sparkler'・点灯中)の位置(0..1)＋向き(TILT由来)を返す＝噴出点。
+   *  ステップシーケンサー再生中は「今のステップで点くマークだけ」になる。 */
+  get sparklerPoints(): { fx: number; fy: number; dir: number }[] {
     return this.beams
-      .filter((b) => b.motif === 'flame' && this.isLit(b))
-      .map((b) => ({ fx: b.x / LW, fy: b.y / LH }))
+      .filter((b) => b.motif === 'sparkler' && this.sfxOn(b))
+      .map((b) => ({ fx: b.x / LW, fy: b.y / LH, dir: this.dirOf(b) }))
+  }
+  /** 火花の灯体が1つでもあれば特効ON（個別の入切はミュート＝灯体と同じ）。 */
+  get sparklerEnabled(): boolean {
+    return this.beams.some((b) => b.motif === 'sparkler')
+  }
+  /** 置いた火花の数（点灯有無に関係なく＝UI表示用）。 */
+  get sparklerPlacedCount(): number {
+    return this.beams.filter((b) => b.motif === 'sparkler').length
+  }
+  setSparklerParams(p: Partial<SparklerParams>): void {
+    this.sparkler.params = { ...this.sparkler.params, ...p }
+    this.bump()
+  }
+  getSparklerParams(): SparklerParams {
+    return { ...this.sparkler.params }
+  }
+  /** 炎の灯体(motif='flame'・点灯中)の位置(0..1)＋向きを返す＝発射/チェイスの的。
+   *  配置・選択・移動・削除・ミュートは灯体の仕組みがそのまま担当する。
+   *  ステップシーケンサー再生中は「今のステップで点くマークだけ」になる。 */
+  get flamePoints(): { fx: number; fy: number; dir: number }[] {
+    return this.beams
+      .filter((b) => b.motif === 'flame' && this.sfxOn(b))
+      .map((b) => ({ fx: b.x / LW, fy: b.y / LH, dir: this.dirOf(b) }))
+  }
+  /** その特効マークが「今点いているか」。通常はミュート判定、シーケンサー再生中は今のステップ。 */
+  private sfxOn(b: Beam): boolean {
+    if (this.sfxSeqPlaying) return b.sfxId != null && this.currentSeqSet().has(b.sfxId)
+    return this.isLit(b)
+  }
+
+  // ---- 特効ステップシーケンサー（炎＋火花共通・ドラムマシン風の格子）----
+  // sfxSeqSteps[col] = その列(ステップ)で点く特効マークの sfxId 配列。
+  // 行＝置いた炎/火花マーク、列＝ステップ。マスのON/OFFで組み、テンポで自動ループ。
+  // 再生中は flamePoints/sparklerPoints が今の列に絞られ、列頭で炎を発火。
+  sfxSeqSteps: number[][] = [[], [], [], [], [], [], [], []] // 既定8ステップ
+  sfxSeqPlaying = false
+  sfxSeqMs = 420
+  private sfxSeqIndex = 0
+  private sfxSeqLast = 0
+  private sfxIdSeq = 1
+  /** 炎/火花マークに安定IDを割り振る（未割当だけ）。 */
+  private ensureSfxIds(): void {
+    for (const b of this.beams) {
+      if ((b.motif === 'flame' || b.motif === 'sparkler') && b.sfxId == null) b.sfxId = this.sfxIdSeq++
+    }
+  }
+  get sfxSeqStepCount(): number { return this.sfxSeqSteps.length }
+  get sfxSeqIndexNow(): number { return this.sfxSeqIndex }
+  /** グリッドの行＝置いた炎/火花マーク（番号付き）。 */
+  get sfxMarks(): { id: number; idx: number; motif: 'flame' | 'sparkler' }[] {
+    this.ensureSfxIds()
+    const out: { id: number; idx: number; motif: 'flame' | 'sparkler' }[] = []
+    for (let i = 0; i < this.beams.length; i++) {
+      const b = this.beams[i]
+      if (b.motif === 'flame' || b.motif === 'sparkler') out.push({ id: b.sfxId!, idx: i, motif: b.motif })
+    }
+    return out
+  }
+  /** ステップ数（列）を変える（1〜32）。増やすと空列、減らすと末尾を削る。 */
+  setSfxSeqStepCount(n: number): void {
+    n = Math.max(1, Math.min(32, Math.round(n)))
+    const cur = this.sfxSeqSteps
+    while (cur.length < n) cur.push([])
+    if (cur.length > n) cur.length = n
+    if (this.sfxSeqIndex >= n) this.sfxSeqIndex = 0
+    this.bump()
+  }
+  /** マス(マークid × 列)をトグル。 */
+  toggleSfxStep(id: number, col: number): void {
+    const step = this.sfxSeqSteps[col]
+    if (!step) return
+    const k = step.indexOf(id)
+    if (k >= 0) step.splice(k, 1)
+    else step.push(id)
+    this.bump()
+  }
+  isSfxStepOn(id: number, col: number): boolean {
+    const step = this.sfxSeqSteps[col]
+    return !!step && step.includes(id)
+  }
+  /** グリッドを全消し（列数は保ったまま中身を空に）。 */
+  sfxSeqClearCells(): void {
+    for (const s of this.sfxSeqSteps) s.length = 0
+    this.bump()
+  }
+  private currentSeqSet(): Set<number> {
+    return new Set(this.sfxSeqSteps[this.sfxSeqIndex] || [])
+  }
+  setSfxSeqPlay(v: boolean): void {
+    this.sfxSeqPlaying = v && this.sfxSeqSteps.length > 0
+    this.sfxSeqIndex = 0
+    this.sfxSeqLast = 0
+    this.bump()
+  }
+  setSfxSeqMs(ms: number): void { this.sfxSeqMs = ms; this.bump() }
+  /** テンポでステップを進める（renderFrame から毎フレーム）。ループする。
+   *  進めるのはステップ番号だけ＝点く炎/火花の集合(sfxOn)が切替わり、持続描画が追従する。 */
+  private tickSfxSeq(now: number): void {
+    if (!this.sfxSeqPlaying || this.sfxSeqSteps.length === 0) return
+    if (!this.sfxSeqLast) this.sfxSeqLast = now
+    if (now - this.sfxSeqLast >= this.sfxSeqMs) {
+      this.sfxSeqLast = now
+      this.sfxSeqIndex = (this.sfxSeqIndex + 1) % this.sfxSeqSteps.length
+      this.bump(false) // 「再生中 X/Y」表示をライブ更新（保存はしない）
+    }
   }
   /** 炎の灯体が1つでもあれば特効ON（個別の入切はミュート＝灯体と同じ）。 */
   get flameEnabled(): boolean {
     return this.beams.some((b) => b.motif === 'flame')
+  }
+  /** 置いた炎の数（点灯有無に関係なく＝UI表示用）。 */
+  get flamePlacedCount(): number {
+    return this.beams.filter((b) => b.motif === 'flame').length
   }
   flameChaseOn = false
   flameChasePattern: 'random' | 'all' | 'inout' | 'outin' = 'inout'
@@ -405,7 +552,7 @@ export class ImageLightEngine {
   private lastChaseAt = 0
   /** 置いた炎を全部いっぺんに発射（無ければ標準4本）。 */
   flameFireAll(): void {
-    if (this.flamePoints.length) this.flamePoints.forEach((p) => this.flame.fire(p.fx, p.fy))
+    if (this.flamePoints.length) this.flamePoints.forEach((p) => this.flame.fire(p.fx, p.fy, 1, p.dir))
     else this.flame.fireRow()
     this.bump()
   }
@@ -425,31 +572,33 @@ export class ImageLightEngine {
   /** チェイス進行（renderFrame から now を渡して毎フレーム呼ぶ）。置いた点を順番/全部/交互/往復/ランダムで発火。 */
   private tickFlameChase(now: number): void {
     if (!this.flameChaseOn) return
+    const up = -Math.PI / 2
     const pts = this.flamePoints.length
       ? this.flamePoints
       : [
-          { fx: 0.17, fy: 1 },
-          { fx: 0.42, fy: 1 },
-          { fx: 0.63, fy: 1 },
-          { fx: 0.79, fy: 1 }
+          { fx: 0.17, fy: 1, dir: up },
+          { fx: 0.42, fy: 1, dir: up },
+          { fx: 0.63, fy: 1, dir: up },
+          { fx: 0.79, fy: 1, dir: up }
         ]
     const n = pts.length
     if (!n) return
     if (this.lastChaseAt && now - this.lastChaseAt < this.flameChaseMs) return
     this.lastChaseAt = now
     const pat = this.flameChasePattern
+    const dirOf = (p: { dir?: number }): number => p.dir ?? -Math.PI / 2
     if (pat === 'all') {
-      pts.forEach((p) => this.flame.fire(p.fx, p.fy))
+      pts.forEach((p) => this.flame.fire(p.fx, p.fy, 1, dirOf(p)))
     } else if (pat === 'random') {
       const p = pts[Math.floor(this.rnd() * n) % n]
-      this.flame.fire(p.fx, p.fy)
+      this.flame.fire(p.fx, p.fy, 1, dirOf(p))
     } else {
       // 内→外(inout)/外→内(outin): 画面中央(fx=0.5)からの距離で並べ、1つずつ順に発火
       const order = pts
         .map((p, i) => ({ i, d: Math.abs(p.fx - 0.5) }))
         .sort((a, b) => (pat === 'outin' ? b.d - a.d : a.d - b.d))
       const p = pts[order[this.chaseIdx % n].i]
-      this.flame.fire(p.fx, p.fy)
+      this.flame.fire(p.fx, p.fy, 1, dirOf(p))
       this.chaseIdx = (this.chaseIdx + 1) % n
     }
   }
@@ -475,6 +624,13 @@ export class ImageLightEngine {
     this.flame.startHold(fx, fy)
     this.bump()
   }
+  /** 置いた炎を全部、長押し開始（向きも反映）。 */
+  flameHoldAllStart(): void {
+    const pts = this.flamePoints
+    if (pts.length) pts.forEach((p) => this.flame.startHold(p.fx, p.fy, 1, p.dir))
+    else this.flame.startHold(0.5, 1)
+    this.bump()
+  }
   flameHoldRelease(): void {
     this.flame.release()
     this.bump()
@@ -496,6 +652,55 @@ export class ImageLightEngine {
     oc.globalCompositeOperation = 'source-over'
     oc.globalAlpha = 1
     oc.drawImage(bd, sx, sy, sw, sh, 0, 0, this.outW, this.outH)
+    oc.globalCompositeOperation = 'source-over'
+  }
+  /** 出力(outCv)へ火花本体を重ねる（炎と同じ box→出力の写像）。glowは光マップ経由で反映済み。 */
+  private drawSparklerOnOutput(): void {
+    if (this.lightOnly || !this.box || this.outW <= 16) return
+    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const box = this.box
+    const bd = this.sparkler.body
+    const kx = bd.width / IW
+    const ky = bd.height / IH
+    oc.setTransform(1, 0, 0, 1, 0, 0)
+    oc.globalCompositeOperation = 'source-over'
+    oc.globalAlpha = 1
+    oc.drawImage(bd, box.x * Q * kx, box.y * Q * ky, box.w * Q * kx, box.h * Q * ky, 0, 0, this.outW, this.outH)
+    oc.globalCompositeOperation = 'source-over'
+  }
+
+  /** 受け系(雨/雪/煙)の matter を「光マップで色付け＆マスク」して vmCv に作る。
+   *  結果＝『照明が当たった所だけ・その光の色で光る粒/煙』（当たってない所は透明）。 */
+  private buildVolumetric(matter: HTMLCanvasElement, QW: number, QH: number): void {
+    const c = this.vmc
+    c.setTransform(1, 0, 0, 1, 0, 0)
+    c.globalAlpha = 1
+    c.globalCompositeOperation = 'source-over'
+    c.clearRect(0, 0, QW, QH)
+    c.drawImage(this.lightCv, 0, 0) // 光マップの色
+    c.globalCompositeOperation = 'destination-in'
+    c.drawImage(matter, 0, 0, matter.width, matter.height, 0, 0, QW, QH) // matter のある所だけ残す
+    c.globalCompositeOperation = 'source-over'
+  }
+  /** vmCv(色付き受け系) を前面 g へ加算合成（編集フレーム fc 用・全面）。 */
+  private drawVolumetricFront(g: CanvasRenderingContext2D, alpha: number): void {
+    g.setTransform(1, 0, 0, 1, 0, 0)
+    g.globalCompositeOperation = 'lighter'
+    g.globalAlpha = alpha
+    g.drawImage(this.vmCv, 0, 0)
+    g.globalAlpha = 1
+    g.globalCompositeOperation = 'source-over'
+  }
+  /** vmCv(色付き受け系) を出力(outCv)へ加算合成（box領域→出力解像度）。 */
+  private drawVolumetricOnOutput(alpha: number): void {
+    if (this.lightOnly || !this.box || this.outW <= 16) return
+    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const b = this.box
+    oc.setTransform(1, 0, 0, 1, 0, 0)
+    oc.globalCompositeOperation = 'lighter'
+    oc.globalAlpha = alpha
+    oc.drawImage(this.vmCv, b.x * Q, b.y * Q, b.w * Q, b.h * Q, 0, 0, this.outW, this.outH)
+    oc.globalAlpha = 1
     oc.globalCompositeOperation = 'source-over'
   }
   private ac = this.airCv.getContext('2d')!
@@ -802,6 +1007,10 @@ export class ImageLightEngine {
     this.motifChase ||
     this.decorAnimating() ||
     (this.flameEnabled && (this.flame.active || this.flameChaseOn)) ||
+    (this.sparklerEnabled && (this.sparklerPoints.length > 0 || this.sparkler.active)) ||
+    this.rain.active ||
+    this.lowSmoke.active ||
+    this.sfxSeqPlaying ||
     this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars')
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
@@ -1099,12 +1308,28 @@ export class ImageLightEngine {
     const lc = this.lc
     const wc = this.wc
     const fc = this.fc
-    // 特効: チェイス進行→炎を1フレーム進める（OFF時は一切触らない＝従来と完全に同じ）
+    // 特効: ステップシーケンサーを進める（再生中だけ。点くマークの集合を今ステップに切替）
+    this.tickSfxSeq(now)
+    // 特効: 炎も火花と同じく「置いて点いていれば出続ける」。点灯中の炎マークを毎フレーム持続。
+    // （単発バースト=手で発射、チェイスは追加で乗る。OFF=炎マーク0個なら何も触らない）
     if (this.flameEnabled) {
+      this.flame.setSustain(this.flamePoints)
       this.tickFlameChase(now)
       this.flame.tick(now)
     }
     const flameLit = this.flameEnabled && this.flame.active
+    // 特効: 火花フォンテンは点灯中の点から連続噴出（OFF時は一切触らない）
+    if (this.sparklerEnabled) {
+      this.sparkler.setActive(this.sparklerPoints)
+      this.sparkler.tick(now)
+    }
+    const sparklerLit = this.sparklerEnabled && this.sparkler.active
+    // 特効: 受け系(雨/雪・ロースモーク)を1フレーム進める（OFF時は触らない）。
+    // 描画は光マップ確定後に「matter×光マップ」で前面合成する（照明が当たった所だけ光る）。
+    if (this.rain.active) this.rain.tick(now)
+    if (this.lowSmoke.active) this.lowSmoke.tick(now)
+    const rainLit = this.rain.active
+    const smokeLit = this.lowSmoke.active
 
     // ---- 光マップ
     lc.setTransform(1, 0, 0, 1, 0, 0)
@@ -1159,11 +1384,19 @@ export class ImageLightEngine {
       lc.drawImage(this.flame.glow, 0, 0, this.flame.glow.width, this.flame.glow.height, 0, 0, QW, QH)
       lc.globalCompositeOperation = 'source-over'
     }
+    // 特効: 火花の灯り(glow)を光マップに足す → セット(写真)が火花で照らされる
+    if (sparklerLit) {
+      lc.setTransform(1, 0, 0, 1, 0, 0)
+      lc.globalCompositeOperation = 'lighter'
+      lc.globalAlpha = 1
+      lc.drawImage(this.sparkler.glow, 0, 0, this.sparkler.glow.width, this.sparkler.glow.height, 0, 0, QW, QH)
+      lc.globalCompositeOperation = 'source-over'
+    }
 
     // ---- 写真 × 光（座組の最大ゲージで露出が決まる＝出荷仕様）
     wc.setTransform(1, 0, 0, 1, 0, 0)
     wc.clearRect(0, 0, QW, QH)
-    if ((maxI > 0.004 || flameLit) && this.mat && this.box) {
+    if ((maxI > 0.004 || flameLit || sparklerLit) && this.mat && this.box) {
       const b = this.box
       const tone = Math.max(0, (0.5 - maxI) / 0.5) * 0.85
       wc.setTransform(Q, 0, 0, Q, 0, 0)
@@ -1305,6 +1538,18 @@ export class ImageLightEngine {
       }
     }
 
+    // 特効(受け系): ロースモーク→雨/雪 を「matter×光マップ」で前面に加算（照明が当たった所だけ光る）。
+    // 光が無ければ matter×光=黒＝何も足さない。煙(床)が奥、雨/雪が手前。炎/火花本体より後ろ。
+    const lightPresent = maxI > 0.004 || flameLit || sparklerLit
+    if (smokeLit && lightPresent) {
+      this.buildVolumetric(this.lowSmoke.matter, QW, QH)
+      this.drawVolumetricFront(fc, 1)
+    }
+    if (rainLit && lightPresent) {
+      this.buildVolumetric(this.rain.matter, QW, QH)
+      this.drawVolumetricFront(fc, 1)
+    }
+
     // 特効: 炎本体を最前面に重ねる（前面レイヤー＝写真/光/モチーフ/電飾の上）
     if (flameLit) {
       fc.setTransform(1, 0, 0, 1, 0, 0)
@@ -1312,6 +1557,14 @@ export class ImageLightEngine {
       fc.globalCompositeOperation = 'source-over'
       fc.globalAlpha = 1
       fc.drawImage(this.flame.body, 0, 0, this.flame.body.width, this.flame.body.height, 0, 0, QW, QH)
+      fc.globalCompositeOperation = 'source-over'
+    }
+    // 特効: 火花本体を最前面に重ねる
+    if (sparklerLit) {
+      fc.setTransform(1, 0, 0, 1, 0, 0)
+      fc.globalCompositeOperation = 'source-over'
+      fc.globalAlpha = 1
+      fc.drawImage(this.sparkler.body, 0, 0, this.sparkler.body.width, this.sparkler.body.height, 0, 0, QW, QH)
       fc.globalCompositeOperation = 'source-over'
     }
 
@@ -1343,8 +1596,18 @@ export class ImageLightEngine {
     this.drawMotifsOnOutput(beams, Is, ms)
     // 出力にも電飾パターンを重ねる（編集画面と同じ絵を Arena へ）。
     this.drawDecorOnOutput(decorT)
+    // 特効(受け系): 出力にも雨/雪・煙を「matter×光マップ」で重ねる（炎/火花本体より後ろ＝奥）。
+    if (smokeLit && lightPresent) {
+      this.buildVolumetric(this.lowSmoke.matter, QW, QH)
+      this.drawVolumetricOnOutput(1)
+    }
+    if (rainLit && lightPresent) {
+      this.buildVolumetric(this.rain.matter, QW, QH)
+      this.drawVolumetricOnOutput(1)
+    }
     // 特効: 出力にも炎本体を重ねる（glowは光マップ経由でcomposeOutputに既に反映済み）
     if (flameLit) this.drawFlameOnOutput()
+    if (sparklerLit) this.drawSparklerOnOutput()
   }
 
   /** 出力(outCv)にモチーフを重ねる。outCv は box 領域を出力解像度に伸ばしたものなので、
@@ -1370,7 +1633,7 @@ export class ImageLightEngine {
    *  ソフトな光は lightCv の box 領域を引き伸ばす（写真だけシャープに保つ）。編集画面とは別物。 */
   private composeOutput(maxI: number): void {
     const OUT_CAP = this.outCap // 出力上限幅（可変：なめらか1920/バランス2560/高精細3840）
-    const flameLit = this.flameEnabled && this.flame.active // 特効: 炎だけでも出力する
+    const flameLit = (this.flameEnabled && this.flame.active) || (this.sparklerEnabled && this.sparkler.active) // 特効: 炎/火花だけでも出力する
     // 光だけ出力モード: 写真を使わず光マップ(lightCv)を出力。Arena側で 映像×光(Multiply)。
     // 出力サイズも光の枠取りも「写真モードと完全に同じ」にする（写真を描かない・切り抜かない
     // だけの違い）。これで光だけに切り替えても解像度・位置が一切変わらず、Arena の映像×光が
@@ -1514,6 +1777,21 @@ export class ImageLightEngine {
   }
   isSelected(i: number): boolean {
     return this.selected.includes(i)
+  }
+  /** 選択中の灯体すべて（UI用・読み取り）。 */
+  get selectedBeams(): Beam[] {
+    return this.selected.map((i) => this.beams[i]).filter(Boolean) as Beam[]
+  }
+  /** 選択中に炎/火花マークが含まれるか（向き(TILT)パネルの表示判定）。 */
+  get hasSfxSelected(): boolean {
+    return this.selected.some((i) => {
+      const b = this.beams[i]
+      return !!b && (b.motif === 'flame' || b.motif === 'sparkler')
+    })
+  }
+  /** 選択中の代表マークの TILT（向きスライダー表示用）。 */
+  get selectedTilt(): number {
+    return this.beams[this.selected[0]]?.tilt ?? 0
   }
   /** 単独選択（素クリック）。互換: -1 を渡すと全選択。 */
   selectBeam(i: number): void {
@@ -1705,7 +1983,8 @@ export class ImageLightEngine {
       | 'pixelpatt'
       | 'stars'
       | 'festoon'
-      | 'flame',
+      | 'flame'
+      | 'sparkler',
     atX?: number,
     atY?: number
   ): void {
@@ -1743,7 +2022,8 @@ export class ImageLightEngine {
         type === 'pixelpatt' ? 28 :    // 70cm
         type === 'stars' ? 400 :       // 星空フィールド 10m角
         type === 'festoon' ? 240 :     // 垂れ幕 6m幅
-        type === 'flame' ? 64 : 200,   // 炎 1.6m
+        type === 'flame' ? 64 :        // 炎 1.6m
+        type === 'sparkler' ? 56 : 200, // 火花 1.4m
       ...(type === 'marquee' ? { motifText: 'LIVE', motifSpeed: 8 } : {}),
       ...(type === 'stars' ? { motifSeed: Math.floor(this.rnd() * 1e6) + 1 } : {})
     })
@@ -3690,6 +3970,15 @@ export class ImageLightEngine {
         ...this.decor,
         color1: this.decor.color1.slice() as RGB3,
         color2: this.decor.color2.slice() as RGB3
+      },
+      sfx: {
+        flame: { ...this.flame.params },
+        sparkler: { ...this.sparkler.params },
+        rain: { ...this.rain.params, on: this.rain.on },
+        lowSmoke: { ...this.lowSmoke.params, on: this.lowSmoke.on },
+        seqSteps: this.sfxSeqSteps.map((s) => s.slice()),
+        seqMs: this.sfxSeqMs,
+        flameChase: { on: this.flameChaseOn, pattern: this.flameChasePattern, ms: this.flameChaseMs }
       }
     }
     return { json: JSON.stringify(show, null, 2), media }
@@ -3768,6 +4057,38 @@ export class ImageLightEngine {
       color: b.color.slice() as RGB3,
       sp: { ...b.sp }
     }))
+    // 特効(SFX)の設定一式を復元（無い古いファイルは既定のまま）。
+    const sfx = show.sfx
+    if (sfx) {
+      if (sfx.flame) this.flame.params = { ...this.flame.params, ...sfx.flame }
+      if (sfx.sparkler) this.sparkler.params = { ...this.sparkler.params, ...sfx.sparkler }
+      if (sfx.rain) {
+        const { on, ...p } = sfx.rain
+        this.rain.params = { ...this.rain.params, ...p }
+        this.rain.on = !!on
+      }
+      if (sfx.lowSmoke) {
+        const { on, ...p } = sfx.lowSmoke
+        this.lowSmoke.params = { ...this.lowSmoke.params, ...p }
+        this.lowSmoke.on = !!on
+      }
+      if (Array.isArray(sfx.seqSteps)) {
+        this.sfxSeqSteps = sfx.seqSteps.map((s) => (Array.isArray(s) ? s.slice() : []))
+        if (this.sfxSeqSteps.length === 0) this.sfxSeqSteps = [[], [], [], [], [], [], [], []]
+      }
+      if (typeof sfx.seqMs === 'number') this.sfxSeqMs = sfx.seqMs
+      if (sfx.flameChase) {
+        this.flameChaseOn = !!sfx.flameChase.on
+        if (sfx.flameChase.pattern) this.flameChasePattern = sfx.flameChase.pattern
+        if (typeof sfx.flameChase.ms === 'number') this.flameChaseMs = sfx.flameChase.ms
+      }
+    }
+    this.sfxSeqPlaying = false
+    this.sfxSeqIndex = 0
+    // sfxId カウンタを復元（既存の最大+1）＝復元後に足す炎/火花のID衝突を防ぐ。
+    let maxSfxId = 0
+    for (const b of this.beams) if (typeof b.sfxId === 'number' && b.sfxId > maxSfxId) maxSfxId = b.sfxId
+    this.sfxIdSeq = maxSfxId + 1
     // 復元した灯体配置は「ユーザーが置いた配置」そのもの。これを立てないと selectScene →
     // placeRigAtPhotoBottom が全灯体の縦位置を写真下端に潰してしまう（位置が全部リセットされるバグ）。
     // 件数に関わらず必ず立てる：外部から配置を入れた経路では自動吸着を必ず止める（空配置でも

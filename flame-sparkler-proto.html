@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>SPARKLER 試作 — コールドスパーク火花フォンテン</title>
+<style>
+  :root{ --line:#2a201d; --ink:#f3e7df; --sub:#b9a79c; --accent:#ffcf66; --accent2:#ffe0a0; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#000;color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;}
+  #stage{position:fixed;inset:0;overflow:hidden;background:#000;cursor:crosshair}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #panel{position:fixed;top:12px;left:12px;width:266px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow:auto;
+    background:rgba(20,18,14,.86);backdrop-filter:blur(10px);
+    border:1px solid var(--line);border-radius:14px;padding:12px 12px 10px;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);z-index:10;user-select:none}
+  #panel h1{font-size:12px;letter-spacing:.04em;margin:0 0 2px;color:var(--accent);font-weight:700}
+  #panel .sub{font-size:10px;color:var(--sub);margin:0 0 8px;line-height:1.5}
+  .grp{font-size:10px;color:var(--accent);margin:10px 0 2px;border-top:1px solid var(--line);padding-top:6px;letter-spacing:.05em}
+  .row{margin:6px 0}
+  .row label{display:flex;justify-content:space-between;font-size:11px;color:var(--sub);margin-bottom:2px}
+  .row label b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600}
+  input[type=range]{width:100%;height:18px;-webkit-appearance:none;background:transparent;margin:0}
+  input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:3px;background:linear-gradient(90deg,#5a4416,#ffcf66)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+    background:var(--accent2);margin-top:-6px;box-shadow:0 0 0 3px rgba(255,207,102,.22);cursor:grab}
+  .btns{display:flex;gap:8px;margin:10px 0 2px}
+  button{flex:1;border:1px solid var(--line);background:#221d12;color:var(--ink);border-radius:10px;padding:10px 6px;font-size:12px;font-weight:600;cursor:pointer}
+  button:hover{border-color:var(--accent);color:var(--accent2)}
+  button.fire{background:linear-gradient(180deg,#ffcf66,#d89a18);border-color:#ffe0a0;color:#1a1406}
+  .mini{display:flex;gap:6px;margin-top:6px}
+  .mini button{font-size:10px;padding:6px 4px;flex:1}
+  .hint{font-size:10px;color:var(--sub);line-height:1.6;margin-top:8px;border-top:1px solid var(--line);padding-top:7px}
+  .hint kbd{background:#2a241a;border:1px solid #3a3326;border-radius:4px;padding:1px 5px;color:var(--accent2)}
+  #fps{position:fixed;bottom:10px;right:12px;font-size:10px;color:#6b6150;z-index:10;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="panel">
+  <h1>SPARKLER 試作 — 火花フォンテン</h1>
+  <p class="sub">クリック/長押しで噴出（押した位置が噴出口）。<kbd>Space</kbd>長押し・<kbd>F</kbd>単発。つまみ自動保存。</p>
+  <div class="btns"><button id="btnSingle">単発</button><button id="btnHold" class="fire">長押し（噴き続け）</button></div>
+
+  <div class="grp">■ フォンテンの形</div>
+  <div class="row"><label>高さ（噴き上がり） <b id="vheight">1.38</b></label><input id="height" type="range" min="0.3" max="2.2" step="0.01" value="1.38"></div>
+  <div class="row"><label>広がり（角度） <b id="vspread">0.10</b></label><input id="spread" type="range" min="0.02" max="0.6" step="0.01" value="0.10"></div>
+  <div class="row"><label>頂点までの減速（重力） <b id="vgrav">1.00</b></label><input id="grav" type="range" min="0.2" max="2.5" step="0.01" value="1.00"></div>
+  <div class="row"><label>横ゆれ（ばらけ） <b id="vwander">0.30</b></label><input id="wander" type="range" min="0" max="1.5" step="0.01" value="0.30"></div>
+
+  <div class="grp">■ 火花の量・寿命</div>
+  <div class="row"><label>量（密度） <b id="vrate">1.98</b></label><input id="rate" type="range" min="0.1" max="3.0" step="0.01" value="1.98"></div>
+  <div class="row"><label>火花の寿命 <b id="vlife">1.00</b></label><input id="life" type="range" min="0.3" max="2.2" step="0.01" value="1.00"></div>
+  <div class="row"><label>尾の長さ <b id="vtrail">1.00</b></label><input id="trail" type="range" min="0" max="3.0" step="0.01" value="1.00"></div>
+  <div class="row"><label>火花の大きさ <b id="vsize">1.00</b></label><input id="size" type="range" min="0.3" max="3.0" step="0.01" value="1.00"></div>
+
+  <div class="grp">■ 質感・色</div>
+  <div class="row"><label>クラックル（チリチリ瞬き） <b id="vcrackle">1.00</b></label><input id="crackle" type="range" min="0" max="2.0" step="0.01" value="1.00"></div>
+  <div class="row"><label>はじけ（分裂ポップ） <b id="vpop">0.50</b></label><input id="pop" type="range" min="0" max="1.5" step="0.01" value="0.50"></div>
+  <div class="row"><label>色 ←金 / 白→ <b id="vwarm">0.68</b></label><input id="warm" type="range" min="0" max="1" step="0.01" value="0.68"></div>
+  <div class="row"><label>明るさ <b id="vbright">1.30</b></label><input id="bright" type="range" min="0.3" max="2.2" step="0.01" value="1.30"></div>
+
+  <div class="grp">■ 寿命（単発）</div>
+  <div class="row"><label>噴出時間（単発・秒） <b id="vdur">0.90</b></label><input id="dur" type="range" min="0.15" max="2.5" step="0.01" value="0.90"></div>
+  <div class="row"><label>立ち上がり（小=速い） <b id="vbloom">0.06</b></label><input id="bloom" type="range" min="0.02" max="0.5" step="0.01" value="0.06"></div>
+
+  <div class="mini"><button id="btnReset">つまみ初期化</button><button id="btnAuto">連続発火 ON/OFF</button></div>
+  <div class="hint">クリック/長押し発火 ・ <kbd>Space</kbd>長押し ・ <kbd>F</kbd>単発 ・ <kbd>R</kbd>初期化 ・ <span id="cnt">0</span>粒</div>
+</div>
+<div id="fps">—</div>
+
+<script>
+const cv=document.getElementById('cv'); const g=cv.getContext('2d');
+const DPR=Math.min(2,window.devicePixelRatio||1);
+let W=0,H=0;
+function resize(){W=innerWidth;H=innerHeight;cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);}
+addEventListener('resize',resize);resize();
+
+const DEF={height:1.38,spread:0.10,grav:1.0,wander:0.30,rate:1.98,life:1.0,trail:1.0,size:1.0,crackle:1.0,pop:0.50,warm:0.68,bright:1.30,dur:0.90,bloom:0.06};
+const P=Object.assign({},DEF);
+
+// ---- パーティクル ----
+const sparks=[]; const CAP=6000;
+let baseX=0.5, baseY=0.92;       // 噴出口（0..1）
+let firing=false, holding=false, emitUntil=0, fireT0=0, autoFire=false, autoT=0;
+let emitRem=0;
+
+function rnd(a,b){return a+Math.random()*(b-a);}
+function emit(n, vigor){
+  const ox=baseX*W, oy=baseY*H;
+  const upV = 760*P.height*vigor;        // 噴き上がり初速(px/s)
+  for(let i=0;i<n;i++){
+    const ang = -Math.PI/2 + (Math.random()-0.5)*P.spread*2.0;   // 真上±広がり
+    const sp = upV*(0.62+Math.random()*0.5);
+    sparks.push({
+      x:ox+(Math.random()-0.5)*6*W/1000, y:oy,
+      vx:Math.cos(ang)*sp + (Math.random()-0.5)*60*P.wander,
+      vy:Math.sin(ang)*sp,
+      life:0, max:(0.9+Math.random()*0.9)*P.life,
+      sz:(0.5+Math.random()*0.9)*P.size,                 // 細かめ
+      tw:Math.random()*6.28, twf:18+Math.random()*26,    // 瞬きの位相/速さ
+      hot:0.7+Math.random()*0.3,
+      apex:null, child:false
+    });
+    if(sparks.length>CAP) sparks.shift();
+  }
+}
+function fireSingle(){baseX=baseX; firing=true; holding=false; emitUntil=performance.now()+P.dur*1000; fireT0=performance.now();}
+function pressHold(){firing=true; holding=true; emitUntil=0; fireT0=performance.now();}
+function release(){holding=false;}
+
+let last=performance.now(),frames=0,facc=0;
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  if(autoFire){autoT-=dt; if(autoT<=0){fireSingle(); autoT=P.dur+1.6;}}
+
+  // 噴出（emitting 中だけ粒を足す）
+  const emitting = holding || (firing && now<emitUntil);
+  if(emitting){
+    const bloom = Math.min(1,(now-fireT0)/1000/P.bloom);   // 立ち上がり
+    const want = 26*P.rate*bloom*dt*60;
+    emitRem += want;
+    const n=Math.floor(emitRem); emitRem-=n;
+    if(n>0) emit(n, 0.85+0.3*bloom);
+  }
+  if(firing && !holding && now>=emitUntil && sparks.length===0) firing=false;
+
+  // 更新＋描画
+  g.setTransform(1,0,0,1,0,0); g.clearRect(0,0,cv.width,cv.height);
+  g.scale(DPR,DPR);
+  g.globalCompositeOperation='lighter';
+  const grav = 1300*P.grav;       // px/s^2
+  const warm=P.warm, bright=P.bright, trailF=P.trail*0.05;
+  for(let i=sparks.length-1;i>=0;i--){
+    const s=sparks[i];
+    s.life+=dt;
+    if(s.life>=s.max){ sparks.splice(i,1); continue; }
+    s.vy += grav*dt;
+    s.vx *= Math.pow(0.985,dt*60);     // 空気抵抗
+    s.x += s.vx*dt; s.y += s.vy*dt;
+    // ★上がりきったら落ちず、頂点で焼き切れて消える
+    if(s.apex==null && s.vy > -8) s.apex=s.life;
+    let burn=1;
+    if(s.apex!=null){ burn=1-(s.life-s.apex)/0.20; if(burn<=0){ sparks.splice(i,1); continue; } }
+    if(s.y<-30 || s.y>H+20 || s.life>=s.max){ sparks.splice(i,1); continue; }
+    const tt=s.life/s.max;
+    // 瞬き(crackle)：明るさが速くチラつく
+    const tw = 1 + Math.sin(now*0.001*s.twf + s.tw)*0.5*P.crackle;
+    const heat = Math.max(0, 1-tt*0.85) * burn;     // 焼き切れで暗→消
+    let a = Math.min(1.7, heat * tw * s.hot * bright);
+    // 色：銀白〜金（warm大ほど白い）
+    const r=255;
+    let G=Math.min(255, Math.round(205 + 50*heat));
+    let B=Math.min(255, Math.round((45+175*warm) + 55*heat));
+    // 尾（速度方向に短い筋）
+    const tl=trailF;
+    if(tl>0){
+      g.strokeStyle=`rgba(${r},${G},${B},${a*0.55})`;
+      g.lineWidth=s.sz*0.8;
+      g.beginPath(); g.moveTo(s.x,s.y); g.lineTo(s.x - s.vx*tl, s.y - s.vy*tl); g.stroke();
+    }
+    // 頭
+    g.fillStyle=`rgba(${r},${G},${B},${a})`;
+    g.beginPath(); g.arc(s.x,s.y,s.sz,0,6.283); g.fill();
+    // はじけ(pop)：たまに子火花に分裂
+    if(P.pop>0 && !s.child && Math.random()<0.006*P.pop*dt*60 && tt>0.2 && tt<0.7){
+      for(let k=0;k<3;k++){
+        sparks.push({x:s.x,y:s.y,vx:s.vx*0.4+(Math.random()-0.5)*160,vy:s.vy*0.4+(Math.random()-0.5)*160,
+          life:0,max:0.18+Math.random()*0.22,sz:s.sz*0.7,tw:Math.random()*6.28,twf:30+Math.random()*30,hot:1.0,apex:null,child:true});
+      }
+    }
+  }
+  // 噴出口の白フラッシュ（根元）
+  if(emitting){
+    const ox=baseX*W, oy=baseY*H;
+    const rg=g.createRadialGradient(ox,oy,0,ox,oy,26);
+    rg.addColorStop(0,'rgba(255,240,200,0.5)'); rg.addColorStop(1,'rgba(255,180,80,0)');
+    g.fillStyle=rg; g.beginPath(); g.arc(ox,oy,26,0,6.283); g.fill();
+  }
+
+  frames++;facc+=dt;if(facc>=0.5){document.getElementById('fps').textContent=Math.round(frames/facc)+' fps';
+    document.getElementById('cnt').textContent=sparks.length;frames=0;facc=0;}
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- controls ----
+const KEYS=Object.keys(DEF); const LSKEY='sparklerToolP';
+let saved=null; try{saved=JSON.parse(localStorage.getItem(LSKEY)||'null');}catch(e){}
+KEYS.forEach(k=>{const el=document.getElementById(k),out=document.getElementById('v'+k);
+ if(saved&&saved[k]!=null) el.value=saved[k];
+ const apply=()=>{P[k]=parseFloat(el.value);out.textContent=P[k].toFixed(2);
+   try{localStorage.setItem(LSKEY,JSON.stringify(P));}catch(e){}};
+ el.addEventListener('input',apply);apply();});
+function setSliders(o){KEYS.forEach(k=>{const el=document.getElementById(k);el.value=o[k];el.dispatchEvent(new Event('input'));});}
+document.getElementById('btnReset').addEventListener('click',e=>{e.stopPropagation();setSliders(DEF);});
+document.getElementById('btnAuto').addEventListener('click',e=>{e.stopPropagation();autoFire=!autoFire;autoT=0;});
+document.getElementById('btnSingle').addEventListener('click',e=>{e.stopPropagation();fireSingle();});
+document.getElementById('btnHold').addEventListener('pointerdown',e=>{e.stopPropagation();pressHold();});
+addEventListener('pointerup',()=>release());
+function setBase(e){const r=cv.getBoundingClientRect();const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left;const cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;baseX=Math.min(0.97,Math.max(0.03,cx/r.width));baseY=Math.min(0.98,Math.max(0.1,cy/r.height));}
+const stage=document.getElementById('stage');
+stage.addEventListener('pointerdown',e=>{setBase(e);pressHold();});
+addEventListener('pointercancel',()=>release());
+addEventListener('keydown',e=>{if(e.repeat)return;
+ if(e.code==='Space'){e.preventDefault();pressHold();}
+ if(e.key==='f'||e.key==='F')fireSingle();
+ if(e.key==='r'||e.key==='R')setSliders(DEF);});
+addEventListener('keyup',e=>{if(e.code==='Space')release();});
+</script>
+</body>
+</html>

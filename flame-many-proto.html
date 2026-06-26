@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>FLAME 軽い土台 — 1回描いて多数スタンプ</title>
+<style>
+  :root{ --line:#2a201d; --ink:#f3e7df; --sub:#b9a79c; --accent:#ff7a33; --accent2:#ffb066; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#000;color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;}
+  #stage{position:fixed;inset:0;overflow:hidden;background:#000}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #panel{position:fixed;top:14px;left:14px;width:260px;max-width:calc(100vw - 28px);
+    background:rgba(22,16,15,.84);backdrop-filter:blur(10px);
+    border:1px solid var(--line);border-radius:14px;padding:13px 13px 11px;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);z-index:10;user-select:none}
+  #panel h1{font-size:12px;letter-spacing:.06em;margin:0 0 2px;color:var(--accent2);font-weight:700}
+  #panel .sub{font-size:10.5px;color:var(--sub);margin:0 0 10px;line-height:1.5}
+  .row{margin:9px 0}
+  .row label{display:flex;justify-content:space-between;font-size:11px;color:var(--sub);margin-bottom:4px}
+  .row label b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600}
+  input[type=range]{width:100%;height:20px;-webkit-appearance:none;background:transparent;margin:0}
+  input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:4px;background:linear-gradient(90deg,#5a2a16,#ff7a33)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:var(--accent2);margin-top:-6px;box-shadow:0 0 0 3px rgba(255,122,51,.25);cursor:grab}
+  .note{font-size:10px;color:var(--sub);line-height:1.6;margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
+  #fps{position:fixed;top:14px;right:16px;z-index:10;text-align:right;
+    font-variant-numeric:tabular-nums;background:rgba(0,0,0,.4);padding:8px 12px;border-radius:10px;border:1px solid var(--line)}
+  #fps .big{font-size:34px;font-weight:700;color:var(--accent2);line-height:1}
+  #fps .lab{font-size:10px;color:var(--sub)}
+  #fps.bad .big{color:#ff5a5a}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="gl"></canvas></div>
+
+<div id="panel">
+  <h1>🔥 軽い土台 — 1回描いて多数スタンプ</h1>
+  <p class="sub">炎を裏で少数だけ描画（アトラス）→ 画面に多数コピー。30個でも軽い設計。右上のfpsを見てください。</p>
+  <div class="row"><label>炎の数 <b id="vCount">30</b></label>
+    <input id="count" type="range" min="1" max="60" step="1" value="30"></div>
+  <div class="row"><label>大きさ <b id="vSize">1.00</b></label>
+    <input id="size" type="range" min="0.3" max="2.5" step="0.01" value="1.00"></div>
+  <div class="row"><label>明るさ <b id="vBright">1.00</b></label>
+    <input id="bright" type="range" min="0.2" max="2.0" step="0.01" value="1.00"></div>
+  <div class="row"><label>ばらつき <b id="vVary">1.00</b></label>
+    <input id="vary" type="range" min="0" max="1.5" step="0.01" value="1.00"></div>
+  <div class="row"><label>オレンジ量 <b id="vOrange">0.78</b></label>
+    <input id="orange" type="range" min="0" max="1" step="0.01" value="0.78"></div>
+  <div class="note">
+    仕組み：重い炎を<b>8種だけ裏で描画</b> → 各炎は位置/大きさ/向き/色/タイミングを変えて<b>コピー配置</b>。<br>
+    本番では各炎を個別に点火/消灯も可能。まずは<b>数を増やしてfpsが落ちないか</b>を確認。
+  </div>
+</div>
+<div id="fps"><div class="big" id="fpsN">—</div><div class="lab"><span id="cntN">30</span>個 · <span id="drawN">0</span>描画</div></div>
+
+<script>
+const cv=document.getElementById('gl');
+const gl=cv.getContext('webgl',{antialias:false,premultipliedAlpha:false});
+const DPR=Math.min(2,window.devicePixelRatio||1);
+
+function sh(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+ if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
+function prog(vs,fs){const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,vs));
+ gl.attachShader(p,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);
+ if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));return p;}
+
+// ===== Pass1: 炎アトラス（8種を1回で描く・軽量シェーダ）=====
+const COLS=4, ROWS=2, NCELL=COLS*ROWS;
+const ATLAS_W=4*150, ATLAS_H=2*220;   // 600x440
+const flameFS=`
+precision highp float;
+uniform vec2 uRes; uniform float uTime, uOrange;
+float hash(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);
+ float a=hash(i),b=hash(i+vec2(1.,0.)),c=hash(i+vec2(0.,1.)),d=hash(i+vec2(1.,1.));
+ return mix(mix(a,b,u.x),mix(c,d,u.x),u.y);}
+float fbm3(vec2 p){float v=0.,a=0.6;for(int i=0;i<3;i++){v+=a*noise(p);p=p*2.03+vec2(1.7,9.2);a*=0.5;}return v;}
+float fbm4(vec2 p){float v=0.,a=0.58;for(int i=0;i<4;i++){v+=a*noise(p);p=p*2.03+vec2(1.7,9.2);a*=0.5;}return v;}
+void main(){
+ vec2 uv=gl_FragCoord.xy/uRes;
+ vec2 cell=floor(vec2(uv.x*float(COLS_), uv.y*float(ROWS_)));
+ float idx=cell.y*float(COLS_)+cell.x;
+ vec2 cuv=fract(vec2(uv.x*float(COLS_), uv.y*float(ROWS_)));
+ float tt=uTime + idx*1.37;          // セルごとに時間ずらし＝バラバラに見える
+ float sd=idx*13.1;                   // セルごとに種ずらし
+ float px=(cuv.x-0.5)*0.78;           // セル内座標（中央0）
+ float py=cuv.y;
+ // しずく型
+ float h=clamp(py/0.86,0.0,1.5);
+ float rs=smoothstep(0.0,0.16,h); float fall=1.0-smoothstep(0.30,1.02,h);
+ float halfw=max(0.055+(0.175-0.055)*rs*(0.30+0.70*fall),0.012);
+ float edgeN=fbm3(vec2(px*3.0+sd, py*5.0 - tt*2.8));
+ halfw=max(halfw*(1.0+0.35*(edgeN-0.5)*2.0),0.008);
+ float sway=(fbm3(vec2(py*2.2+sd, tt*0.3))-0.5)*0.05*h + 0.012*sin(py*7.0-tt*4.0);
+ float xr=(px-sway)/halfw;
+ float radial=exp(-2.4*xr*xr);
+ float nf=fbm4(vec2(px*2.6+sd, py*2.8 - tt*2.3));
+ float bdy=radial*(0.88+0.55*(nf-0.5));
+ float vein=fbm3(vec2(px*6.5+sd, py*2.2 - tt*3.0));
+ bdy*=(1.0-0.40*smoothstep(0.55,1.0,vein));
+ float vert=1.0-smoothstep(0.45,1.06,h);
+ float dens=clamp(bdy*vert,0.0,1.6);
+ dens=clamp(dens-smoothstep(0.62,1.05,h)*(1.0-nf)*0.5,0.0,1.6);
+ float heat=pow(max(dens*(1.30-0.5*clamp(h,0.0,1.0)),0.0),1.10);
+ float e=heat*2.6;
+ vec3 deep=vec3(1.20,0.25,0.04), org=vec3(1.95,0.72,0.15), white=vec3(2.60,2.35,2.05);
+ float wRed=smoothstep(0.04,0.26,e),wOrg=smoothstep(0.28,0.78,e);
+ float wWhite=smoothstep(0.95+0.70*uOrange,1.55+0.85*uOrange,e);
+ vec3 col=deep*wRed+(org-deep)*wOrg+(white-org)*wWhite;
+ float grain=fbm3(vec2(px*22.0+sd, py*26.0 - tt*5.0));
+ col*=1.0+0.18*(grain-0.5)*2.0;
+ // 露出トーンマップしてアトラスに格納（0..1）
+ col=vec3(1.0)-exp(-col*1.15); col=pow(col,vec3(0.4545));
+ gl_FragColor=vec4(col,1.0);
+}`.replace(/COLS_/g,COLS).replace(/ROWS_/g,ROWS);
+const fullVS=`attribute vec2 a; void main(){ gl_Position=vec4(a,0.,1.); }`;
+const pFlame=prog(fullVS,flameFS);
+const triBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,triBuf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+
+// FBO + アトラステクスチャ
+const atlasTex=gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D,atlasTex);
+gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,ATLAS_W,ATLAS_H,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+const fbo=gl.createFramebuffer();
+gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);
+gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,atlasTex,0);
+gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+
+// ===== Pass2: スプライト（炎をコピー配置・加算合成）=====
+const spriteVS=`
+attribute vec2 a; uniform vec2 uPos, uHalf; uniform vec4 uRect; uniform float uFlip;
+varying vec2 vUv;
+void main(){
+ vec2 q=a*2.0-1.0;
+ gl_Position=vec4(uPos+q*uHalf,0.,1.);
+ vec2 uv=a; uv.y=1.0-uv.y;
+ if(uFlip<0.5) uv.x=1.0-uv.x;
+ vUv=uRect.xy+uv*uRect.zw;
+}`;
+const spriteFS=`
+precision mediump float; uniform sampler2D uTex; uniform vec3 uTint; uniform float uBright;
+varying vec2 vUv;
+void main(){ vec3 c=texture2D(uTex,vUv).rgb; gl_FragColor=vec4(c*uTint*uBright,1.0); }`;
+const pSprite=prog(spriteVS,spriteFS);
+const quadBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([0,0, 1,0, 0,1, 0,1, 1,0, 1,1]),gl.STATIC_DRAW);
+
+const SU={pos:gl.getUniformLocation(pSprite,'uPos'),half:gl.getUniformLocation(pSprite,'uHalf'),
+ rect:gl.getUniformLocation(pSprite,'uRect'),flip:gl.getUniformLocation(pSprite,'uFlip'),
+ tint:gl.getUniformLocation(pSprite,'uTint'),bright:gl.getUniformLocation(pSprite,'uBright'),tex:gl.getUniformLocation(pSprite,'uTex')};
+const FU={res:gl.getUniformLocation(pFlame,'uRes'),time:gl.getUniformLocation(pFlame,'uTime'),orange:gl.getUniformLocation(pFlame,'uOrange')};
+
+// ---- インスタンス生成（位置/大きさ/向き/色/セル）----
+const P={count:30,size:1,bright:1,vary:1,orange:.78};
+let inst=[];
+function rng(s){return function(){s=(s*1664525+1013904223)>>>0;return s/4294967296;};}
+function buildInstances(){
+ const r=rng(12345); inst=[];
+ const N=60;
+ for(let i=0;i<N;i++){
+  const cell=Math.floor(r()*NCELL);
+  inst.push({
+   bx: (i+0.5)/N,                  // 横位置(0..1) 等間隔ベース
+   jx: (r()-0.5),                  // 横ジッタ
+   by: 0.16+r()*0.06,             // 下寄り
+   s: 0.7+r()*0.7,                 // 大きさ係数
+   cell, flip: r()<0.5?0:1,
+   tint:[1.0-0.06*r(), 1.0-0.10*r(), 1.0-0.18*r()],
+   bj: 0.8+r()*0.4,                // 明るさジッタ
+  });
+ }
+}
+buildInstances();
+
+let W=0,H=0;
+function resize(){W=innerWidth;H=innerHeight;cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);}
+addEventListener('resize',resize);resize();
+
+let t0=performance.now(),last=t0,frames=0,facc=0;
+function frame(now){
+ const dt=(now-last)/1000;last=now;
+ // --- Pass1: アトラスへ炎を描画 ---
+ gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);
+ gl.viewport(0,0,ATLAS_W,ATLAS_H);
+ gl.useProgram(pFlame);
+ gl.bindBuffer(gl.ARRAY_BUFFER,triBuf);
+ const fa=gl.getAttribLocation(pFlame,'a');gl.enableVertexAttribArray(fa);gl.vertexAttribPointer(fa,2,gl.FLOAT,false,0,0);
+ gl.uniform2f(FU.res,ATLAS_W,ATLAS_H);gl.uniform1f(FU.time,(now-t0)/1000);gl.uniform1f(FU.orange,P.orange);
+ gl.disable(gl.BLEND);
+ gl.drawArrays(gl.TRIANGLES,0,3);
+ // --- Pass2: 画面へスプライトを多数描画（加算）---
+ gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+ gl.viewport(0,0,cv.width,cv.height);
+ gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+ gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);
+ gl.useProgram(pSprite);
+ gl.bindBuffer(gl.ARRAY_BUFFER,quadBuf);
+ const sa=gl.getAttribLocation(pSprite,'a');gl.enableVertexAttribArray(sa);gl.vertexAttribPointer(sa,2,gl.FLOAT,false,0,0);
+ gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,atlasTex);gl.uniform1i(SU.tex,0);
+ const aspect=cv.width/cv.height;
+ const cw=1.0/COLS, ch=1.0/ROWS, inset=0.004;
+ const n=Math.min(P.count,inst.length);
+ let draws=0;
+ for(let i=0;i<n;i++){
+  const it=inst[i];
+  const sz=P.size*(1.0+(it.s-1.0)*P.vary);   // ばらつき0で全部同サイズ
+  const halfW=0.06*sz;                         // NDC半幅
+  const halfH=halfW*aspect*1.55;               // 縦長
+  const px=(it.bx*2.0-1.0) + it.jx*0.03*P.vary;          // 横：等間隔＋ジッタ
+  const cy=(-1.0 + it.by) + halfH;                        // 縦：下端付近に立てる
+  const cellX=it.cell%COLS, cellY=Math.floor(it.cell/COLS);
+  gl.uniform2f(SU.pos, px, cy);
+  gl.uniform2f(SU.half, halfW, halfH);
+  gl.uniform4f(SU.rect, cellX*cw+inset, cellY*ch+inset, cw-2.0*inset, ch-2.0*inset);
+  gl.uniform1f(SU.flip, it.flip);
+  const tv=P.vary;
+  gl.uniform3f(SU.tint, 1.0-(1.0-it.tint[0])*tv, 1.0-(1.0-it.tint[1])*tv, 1.0-(1.0-it.tint[2])*tv);
+  gl.uniform1f(SU.bright, P.bright*(1.0-(1.0-it.bj)*tv));
+  gl.drawArrays(gl.TRIANGLES,0,6);
+  draws++;
+ }
+ frames++;facc+=dt;
+ if(facc>=0.4){const f=Math.round(frames/facc);
+  const el=document.getElementById('fps');el.classList.toggle('bad',f<50);
+  document.getElementById('fpsN').textContent=f;
+  document.getElementById('cntN').textContent=n;document.getElementById('drawN').textContent=draws+1;
+  frames=0;facc=0;}
+ requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- controls ----
+[['count','vCount',v=>v|0],['size','vSize',v=>v.toFixed(2)],['bright','vBright',v=>v.toFixed(2)],
+ ['vary','vVary',v=>v.toFixed(2)],['orange','vOrange',v=>v.toFixed(2)]].forEach(([id,vid,fmt])=>{
+ const el=document.getElementById(id),out=document.getElementById(vid);
+ const apply=()=>{P[id]=parseFloat(el.value);out.textContent=fmt(parseFloat(el.value));};
+ el.addEventListener('input',apply);apply();});
+</script>
+</body>
+</html>

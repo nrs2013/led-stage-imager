@@ -1,99 +1,146 @@
-// flame.ts — スペシャルエフェクト(特効)用のプロシージャル炎(フレーマー)。
-// チャットで v1→v19 まで詰めて確定した「C＝濃い実写風」を独立モジュール化したもの。
-// 仕様: ヒートフィールド＋パーティクルを炎パレット(白はベタ禁止/芯だけ淡黄→橙→赤)で色変換。
-//   出口は細く胴は太い teardrop。単発(約1.1秒の有限ライフ)＋長押し(サスティン・離すと終わる)。
-//   炎ごとに別乱数でバラバラ。内部は domain-warp + bilinear の低周波ノイズで churn(四角さ/粒感を消す)。
-//   最後は散らさない(塊が昇って煙化)。
-// 出力は2枚: body(前面に重ねる炎本体・透過) と glow(背景セットを照らす暖色の灯り)。
-// engine 側は body を出力フレームへ source-over、glow を光マップへ lighter で重ねる。
+// flame.ts — スペシャルエフェクト(特効)用の炎。2026-06-26 に Canvas2D版から
+// 「ファイヤーボール(WebGL)」へ全面差し替え。チャットで実写FB1.movを実測して詰め、
+// のむさん承認の確定Defaultを GLSL に焼き込んだもの（flame-fireball-proto.html と同等）。
+//
+// 仕様: 機械(ノズル)から細く噴射→上に向かって徐々に太く billowing→火球の頭。
+//   立ち上がり速い／白コア＋オレンジ縁／下から消える・上には伸びない／煙なし。
+//   churn(動き)の時計と age(寿命)を分離＝長押し中も動きが止まらない。
+//   流速は炎の高さに比例（高さでスローモーにならない）。
+//
+// 公開APIは旧版と完全互換: body(前面炎・透過) / glow(照らし) / active / tick(now) /
+//   fire(fx,fy,str) / fireRow() / startHold(fx,fy,str) / release() / params。
+//   engine は body を出力へ source-over、glow を光マップへ lighter で重ねる（無改造）。
 
 export interface FlameParams {
-  thick: number // 胴の太さ
-  dense: number // 迫力(密度)
-  churn: number // ゆらぎ(内部の乱れ)
-  speed: number // 速さ(内部のゆらぎ時間)
-  height: number // 背丈(炎の届く高さ)＝粒の上昇量
-  dur: number // 燃えてる時間(一発の持続)
+  thick: number // 胴の太さ → width
+  dense: number // 迫力(明るさ) → bright
+  churn: number // ゆらぎ(モコモコ) → roil
+  speed: number // 速さ(流れの時間) → churn速度
+  height: number // 背丈(炎の届く高さ) → 画面上のサイズ
+  dur: number // 燃えてる時間(一発の持続) → 寿命スケール
 }
 
 interface Shot {
-  x: number
-  by: number
-  t0: number
+  nx: number // ノズル横位置 0..1
+  ny: number // ノズル縦位置 0..1（床=1）
   str: number
+  dir: number // 噴き出す向き（ラジアン・画面座標 0=右, -π/2=真上）
+  t0: number // 発射時刻(ms)
   held: boolean
-  rel: number | null
-  relAt: number | null
-  no: number
-  wmul: number
-}
-interface Part {
-  x: number
-  cx: number
-  no: number
-  sp: number
-  y: number
-  vx: number
-  vy: number
-  age: number
-  max: number
-  en: number
-  bri: number
-}
-interface Smk {
-  x: number
-  y: number
-  vx: number
-  vy: number
-  age: number
-  max: number
-  r: number
-}
-interface Flash {
-  x: number
-  y: number
-  t0: number
+  relAt: number | null // 離した時刻(ms)
+  ageAtRel: number // 離した時点のage(秒)
 }
 
-const FW = 640 // 内部作業解像度(16:9)。engine 側で出力サイズへ拡大する。
+const FW = 640 // body/glow の解像度（engine 側で出力サイズへ拡大）
 const FH = 360
-const CELL = 2
-const GW = Math.ceil(FW / CELL)
-const GH = Math.ceil(FH / CELL)
-const NW = 96
-const NH = 96
-const PN = 120 // パレット段数
+const MAXSHOTS = 48 // 持続炎(置いた数)＋単発バーストを同時に賄える数
 
-function buildPalette(): Uint8Array {
-  const pal = new Uint8Array(PN * 4)
-  const s = [
-    [0, 0, 0, 0, 0],
-    [0.05, 46, 9, 2, 80],
-    [0.13, 112, 22, 7, 170],
-    [0.26, 168, 38, 12, 225],
-    [0.42, 214, 70, 18, 250],
-    [0.6, 242, 110, 30, 255],
-    [0.76, 252, 154, 44, 255],
-    [0.89, 255, 194, 84, 255],
-    [1, 255, 238, 170, 255]
-  ]
-  for (let i = 0; i < PN; i++) {
-    const f = i / (PN - 1)
-    for (let j = 0; j < s.length - 1; j++) {
-      if (f >= s[j][0] && f <= s[j + 1][0]) {
-        const a = s[j]
-        const b = s[j + 1]
-        const u = (f - a[0]) / (b[0] - a[0] || 1)
-        pal[i * 4] = a[1] + (b[1] - a[1]) * u
-        pal[i * 4 + 1] = a[2] + (b[2] - a[2]) * u
-        pal[i * 4 + 2] = a[3] + (b[3] - a[3]) * u
-        pal[i * 4 + 3] = a[4] + (b[4] - a[4]) * u
-        break
-      }
-    }
-  }
-  return pal
+// --- のむさん承認の確定Default（flame-fireball-proto.html DEF と一致 2026-06-26）---
+//   height/thick/dense/churn/speed/dur は FlameParams 経由で倍率調整。
+//   下記は「形・色」の固定値（必要なら将来UIに出す）。
+const D = {
+  uHeight: 2.49, // 形の比率＆流速の基準（画面サイズとは別物）
+  width: 1.08,
+  neck: 0.023,
+  headPeak: 0.27,
+  bloomT: 0.22,
+  lifeStart: 0.3,
+  clearDur: 0.91,
+  churn: 1.4,
+  roil: 1.36,
+  roilFreq: 1.57,
+  orange: 0.76,
+  warm: 1.0,
+  bright: 0.7
 }
+const BASE_SCALE = 120 // height=1 のときの px/正規化単位（炎の画面上の大きさ）
+
+/** 床位置(出口)の標準配置 = 写真フレーム幅に対する割合。 */
+export const DEFAULT_ROW = [0.17, 0.42, 0.63, 0.79]
+const ROW_STR = [1.0, 1.08, 0.85, 0.78]
+
+// GLSL は float リテラルに小数点が必須（"1" は不可・"1.0" にする）
+const flt = (n: number): string => {
+  const s = String(n)
+  return s.includes('.') || s.includes('e') ? s : s + '.0'
+}
+const VS = `attribute vec2 a; void main(){ gl_Position=vec4(a,0.,1.); }`
+const FS = `
+precision highp float;
+uniform vec2 uRes;
+uniform vec2 uNozzle;
+uniform float uTime,uAge,uStr,uScale,uWidth,uBright,uRoil,uChurnSpd,uOrange,uLifeStart,uClearDur,uDir;
+float hash(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);
+ float a=hash(i),b=hash(i+vec2(1.,0.)),c=hash(i+vec2(0.,1.)),d=hash(i+vec2(1.,1.));
+ return mix(mix(a,b,u.x),mix(c,d,u.x),u.y);}
+float fbm(vec2 p){float v=0.,a=0.55;for(int i=0;i<6;i++){v+=a*noise(p);p=p*2.02+vec2(1.7,9.2);a*=0.5;}return v;}
+float fbm4(vec2 p){float v=0.,a=0.55;for(int i=0;i<4;i++){v+=a*noise(p);p=p*2.02+vec2(1.7,9.2);a*=0.5;}return v;}
+vec2 curl(vec2 p){float e=0.06;
+ float x=fbm(p+vec2(0.,e))-fbm(p-vec2(0.,e)); float y=fbm(p+vec2(e,0.))-fbm(p-vec2(e,0.));
+ return vec2(x,-y)/(2.*e);}
+const float HGT=${flt(D.uHeight)};
+const float NECK=${flt(D.neck)};
+const float HEADP=${flt(D.headPeak)};
+const float BLOOMT=${flt(D.bloomT)};
+const float ROILF=${flt(D.roilFreq)};
+const float WARM=${flt(D.warm)};
+vec3 fireball(float px, float py){
+ float age=uAge;
+ float bloom=smoothstep(0.0,BLOOMT,age);
+ float headC=0.20+0.42*bloom;
+ float peak=mix(0.07,HEADP,bloom)*uWidth;
+ float neck=NECK*uWidth;
+ float fadeIn=smoothstep(0.02,0.10,age);
+ float h=clamp(py/(0.82*HGT),-0.08,1.5);
+ float vsp=HGT*uChurnSpd;
+ vec2 cc=curl(vec2(px*3.0, py*3.0 - uTime*1.8*vsp));
+ float wx=px+0.06*cc.x, wy=py+0.06*cc.y;
+ float nb=fbm(vec2(wx*4.5*ROILF+3.0, wy*4.5*ROILF - uTime*2.5*vsp));
+ float nb2=fbm4(vec2(wx*9.5*ROILF-5.0, wy*9.5*ROILF - uTime*3.6*vsp));
+ float roil=0.62*nb+0.38*nb2;
+ float widen=smoothstep(0.0,headC,h);
+ float taper=1.0-smoothstep(headC+0.12,headC+0.55,h);
+ float halfw=max(neck+(peak-neck)*widen*(0.35+0.65*taper),0.012);
+ float xr=px/halfw; float radial=exp(-2.5*xr*xr);
+ float headw=smoothstep(0.25,0.85,h);
+ float dens=clamp(radial*(0.85+(0.4+0.5*headw)*(roil-0.5)*2.0*uRoil)
+                  - smoothstep(0.30,1.05,abs(xr))*(1.0-roil)*(0.9+0.8*headw), 0.0, 1.7);
+ float base_on=smoothstep(-0.07,0.03,h);
+ float fray=smoothstep(headC+0.15+0.30*roil, headC+0.62, h);
+ float vert=base_on*(1.0-fray);
+ float clearFront=-0.18+2.0*smoothstep(uLifeStart, uLifeStart+uClearDur, age);
+ float hj=h+(roil-0.5)*0.42;
+ float clearGate=smoothstep(clearFront-0.04, clearFront+0.26, hj);
+ dens=dens*vert*fadeIn*clearGate;
+ float coolAge=1.2-0.5*smoothstep(uLifeStart, uLifeStart+uClearDur*0.85, age);
+ float heat=pow(max(dens*(1.55-0.7*abs(xr)-0.25*headw)*coolAge,0.0),1.08);
+ float e=heat*2.6*uBright;
+ float whi_lo=1.55+0.85*uOrange, whi_hi=2.30+0.85*uOrange;
+ float w_red=1.0-smoothstep(0.10,0.55,e);
+ float w_white=smoothstep(whi_lo,whi_hi,e);
+ float w_org=clamp(1.0-w_red-w_white,0.0,1.0);
+ vec3 col=(w_red*vec3(1.20,0.25,0.04)+w_org*vec3(1.95,0.72,0.15)+w_white*vec3(2.60,2.35,2.05))*e;
+ col.r*=1.0+(0.5-WARM)*0.30; col.b*=1.0+(WARM-0.5)*0.40;
+ return col;
+}
+void main(){
+ vec2 uv=gl_FragCoord.xy/uRes;
+ float sx=uv.x*uRes.x;
+ float sy=(1.0-uv.y)*uRes.y;       // 上下を flame.ts と合わせる(上=小さいy)
+ float nx=uNozzle.x*uRes.x;
+ float ny=uNozzle.y*uRes.y;
+ float py=(ny-sy)/uScale;          // ノズルから上が +
+ float px=(sx-nx)/uScale;
+ // 噴き出す向き: 既定 -π/2(真上)なら無回転。サンプル座標を回して炎を傾ける。
+ float ph=uDir+1.5707963;
+ float cs=cos(ph), sn=sin(ph);
+ float lpx=px*cs - py*sn;
+ float lpy=px*sn + py*cs;
+ vec3 col=fireball(lpx,lpy)*uStr;
+ float a=clamp(max(max(col.r,col.g),col.b),0.0,1.0);
+ gl_FragColor=vec4(col,a);
+}`
 
 function mkCanvas(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement('canvas')
@@ -102,337 +149,204 @@ function mkCanvas(w: number, h: number): HTMLCanvasElement {
   return c
 }
 
-/** 床位置(出口)の標準配置 = 写真フレーム幅に対する割合。 */
-export const DEFAULT_ROW = [0.17, 0.42, 0.63, 0.79]
-const ROW_STR = [1.0, 1.08, 0.85, 0.78]
-
 export class FlameFX {
-  params: FlameParams = { thick: 1.1, dense: 1.6, churn: 0.75, speed: 2.4, height: 1, dur: 1 }
+  params: FlameParams = { thick: 1.0, dense: 1.0, churn: 1.0, speed: 1.0, height: 1.0, dur: 1.0 }
 
-  private heat = new Float32Array(GW * GH)
-  private noise = new Float32Array(NW * NH)
-  private pal = buildPalette()
-  private off = mkCanvas(GW, GH) // 色変換した炎(等倍)
-  private offCtx: CanvasRenderingContext2D
-  private img: ImageData
-  private bodyCv = mkCanvas(FW, FH)
-  private bodyCtx: CanvasRenderingContext2D
-  private glowCv = mkCanvas(FW, FH)
+  private bodyGL = mkCanvas(FW, FH) // WebGL: 火球本体(透過)
+  private glowCv = mkCanvas(FW, FH) // Canvas2D: 照らし用(ぼかし)
   private glowCtx: CanvasRenderingContext2D
-
+  private gl: WebGLRenderingContext | null
+  private prog: WebGLProgram | null = null
+  private u: Record<string, WebGLUniformLocation | null> = {}
   private shots: Shot[] = []
-  private parts: Part[] = []
-  private smoke: Smk[] = []
-  private flashes: Flash[] = []
-  private frame = 0
   private heldShot: Shot | null = null
+  private t0 = 0
+  private ok = false
 
   constructor() {
-    this.offCtx = this.off.getContext('2d')!
-    this.img = this.offCtx.createImageData(GW, GH)
-    this.bodyCtx = this.bodyCv.getContext('2d')!
     this.glowCtx = this.glowCv.getContext('2d')!
-    for (let i = 0; i < this.noise.length; i++) this.noise[i] = Math.random()
+    const gl = (this.bodyGL.getContext('webgl', {
+      premultipliedAlpha: false,
+      alpha: true,
+      antialias: false
+    }) || null) as WebGLRenderingContext | null
+    this.gl = gl
+    if (gl) {
+      try {
+        this.initGL(gl)
+        this.ok = true
+      } catch (e) {
+        console.error('[flame] WebGL init failed', e)
+        this.ok = false
+      }
+    }
   }
 
-  /** 前面に重ねる炎本体(透過)。engine は出力フレームへ source-over で drawImage。 */
-  get body(): HTMLCanvasElement {
-    return this.bodyCv
+  private initGL(gl: WebGLRenderingContext): void {
+    const sh = (t: number, s: string): WebGLShader => {
+      const x = gl.createShader(t)!
+      gl.shaderSource(x, s)
+      gl.compileShader(x)
+      if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x) || 'shader')
+      return x
+    }
+    const p = gl.createProgram()!
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, VS))
+    gl.attachShader(p, sh(gl.FRAGMENT_SHADER, FS))
+    gl.linkProgram(p)
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || 'link')
+    this.prog = p
+    gl.useProgram(p)
+    const buf = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW)
+    const loc = gl.getAttribLocation(p, 'a')
+    gl.enableVertexAttribArray(loc)
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0)
+    const names = ['uRes', 'uNozzle', 'uTime', 'uAge', 'uStr', 'uScale', 'uWidth', 'uBright',
+      'uRoil', 'uChurnSpd', 'uOrange', 'uLifeStart', 'uClearDur', 'uDir']
+    for (const n of names) this.u[n] = gl.getUniformLocation(p, n)
+    gl.viewport(0, 0, FW, FH)
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.ONE, gl.ONE) // 加算（複数の火球を重ねる）
   }
-  /** 背景セットを照らす暖色の灯り。engine は光マップへ lighter で drawImage。 */
+
+  get body(): HTMLCanvasElement {
+    return this.bodyGL
+  }
   get glow(): HTMLCanvasElement {
     return this.glowCv
   }
-  /** 今この瞬間、描くもの(炎 or 煙)があるか。無ければ engine 側で合成をスキップできる。 */
   get active(): boolean {
-    return this.parts.length > 0 || this.smoke.length > 0 || this.shots.length > 0
+    return this.shots.length > 0
   }
 
-  // ---- bilinear noise (格子感を消す) ----
-  private samp(u: number, v: number): number {
-    const x0 = Math.floor(u)
-    const y0 = Math.floor(v)
-    const fx = u - x0
-    const fy = v - y0
-    let ix = x0 % NW
-    if (ix < 0) ix += NW
-    let iy = y0 % NH
-    if (iy < 0) iy += NH
-    const ix1 = (ix + 1) % NW
-    const iy1 = (iy + 1) % NH
-    const a = this.noise[iy * NW + ix]
-    const b = this.noise[iy * NW + ix1]
-    const c = this.noise[iy1 * NW + ix]
-    const d = this.noise[iy1 * NW + ix1]
-    const t = a + (b - a) * fx
-    const bo = c + (d - c) * fx
-    return t + (bo - t) * fy
-  }
-  // domain-warp した低周波ノイズ(内部 churn 用)
-  private nz(x: number, y: number, no: number): number {
-    const sp = this.params.speed
-    const wx = (this.samp(x * 0.018 + no, y * 0.018 - this.frame * 0.2 * sp) - 0.5) * 7
-    const wy = (this.samp(x * 0.018 + no + 40, y * 0.018 - this.frame * 0.2 * sp + 9) - 0.5) * 7
-    return (
-      this.samp((x + wx) * 0.05 + no, (y + wy) * 0.05 - this.frame * 0.5 * sp) * 0.7 +
-      this.samp((x + wx) * 0.095 + no * 1.7 + 31, (y + wy) * 0.095 - this.frame * 0.85 * sp + 17) * 0.3
-    )
-  }
-
-  // ---- トリガー（fx,fy は 0..1 の横位置/縦位置＝炎の出る場所＝ノズル） ----
-  private mk(fx: number, fy: number, str: number, held: boolean, relAt: number | null): Shot {
-    const by = Math.max(8, Math.min(FH - 2, fy * FH))
-    const s: Shot = {
-      x: fx * FW,
-      by,
-      t0: this.frame,
-      str,
-      held,
-      rel: null,
-      relAt,
-      no: Math.random() * 577,
-      wmul: 0.82 + Math.random() * 0.42
-    }
+  // ---- トリガー ----
+  private mk(fx: number, fy: number, str: number, held: boolean, dir: number): Shot {
+    const s: Shot = { nx: fx, ny: fy, str, dir, t0: this.now, held, relAt: null, ageAtRel: 0 }
+    if (this.shots.length >= MAXSHOTS) this.shots.shift()
     this.shots.push(s)
-    this.flashes.push({ x: s.x, y: s.by, t0: this.frame })
     return s
   }
-  /** 一発(単発)。fx,fy=0..1（fy 未指定は床=1）。 */
-  fire(fx: number, fy = 1, str = 1): void {
-    this.mk(fx, fy, str, false, null)
+  fire(fx: number, fy = 1, str = 1, dir = -Math.PI / 2): void {
+    this.mk(fx, fy, str, false, dir)
   }
-  /** 標準の4本を時間差で一斉発射(単発・床)。 */
   fireRow(): void {
-    for (let i = 0; i < DEFAULT_ROW.length; i++) {
-      const s = this.mk(DEFAULT_ROW[i], 1, ROW_STR[i], false, null)
-      s.t0 = this.frame + i * 5
-    }
+    for (let i = 0; i < DEFAULT_ROW.length; i++) this.mk(DEFAULT_ROW[i], 1, ROW_STR[i], false, -Math.PI / 2)
   }
-  /** 長押し開始(サスティン)。release() で終わる。 */
-  startHold(fx: number, fy = 1, str = 1): void {
-    this.heldShot = this.mk(fx, fy, str, true, null)
+  startHold(fx: number, fy = 1, str = 1, dir = -Math.PI / 2): void {
+    this.heldShot = this.mk(fx, fy, str, true, dir)
   }
-  /** 長押し終了。 */
   release(): void {
     if (this.heldShot) {
-      this.heldShot.held = false
-      this.heldShot.rel = this.frame
+      const s = this.heldShot
+      s.ageAtRel = this.shotAge(s)
+      s.relAt = this.now
+      s.held = false
       this.heldShot = null
     }
   }
 
-  private emit(s: Shot, ms: number, step: number): void {
-    const st = s.str
-    const rate = Math.round((ms < 100 ? 40 : 27) * this.params.dense * step)
-    const climb = ms < 100 ? 1.1 : 1
-    const bw = (7 + this.params.thick * 26) * st * s.wmul
-    for (let i = 0; i < rate; i++) {
-      this.parts.push({
-        x: s.x + (Math.random() - 0.5) * 3.2,
-        cx: s.x,
-        no: s.no,
-        sp: (Math.random() - 0.5) * bw,
-        y: s.by - Math.random() * 5,
-        vx: (Math.random() - 0.5) * 0.1,
-        vy: -(7.4 + Math.random() * 3.4) * st * climb * this.params.height, // 立ち上がり(元v19)×背丈。×2は突き抜けて細い筋になるのでやめた
-        age: 0,
-        max: 52 + Math.random() * 26,
-        en: 6.8 + Math.random() * 1.8,
-        bri: 0.88 + Math.random() * 0.16
-      })
+  // ---- 持続モード（火花と同じ「置いて点いていれば出続ける」を炎にも）----
+  // 点灯中の炎マーク(0..1＋向き)を毎フレーム渡す＝各点で炎を燃やし続ける。
+  // 点が消えた(=消灯/別ステップ)ら、その炎は自然に燃え尽きる。
+  private sustained = new Map<string, Shot>()
+  setSustain(points: { fx: number; fy: number; dir?: number; str?: number }[]): void {
+    const seen = new Set<string>()
+    for (const p of points) {
+      const k = p.fx.toFixed(4) + ',' + p.fy.toFixed(4)
+      seen.add(k)
+      const cur = this.sustained.get(k)
+      if (!cur || cur.relAt != null) {
+        const s = this.mk(p.fx, p.fy, p.str ?? 1, true, p.dir ?? -Math.PI / 2)
+        this.sustained.set(k, s)
+      } else {
+        cur.dir = p.dir ?? cur.dir // 向き(TILT)変更を反映
+        cur.str = p.str ?? cur.str
+      }
+    }
+    // 消えた点の炎は離して燃え尽きさせる
+    for (const [k, s] of this.sustained) {
+      if (!seen.has(k)) {
+        if (s.held) {
+          s.ageAtRel = this.shotAge(s)
+          s.relAt = this.now
+          s.held = false
+        }
+        this.sustained.delete(k)
+      }
     }
   }
-  private dep(px: number, py: number, e: number): void {
-    const gx = (px / CELL) | 0
-    const gy = (py / CELL) | 0
-    if (gx < 2 || gx >= GW - 2 || gy < 1 || gy >= GH - 1) return
-    const c = gy * GW + gx
-    const h = this.heat
-    h[c] += e
-    h[c - 1] += e * 0.55
-    h[c + 1] += e * 0.55
-    h[c - 2] += e * 0.26
-    h[c + 2] += e * 0.26
-    h[c - GW] += e * 0.55
-    h[c + GW] += e * 0.22
+
+  private now = 0
+  private get lifeStart(): number {
+    return D.lifeStart * this.params.dur
+  }
+  private get clearDur(): number {
+    return D.clearDur * this.params.dur
+  }
+  private shotAge(s: Shot): number {
+    const el = (this.now - s.t0) / 1000
+    if (s.held) return Math.min(el, Math.max(0.05, this.lifeStart - 0.05))
+    if (s.relAt != null) return s.ageAtRel + (this.now - s.relAt) / 1000
+    return el
   }
 
-  /** 1フレーム進める＋ body / glow を更新する。engine の renderFrame から毎フレーム呼ぶ。 */
-  private lastNow = 0
+  /** 1フレーム進める＋ body/glow を更新。engine の renderFrame から毎フレーム。 */
   tick(now: number): void {
-    // 実時間ベース: 描画が30fpsに間引かれても/CPUが落ちても、"決めた速さ"で動かす。
-    // step = 直前tickからの経過を60fpsコマ換算（0.3〜4でクランプ＝初回やカクつきで暴れない）。
-    const step = this.lastNow ? Math.min(4, Math.max(0.3, (now - this.lastNow) / 16.67)) : 1
-    this.lastNow = now
-    this.frame += step
-    const sp = this.params.speed
-    const churn = this.params.churn
-    const h = this.heat
-    const dec = Math.pow(0.78, step) // 消える速さ（実時間）
-    const depK = (1 - dec) / 0.22 // fpsが変わっても炎の明るさ(熱の釣り合い)を保つ補正
-    for (let i = 0; i < h.length; i++) h[i] *= dec
-
-    // shots: 発射タイミング・サスティン・残炎の寿命管理（frameが実時間なのでmsも実時間）
-    for (let si = this.shots.length - 1; si >= 0; si--) {
-      const s = this.shots[si]
-      const ms = (this.frame - s.t0) * 16.67
-      if (ms < 0) continue
-      const dur = this.params.dur // 燃えてる時間＝一発の持続をスケール
-      const emitting = s.held ? true : s.rel ? false : ms <= 560 * dur
-      if (emitting) this.emit(s, ms, step)
-      const dead = s.held
-        ? false
-        : s.rel
-          ? (this.frame - s.rel) * 16.67 > 820 * dur
-          : ms > 1300 * dur
-      if (dead) this.shots.splice(si, 1)
+    if (!this.t0) this.t0 = now
+    this.now = now
+    const lifeEnd = this.lifeStart + this.clearDur + 0.5
+    for (let i = this.shots.length - 1; i >= 0; i--) {
+      if (this.shotAge(this.shots[i]) > lifeEnd) this.shots.splice(i, 1)
     }
-
-    // particles
-    const cap = 7000
-    const vxDamp = Math.pow(0.9, step)
-    const vyDamp = Math.pow(0.975, step)
-    for (let i = this.parts.length - 1; i >= 0; i--) {
-      const p = this.parts[i]
-      p.age += step
-      const tt = p.age / p.max
-      if (tt >= 1) {
-        if (Math.random() < 0.09 * step)
-          this.smoke.push({
-            x: p.x,
-            y: p.y,
-            vx: (Math.random() - 0.5) * 0.3,
-            vy: -0.7 - Math.random() * 0.6,
-            age: 0,
-            max: 22 + Math.random() * 22,
-            r: 8 + Math.random() * 8
-          })
-        this.parts.splice(i, 1)
-        continue
-      }
-      const env = Math.pow(Math.min(1, tt * 2.2), 0.5)
-      const ny = p.y * 0.045 - this.frame * 0.38 * sp
-      const wob = this.samp(11 + p.no, ny) - 0.5
-      const cshift = this.samp(60 + p.no, ny * 0.8 + 5) - 0.5
-      const widthMul = Math.max(0.68, 1 + wob * 0.85 * churn)
-      const target = p.cx + cshift * 3.5 * churn + p.sp * env * widthMul
-      const amp = (0.05 + tt * tt * 0.38) * sp
-      p.vx += ((Math.random() - 0.5) * amp + (target - p.x) * 0.06 * (1 - tt * 0.3)) * step
-      p.vx *= vxDamp
-      p.vy *= vyDamp
-      p.x += p.vx * step
-      p.y += p.vy * step
-      const nf = 1 - churn * 0.55 * (1 - this.nz(p.x, p.y, p.no))
-      const en = p.en * (1 - tt * 0.4) * p.bri * nf
-      this.dep(p.x, p.y, en * depK)
-    }
-    if (this.parts.length > cap) this.parts.splice(0, this.parts.length - cap)
-
-    for (let i = this.smoke.length - 1; i >= 0; i--) {
-      const m = this.smoke[i]
-      m.age += step
-      if (m.age >= m.max) {
-        this.smoke.splice(i, 1)
-        continue
-      }
-      m.x += m.vx * step
-      m.y += m.vy * step
-      m.r += 0.4 * step
-    }
-
-    // heat -> 色(等倍 off)
-    const d = this.img.data
-    const pal = this.pal
-    for (let i = 0; i < h.length; i++) {
-      const hv = h[i]
-      let idx = 0
-      if (hv > 0) {
-        const f = 1 - Math.exp(-hv * 0.09)
-        idx = (f * (PN - 1)) | 0
-        if (idx > PN - 1) idx = PN - 1
-      }
-      const pi = idx * 4
-      const o = i * 4
-      d[o] = pal[pi]
-      d[o + 1] = pal[pi + 1]
-      d[o + 2] = pal[pi + 2]
-      d[o + 3] = pal[pi + 3]
-    }
-    this.offCtx.putImageData(this.img, 0, 0)
-
-    this.renderBody()
+    this.renderBody(now)
     this.renderGlow()
   }
 
-  // 前面の炎本体(透過)。煙→bloom→本体→点火フラッシュ。
-  private renderBody(): void {
-    const c = this.bodyCtx
-    c.setTransform(1, 0, 0, 1, 0, 0)
-    c.globalCompositeOperation = 'source-over'
-    c.globalAlpha = 1
-    c.clearRect(0, 0, FW, FH)
-    // 煙(薄い暖色グレー)
-    for (let i = 0; i < this.smoke.length; i++) {
-      const m = this.smoke[i]
-      const a = (1 - m.age / m.max) * 0.11
-      c.globalAlpha = a
-      const sg = c.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r)
-      sg.addColorStop(0, 'rgba(74,56,48,1)')
-      sg.addColorStop(1, 'rgba(74,56,48,0)')
-      c.fillStyle = sg
-      c.beginPath()
-      c.arc(m.x, m.y, m.r, 0, 7)
-      c.fill()
+  private renderBody(now: number): void {
+    const gl = this.gl
+    if (!gl || !this.ok || !this.prog) return
+    gl.useProgram(this.prog)
+    gl.clearColor(0, 0, 0, 0)
+    gl.clear(gl.COLOR_BUFFER_BIT)
+    if (this.shots.length === 0) return
+    const P = this.params
+    const t = (now - this.t0) / 1000
+    gl.uniform2f(this.u.uRes, FW, FH)
+    gl.uniform1f(this.u.uTime, t)
+    gl.uniform1f(this.u.uWidth, D.width * P.thick)
+    gl.uniform1f(this.u.uBright, D.bright * P.dense)
+    gl.uniform1f(this.u.uRoil, D.roil * P.churn)
+    gl.uniform1f(this.u.uChurnSpd, D.churn * P.speed)
+    gl.uniform1f(this.u.uOrange, D.orange)
+    gl.uniform1f(this.u.uLifeStart, this.lifeStart)
+    gl.uniform1f(this.u.uClearDur, this.clearDur)
+    const scale = BASE_SCALE * P.height
+    for (const s of this.shots) {
+      gl.uniform2f(this.u.uNozzle, s.nx, s.ny)
+      gl.uniform1f(this.u.uAge, this.shotAge(s))
+      gl.uniform1f(this.u.uStr, s.str)
+      gl.uniform1f(this.u.uScale, scale)
+      gl.uniform1f(this.u.uDir, s.dir)
+      gl.drawArrays(gl.TRIANGLES, 0, 3)
     }
-    // bloom(halo)
-    c.globalCompositeOperation = 'lighter'
-    c.filter = 'blur(6px)'
-    c.globalAlpha = 0.24
-    c.drawImage(this.off, 0, 0, GW, GH, 0, 0, FW, FH)
-    c.filter = 'none'
-    // 本体(わずかにスムージング)
-    c.globalCompositeOperation = 'source-over'
-    c.globalAlpha = 1
-    c.filter = 'blur(1.5px)'
-    c.drawImage(this.off, 0, 0, GW, GH, 0, 0, FW, FH)
-    c.filter = 'none'
-    // 点火フラッシュ(根元の白)
-    c.globalCompositeOperation = 'lighter'
-    for (let i = this.flashes.length - 1; i >= 0; i--) {
-      const fl = this.flashes[i]
-      const fms = (this.frame - fl.t0) * 16.67
-      if (fms < 0) continue
-      if (fms > 140) {
-        this.flashes.splice(i, 1)
-        continue
-      }
-      const fa = 1 - fms / 140
-      const rd = 9 + fms * 0.2
-      const rg = c.createRadialGradient(fl.x, fl.y, 0, fl.x, fl.y, rd)
-      rg.addColorStop(0, 'rgba(255,242,210,' + fa * 0.8 + ')')
-      rg.addColorStop(1, 'rgba(255,150,60,0)')
-      c.fillStyle = rg
-      c.beginPath()
-      c.arc(fl.x, fl.y, rd, 0, 7)
-      c.fill()
-    }
-    c.globalAlpha = 1
   }
 
-  // 背景セットを照らす暖色の灯り(広めにぼかした炎)。光マップへ lighter で乗せる。
   private renderGlow(): void {
     const c = this.glowCtx
     c.setTransform(1, 0, 0, 1, 0, 0)
     c.globalCompositeOperation = 'source-over'
     c.globalAlpha = 1
     c.clearRect(0, 0, FW, FH)
+    if (this.shots.length === 0) return
     c.globalCompositeOperation = 'lighter'
     c.filter = 'blur(22px)'
     c.globalAlpha = 0.5
-    c.drawImage(this.off, 0, 0, GW, GH, 0, 0, FW, FH)
+    c.drawImage(this.bodyGL, 0, 0, FW, FH)
     c.filter = 'blur(10px)'
     c.globalAlpha = 0.6
-    c.drawImage(this.off, 0, 0, GW, GH, 0, 0, FW, FH)
+    c.drawImage(this.bodyGL, 0, 0, FW, FH)
     c.filter = 'none'
     c.globalAlpha = 1
   }

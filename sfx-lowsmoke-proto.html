@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>LOW SMOKE 試作 — 配置できる低い煙</title>
+<style>
+  :root{ --line:#262a30; --ink:#e8eef5; --sub:#9aa6b2; --accent:#bfc8d4; --accent2:#e6ecf3; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#0b0d10;color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;}
+  #stage{position:fixed;inset:0;overflow:hidden;background:#0b0d10;cursor:crosshair}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #ov{pointer-events:none}
+  #panel{position:fixed;top:12px;left:12px;width:266px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow:auto;
+    background:rgba(16,18,22,.88);backdrop-filter:blur(10px);
+    border:1px solid var(--line);border-radius:14px;padding:12px 12px 10px;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);z-index:10;user-select:none}
+  #panel h1{font-size:12px;letter-spacing:.04em;margin:0 0 2px;color:var(--accent2);font-weight:700}
+  #panel .sub{font-size:10px;color:var(--sub);margin:0 0 8px;line-height:1.5}
+  .grp{font-size:10px;color:var(--accent);margin:10px 0 2px;border-top:1px solid var(--line);padding-top:6px;letter-spacing:.05em}
+  .row{margin:6px 0}
+  .row label{display:flex;justify-content:space-between;font-size:11px;color:var(--sub);margin-bottom:2px}
+  .row label b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600}
+  input[type=range]{width:100%;height:18px;-webkit-appearance:none;background:transparent;margin:0}
+  input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:3px;background:linear-gradient(90deg,#2a3038,#bfc8d4)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+    background:var(--accent2);margin-top:-6px;box-shadow:0 0 0 3px rgba(191,200,212,.22);cursor:grab}
+  .btns{display:flex;gap:8px;margin:10px 0 2px}
+  button{flex:1;border:1px solid var(--line);background:#161a20;color:var(--ink);border-radius:10px;padding:9px 6px;font-size:12px;font-weight:600;cursor:pointer}
+  button:hover{border-color:var(--accent);color:var(--accent2)}
+  button.on{background:linear-gradient(180deg,#cfd6e0,#8a93a0);border-color:#e6ecf3;color:#10131a}
+  .mini{display:flex;gap:6px;margin-top:6px}
+  .mini button{font-size:10px;padding:6px 4px;flex:1}
+  .hint{font-size:10px;color:var(--sub);line-height:1.6;margin-top:8px;border-top:1px solid var(--line);padding-top:7px}
+  #fps{position:fixed;bottom:10px;right:12px;font-size:10px;color:#5a6471;z-index:10;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="gl"></canvas><canvas id="ov"></canvas></div>
+<div id="panel">
+  <h1>LOW SMOKE — 配置できる低い煙</h1>
+  <p class="sub">画面クリック＝床(下場)をそこに置く。幅/高さ等はつまみ。煙以外は透明。自動保存。</p>
+  <div class="btns"><button id="btnOn" class="on">ON / OFF</button><button id="btnRefill">溜め直す</button></div>
+
+  <div class="grp">■ 配置（場所・大きさ）</div>
+  <div class="row"><label>中心X <b id="vcx">0.55</b></label><input id="cx" type="range" min="0" max="1" step="0.01" value="0.55"></div>
+  <div class="row"><label>床の高さ（下場の位置） <b id="vfloory">0.42</b></label><input id="floory" type="range" min="0" max="0.95" step="0.01" value="0.42"></div>
+  <div class="row"><label>幅 <b id="vwidth">0.32</b></label><input id="width" type="range" min="0.05" max="0.6" step="0.01" value="0.32"></div>
+  <div class="row"><label>溜まる高さ（厚み） <b id="vtop">0.16</b></label><input id="top" type="range" min="0.04" max="0.8" step="0.01" value="0.16"></div>
+
+  <div class="grp">■ 溜まり</div>
+  <div class="row"><label>濃さ <b id="vdensity">1.00</b></label><input id="density" type="range" min="0.2" max="2.2" step="0.01" value="1.00"></div>
+  <div class="row"><label>溜まる速さ（秒・小=速い） <b id="vaccum">8.1</b></label><input id="accum" type="range" min="0.5" max="9.0" step="0.1" value="8.1"></div>
+  <div class="row"><label>上端の柔らかさ <b id="vsoft">0.55</b></label><input id="soft" type="range" min="0" max="1" step="0.01" value="0.55"></div>
+
+  <div class="grp">■ 動き・質感</div>
+  <div class="row"><label>もくもく感（うねり） <b id="vbillow">0.11</b></label><input id="billow" type="range" min="0.1" max="2.2" step="0.01" value="0.11"></div>
+  <div class="row"><label>動きの速さ（ゆっくり） <b id="vspeed">1.00</b></label><input id="speed" type="range" min="0.1" max="3.0" step="0.01" value="1.00"></div>
+  <div class="row"><label>横の流れ ←左/右→ <b id="vdrift">0.30</b></label><input id="drift" type="range" min="-2" max="2" step="0.01" value="0.30"></div>
+  <div class="row"><label>きめ細かさ <b id="vscale">3.5</b></label><input id="scale" type="range" min="1.2" max="8.0" step="0.1" value="3.5"></div>
+
+  <div class="grp">■ 色</div>
+  <div class="row"><label>色 ←白 / 灰→ <b id="vgray">0.15</b></label><input id="gray" type="range" min="0" max="1" step="0.01" value="0.15"></div>
+  <div class="row"><label>明るさ <b id="vbright">1.00</b></label><input id="bright" type="range" min="0.3" max="1.6" step="0.01" value="1.00"></div>
+
+  <div class="mini"><button id="btnGuide" class="on">枠ガイド</button><button id="btnReset">つまみ初期化</button></div>
+  <div class="hint">クリックで床(下場)の位置を指定。本番は透明でセットに重なる（枠は編集ガイド・出力に出ない）。</div>
+</div>
+<div id="fps">—</div>
+
+<script>
+const glc=document.getElementById('gl'); const ovc=document.getElementById('ov'); const ov=ovc.getContext('2d');
+const gl=glc.getContext('webgl',{premultipliedAlpha:false,alpha:true,antialias:false});
+const DPR=Math.min(2,window.devicePixelRatio||1);
+
+const VS=`attribute vec2 a; void main(){ gl_Position=vec4(a,0.,1.); }`;
+const FS=`
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime,uCx,uFloorY,uHalfW,uTop,uDensity,uBillow,uScale,uSpeed,uDrift,uSoft,uGray,uBright,uOn;
+float hash(vec2 p){p=fract(p*vec2(123.34,345.45));p+=dot(p,p+34.345);return fract(p.x*p.y);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);vec2 u=f*f*(3.-2.*f);
+ float a=hash(i),b=hash(i+vec2(1.,0.)),c=hash(i+vec2(0.,1.)),d=hash(i+vec2(1.,1.));
+ return mix(mix(a,b,u.x),mix(c,d,u.x),u.y);}
+float fbm(vec2 p){float v=0.,a=0.55;for(int i=0;i<6;i++){v+=a*noise(p);p=p*2.02+vec2(1.7,9.2);a*=0.5;}return v;}
+void main(){
+ vec2 uv=gl_FragCoord.xy/uRes;          // y=0下, y=1上
+ float x=uv.x, y=uv.y, t=uTime;
+ // 配置：中心X±幅、床の高さ floorY、厚み top
+ float lx=(x-uCx)/max(uHalfW,0.02);
+ float edge=1.0 - smoothstep(0.60,1.0,abs(lx));      // 横端で柔らかく消える
+ float hAbove=y - uFloorY;                           // 床からの高さ
+ // 雲ノイズ（横流れ＋ゆっくり churn＋ドメインワープ）
+ vec2 p=vec2(x*uScale + uDrift*t*0.06, y*uScale*1.7 - t*uSpeed*0.05);
+ vec2 wv=vec2(fbm(p*0.6+vec2(t*uSpeed*0.04,0.0)), fbm(p*0.6+vec2(5.2,-t*uSpeed*0.04)));
+ float n=fbm(p+(wv-0.5)*1.5*uBillow);
+ float nf=fbm(p*2.6+11.0);
+ float cloud=mix(n, n*nf, 0.45);
+ float topVar=(fbm(vec2(x*2.4 + t*uDrift*0.05, t*uSpeed*0.03))-0.5)*0.20*uBillow;
+ float layerTop=uTop*uOn + topVar;                   // 溜まり(accumulation)で厚みが上がる
+ float vUp=smoothstep(layerTop, layerTop-(0.03+uSoft*0.30), hAbove);  // 上端ソフト
+ float vLo=smoothstep(-0.05,0.015,hAbove);           // 床の少し下までで止める
+ float floorB=clamp(1.0 - hAbove/max(layerTop,0.05),0.0,1.0);         // 床際ほど濃い
+ float dens=edge*vUp*vLo*(0.30+0.70*floorB)*(0.25+0.95*cloud)*uDensity;
+ dens=clamp(dens,0.0,1.0);
+ vec3 base=mix(vec3(0.95,0.96,1.0), vec3(0.58,0.60,0.66), uGray)*uBright;
+ gl_FragColor=vec4(base, dens);                      // 煙以外は透明(alpha=dens)
+}`;
+function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);
+ if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(x));return x;}
+const prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));
+gl.linkProgram(prog);if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const aloc=gl.getAttribLocation(prog,'a');gl.enableVertexAttribArray(aloc);gl.vertexAttribPointer(aloc,2,gl.FLOAT,false,0,0);
+const U=n=>gl.getUniformLocation(prog,n);
+const u={res:U('uRes'),time:U('uTime'),cx:U('uCx'),floory:U('uFloorY'),halfw:U('uHalfW'),top:U('uTop'),density:U('uDensity'),
+ billow:U('uBillow'),scale:U('uScale'),speed:U('uSpeed'),drift:U('uDrift'),soft:U('uSoft'),gray:U('uGray'),bright:U('uBright'),on:U('uOn')};
+
+const DEF={cx:0.55,floory:0.42,width:0.32,top:0.16,density:1.0,accum:8.1,soft:0.55,billow:0.11,speed:1.0,drift:0.30,scale:3.5,gray:0.15,bright:1.0};
+const P=Object.assign({},DEF);
+let smokeOn=true, env=0, guide=true, W=0,H=0;
+
+function resize(){W=innerWidth;H=innerHeight;glc.width=ovc.width=Math.round(W*DPR);glc.height=ovc.height=Math.round(H*DPR);gl.viewport(0,0,glc.width,glc.height);}
+addEventListener('resize',resize);resize();
+
+let t0=performance.now(),last=t0,frames=0,facc=0;
+function frame(now){
+ const dt=Math.min(0.05,(now-last)/1000);last=now;
+ const rate=smokeOn?1/Math.max(0.2,P.accum):-1/3.0;
+ env=Math.max(0,Math.min(1, env+rate*dt));
+ gl.uniform2f(u.res,glc.width,glc.height);
+ gl.uniform1f(u.time,(now-t0)/1000);
+ gl.uniform1f(u.cx,P.cx);gl.uniform1f(u.floory,P.floory);gl.uniform1f(u.halfw,P.width);gl.uniform1f(u.top,P.top);
+ gl.uniform1f(u.density,P.density);gl.uniform1f(u.billow,P.billow);gl.uniform1f(u.scale,P.scale);
+ gl.uniform1f(u.speed,P.speed);gl.uniform1f(u.drift,P.drift);gl.uniform1f(u.soft,P.soft);
+ gl.uniform1f(u.gray,P.gray);gl.uniform1f(u.bright,P.bright);gl.uniform1f(u.on,env);
+ gl.drawArrays(gl.TRIANGLES,0,3);
+ // 枠ガイド（編集用・出力には出ない想定）
+ ov.setTransform(1,0,0,1,0,0); ov.clearRect(0,0,ovc.width,ovc.height); ov.scale(DPR,DPR);
+ if(guide){
+   const fy=(1-P.floory)*H, ty=(1-(P.floory+P.top))*H, x0=(P.cx-P.width)*W, x1=(P.cx+P.width)*W;
+   ov.strokeStyle='rgba(120,200,255,0.55)'; ov.lineWidth=1; ov.setLineDash([6,5]);
+   ov.strokeRect(x0,ty,x1-x0,fy-ty);
+   ov.setLineDash([]); ov.strokeStyle='rgba(120,255,200,0.9)'; ov.lineWidth=2;
+   ov.beginPath(); ov.moveTo(x0,fy); ov.lineTo(x1,fy); ov.stroke();   // 床(下場)ライン
+   // 8ハンドル（角・辺）＝マウスで掴んで拡大縮小
+   const mx=(x0+x1)/2, my=(ty+fy)/2, hs=5;
+   ov.fillStyle='rgba(190,225,255,0.95)';
+   [[x0,ty],[mx,ty],[x1,ty],[x1,my],[x1,fy],[mx,fy],[x0,fy],[x0,my]].forEach(p=>ov.fillRect(p[0]-hs,p[1]-hs,hs*2,hs*2));
+ }
+ frames++;facc+=dt;if(facc>=0.5){document.getElementById('fps').textContent=Math.round(frames/facc)+' fps · 溜'+Math.round(env*100)+'%';frames=0;facc=0;}
+ requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+const KEYS=Object.keys(DEF); const LSKEY='lowSmokeToolP';
+let saved=null; try{saved=JSON.parse(localStorage.getItem(LSKEY)||'null');}catch(e){}
+KEYS.forEach(k=>{const el=document.getElementById(k),out=document.getElementById('v'+k);
+ if(saved&&saved[k]!=null) el.value=saved[k];
+ const apply=()=>{P[k]=parseFloat(el.value);out.textContent=(k==='accum'?P[k].toFixed(1):P[k].toFixed(2));
+   try{localStorage.setItem(LSKEY,JSON.stringify(P));}catch(e){}};
+ el.addEventListener('input',apply);apply();});
+function setSliders(o){KEYS.forEach(k=>{const el=document.getElementById(k);el.value=o[k];el.dispatchEvent(new Event('input'));});}
+const onBtn=document.getElementById('btnOn');
+onBtn.addEventListener('click',e=>{e.stopPropagation();smokeOn=!smokeOn;onBtn.classList.toggle('on',smokeOn);});
+document.getElementById('btnRefill').addEventListener('click',e=>{e.stopPropagation();env=0;smokeOn=true;onBtn.classList.add('on');});
+const gBtn=document.getElementById('btnGuide');
+gBtn.addEventListener('click',e=>{e.stopPropagation();guide=!guide;gBtn.classList.toggle('on',guide);});
+document.getElementById('btnReset').addEventListener('click',e=>{e.stopPropagation();setSliders(DEF);});
+// ===== 図形のように直接さわる：枠をドラッグで移動／ハンドルで拡大縮小 =====
+const stage=document.getElementById('stage'); const HS=11;
+function c2(e){const r=glc.getBoundingClientRect();return {x:e.clientX-r.left, y:e.clientY-r.top, rw:r.width, rh:r.height};}
+function rectOf(rw,rh){const x0=(P.cx-P.width)*rw,x1=(P.cx+P.width)*rw,fy=(1-P.floory)*rh,ty=(1-(P.floory+P.top))*rh;return{x0,x1,ty,fy,mx:(x0+x1)/2,my:(ty+fy)/2};}
+function hit(x,y,R){
+ const hs=[['nw',R.x0,R.ty],['n',R.mx,R.ty],['ne',R.x1,R.ty],['e',R.x1,R.my],['se',R.x1,R.fy],['s',R.mx,R.fy],['sw',R.x0,R.fy],['w',R.x0,R.my]];
+ for(let i=0;i<hs.length;i++){const h=hs[i];if(Math.abs(x-h[1])<HS&&Math.abs(y-h[2])<HS)return h[0];}
+ if(x>R.x0&&x<R.x1&&y>R.ty&&y<R.fy)return 'move';
+ return null;
+}
+function setP(k,v){const el=document.getElementById(k);el.value=v;el.dispatchEvent(new Event('input'));}
+function applyRect(rw,rh,r){
+ let x0=Math.min(r.x0,r.x1),x1=Math.max(r.x0,r.x1),ty=Math.min(r.ty,r.fy),fy=Math.max(r.ty,r.fy);
+ if(x1-x0<24)x1=x0+24; if(fy-ty<16)fy=ty+16;
+ setP('cx', Math.min(1,Math.max(0,((x0+x1)/2)/rw)).toFixed(3));
+ setP('width', Math.min(0.6,Math.max(0.03,((x1-x0)/2)/rw)).toFixed(3));
+ setP('floory', Math.min(0.98,Math.max(0,1-fy/rh)).toFixed(3));
+ setP('top', Math.min(0.9,Math.max(0.03,(fy-ty)/rh)).toFixed(3));
+}
+let drag=null, lx=0, ly=0;
+stage.addEventListener('pointerdown',e=>{const c=c2(e);drag=hit(c.x,c.y,rectOf(c.rw,c.rh));lx=c.x;ly=c.y;});
+addEventListener('pointermove',e=>{const c=c2(e);
+ if(!drag){const h=hit(c.x,c.y,rectOf(c.rw,c.rh));stage.style.cursor=h==='move'?'move':(h?'nwse-resize':'crosshair');return;}
+ const dx=c.x-lx,dy=c.y-ly;lx=c.x;ly=c.y;const R=rectOf(c.rw,c.rh);const r={x0:R.x0,x1:R.x1,ty:R.ty,fy:R.fy};
+ if(drag==='move'){r.x0+=dx;r.x1+=dx;r.ty+=dy;r.fy+=dy;}
+ else{if(drag.indexOf('w')>=0)r.x0+=dx;if(drag.indexOf('e')>=0)r.x1+=dx;if(drag.indexOf('n')>=0)r.ty+=dy;if(drag.indexOf('s')>=0)r.fy+=dy;}
+ applyRect(c.rw,c.rh,r);
+});
+addEventListener('pointerup',()=>{drag=null;});
+addEventListener('keydown',e=>{if(e.key==='r'||e.key==='R')setSliders(DEF);});
+</script>
+</body>
+</html>
