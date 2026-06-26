@@ -101,6 +101,21 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const engineVersion = useSyncExternalStore(engine.subscribe, engine.getVersion, engine.getVersion)
   const autoRestoredRef = useRef(false) // 起動時の自動復元が済むまで自動保存しない（空で上書き防止）
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 🔴 最重要データ事故ガード: このセッションでユーザーが実際に触る(クリック/キー)まで
+  // 自動保存しない。起動時に何が自動で現れても(default灯体/シーン復元/race)、触ってなければ
+  // 前回データ(il-autosave)を絶対に潰さない。触った瞬間から今のセッションを保存する。
+  const userTouchedRef = useRef(false)
+  useEffect(() => {
+    const mark = (): void => {
+      userTouchedRef.current = true
+    }
+    window.addEventListener('pointerdown', mark, true)
+    window.addEventListener('keydown', mark, true)
+    return () => {
+      window.removeEventListener('pointerdown', mark, true)
+      window.removeEventListener('keydown', mark, true)
+    }
+  }, [])
 
   // シーン名のインライン編集（null=非編集中）
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null)
@@ -139,9 +154,11 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     autoSaveTimer.current = setTimeout(async () => {
       try {
-        // 中身が空（写真も灯体もチャートも無い）のうちは書かない＝起動直後の真っ白で
-        // 前回の自動保存(クラッシュ復帰用)を潰さない。何か置いた瞬間から今のセッションを保存。
-        if (engine.scenes.length === 0 && engine.beams.length === 0 && !engine.maskImage) return
+        // 🔴 最重要: このセッションでユーザーが触るまでは絶対に書かない（起動時の自動現出/
+        // race でも前回データを潰さない）。
+        if (!userTouchedRef.current) return
+        // さらに“本物の中身”がある時だけ書く（デフォルト灯体だけの状態では書かない）。
+        if (!engine.hasSaveableContent()) return
         const { json, media } = await engine.serializeShow()
         await api.autosaveImageLightWrite!(json, media)
       } catch {
