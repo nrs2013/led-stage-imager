@@ -428,6 +428,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
+      // ⌘+S（Ctrl+S）＝公演まるごと保存。どのモードでも効く（ブラウザ既定の保存は止める）。
+      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        void saveShow()
+        return
+      }
       // 操作キー一覧を開いている間は本番操作にキーを流さない（Esc/?で閉じるだけ）。
       if (showKeysRef.current) {
         if (e.key === 'Escape' || e.key === '?') {
@@ -990,19 +996,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       <header className="il-header">
         <h1>
           LIGHT SKETCH
-          <span
-            style={{
-              fontFamily: "'Noto Sans JP',sans-serif",
-              fontSize: 11,
-              color: 'var(--il-dim)',
-              letterSpacing: 0,
-              marginLeft: 8
-            }}
-          >
-            かんたんモード
-          </span>
         </h1>
-        <small>写真はクリック・明かりはシーン・困ったらESC</small>
         <div style={{ flex: 1 }} />
         <span
           className="il-lamp"
@@ -1032,7 +1026,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         >
           SHORTCUT
         </button>
-        <button className="il-mini" onClick={saveShow} title="公演まるごとフォルダに保存（写真/動画も一緒）">
+        <button className="il-mini" onClick={saveShow} title="公演まるごとフォルダに保存（写真/動画も一緒）／ ⌘S でも保存">
           保存
         </button>
         <button className="il-mini" onClick={openShow} title="保存した公演フォルダを開く（写真も明かりも復元）">
@@ -1082,13 +1076,17 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           )}
           {uiMode === 'build' && (
             <div className="il-hint">
-              <b>⌘+クリック＝追加</b> ／ クリック＝選択 ／ <b>Shift+クリック＝複数選択</b> ／{' '}
-              <b>空きを四角ドラッグ＝囲んで選択</b> ／ ドラッグ＝移動（選択ぜんぶ）
-              <br />
-              <b>Delete＝削除</b> ／ <b>⌘C→⌘V＝コピペ</b>（複数まとめて）／ 番号の下の <b>M</b>
-              ＝消す・<b>S</b>＝これだけ
-              <br />
-              下の <b>＋ボタン</b>やモチーフ（街灯・電球など）の各ボタンでも追加できます
+              <span><kbd>⌘</kbd>click add</span>
+              <span className="sep">·</span>
+              <span><kbd>⇧</kbd>click multi</span>
+              <span className="sep">·</span>
+              <span>drag move</span>
+              <span className="sep">·</span>
+              <span><kbd>⌫</kbd>delete</span>
+              <span className="sep">·</span>
+              <span><kbd>⌘C</kbd><kbd>⌘V</kbd>copy</span>
+              <span className="sep">·</span>
+              <span><kbd>?</kbd>help</span>
             </div>
           )}
           <div className="il-scenes">
@@ -1791,6 +1789,38 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <span className="il2-kind">電飾</span>
                   <b>DECOR</b>
                 </div>
+                <div className="il-lbl" style={{ marginTop: 4 }}>ADD（灯体・モチーフを置く）</div>
+                <div className="il-frow" style={{ gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                  {([
+                    { type: 'streetlamp' as const, label: 'Street' },
+                    { type: 'chandelier' as const, label: 'Chandelier' },
+                    { type: 'marquee' as const, label: 'Marquee' },
+                    { type: 'bulb' as const, label: 'Bulb' },
+                    { type: 'parlight' as const, label: 'PAR' },
+                    { type: 'blinder' as const, label: 'Mini' },
+                    { type: 'patt' as const, label: 'PAT' },
+                    { type: 'pixelpatt' as const, label: 'PixelPAT' },
+                    { type: 'stars' as const, label: 'Star' },
+                    { type: 'festoon' as const, label: 'Banner' }
+                  ]).map(({ type, label }) => (
+                    <button
+                      key={type}
+                      className="il-mini"
+                      disabled={engine.beams.length >= MAX_BEAMS}
+                      onClick={() => engine.addMotifAuto(type)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <button
+                    className="il-mini"
+                    disabled={engine.beams.length >= MAX_BEAMS}
+                    onClick={() => imageMotifInputRef.current?.click()}
+                    title="画像生成などで作ったリアルな発光画像（黒背景）を灯体として読み込む。明るさだけで光ります"
+                  >
+                    画像
+                  </button>
+                </div>
                 <button
                   className={'il2-switch' + (engine.decor.enabled ? ' on' : '')}
                   onClick={() => engine.setDecor({ enabled: !engine.decor.enabled })}
@@ -2201,7 +2231,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 )}
               </div>
               <div className="il-lbl" style={{ marginTop: 8 }}>ALIGN（選んだ灯体をそろえる）</div>
-              <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+              <div className="il2-act il-alignrow" style={{ flexWrap: 'nowrap', gap: 3 }}>
                 <button className="il-mini il-icn" title="左ぞろえ" onClick={() => engine.alignLeft()}><AlignIcon kind="left" /></button>
                 <button className="il-mini il-icn" title="左右中央でそろえる" onClick={() => engine.alignCenterX()}><AlignIcon kind="cx" /></button>
                 <button className="il-mini il-icn" title="右ぞろえ" onClick={() => engine.alignRight()}><AlignIcon kind="right" /></button>
@@ -2211,38 +2241,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 <button className="il-mini il-icn" title="横に等間隔（3つ以上選ぶ）" onClick={() => engine.distributeX()}><AlignIcon kind="dx" /></button>
                 <button className="il-mini il-icn" title="縦に等間隔（3つ以上選ぶ）" onClick={() => engine.distributeY()}><AlignIcon kind="dy" /></button>
               </div>
-              <div className="il-lbl" style={{ marginTop: 6 }}>Add</div>
-            <div className="il-frow" style={{ gap: 4, flexWrap: 'wrap' }}>
-              {([
-                { type: 'streetlamp' as const, label: 'Street' },
-                { type: 'chandelier' as const, label: 'Chandelier' },
-                { type: 'marquee' as const, label: 'Marquee' },
-                { type: 'bulb' as const, label: 'Bulb' },
-                { type: 'parlight' as const, label: 'PAR' },
-                { type: 'blinder' as const, label: 'Mini' },
-                { type: 'patt' as const, label: 'PAT' },
-                { type: 'pixelpatt' as const, label: 'PixelPAT' },
-                { type: 'stars' as const, label: 'Star' },
-                { type: 'festoon' as const, label: 'Banner' },
-              ]).map(({ type, label }) => (
-                <button
-                  key={type}
-                  className="il-mini"
-                  disabled={engine.beams.length >= MAX_BEAMS}
-                  onClick={() => engine.addMotifAuto(type)}
-                >
-                  {label}
-                </button>
-              ))}
-              <button
-                className="il-mini"
-                disabled={engine.beams.length >= MAX_BEAMS}
-                onClick={() => imageMotifInputRef.current?.click()}
-                title="画像生成などで作ったリアルな発光画像（黒背景）を灯体として読み込む。明るさだけで光ります"
-              >
-                画像
-              </button>
-            </div>
+              {/* ADD（モチーフ追加）ボタンは DECOR タブへ移動した。 */}
             </div>
 
             <div className="il-card">
@@ -3372,8 +3371,10 @@ const IL_CSS = `
 .il-empty{position:absolute;top:0;left:0;right:0;bottom:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;pointer-events:auto;}
 .il-empty-big{font-family:'Bebas Neue',sans-serif;font-size:15px;color:var(--il-dim);font-weight:400;letter-spacing:0.16em;border:0.5px dashed var(--il-line);border-radius:10px;padding:22px 34px;}
 .il-empty-sub{font-size:12px;color:var(--il-faint);letter-spacing:0.02em;}
-.il-hint{position:absolute;top:10px;left:14px;font-size:11.5px;color:var(--il-faint);pointer-events:none;line-height:1.6;}
-.il-hint b{color:var(--il-amber);font-weight:500;}
+.il-hint{position:absolute;top:10px;left:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;max-width:64%;font-size:11px;color:var(--il-dim);pointer-events:none;line-height:1;}
+.il-hint span{display:inline-flex;align-items:center;gap:5px;}
+.il-hint .sep{color:var(--il-faint);opacity:0.5;}
+.il-hint kbd{font-family:'JetBrains Mono','SFMono-Regular',monospace;font-size:9.5px;color:var(--il-txt);background:rgba(255,255,255,0.06);border:0.5px solid var(--il-line);border-radius:4px;padding:2px 5px;line-height:1;}
 .il-scenes{position:absolute;left:0;right:0;bottom:0;display:flex;gap:8px;align-items:flex-end;padding:8px 12px;background:rgba(10,9,8,0.74);border-top:0.5px solid var(--il-line);overflow-x:auto;}
 .il-sc-wrap{flex:0 0 auto;display:flex;flex-direction:column;align-items:stretch;gap:4px;}
 .il-sc{flex:0 0 auto;width:96px;cursor:pointer;border:0.5px solid var(--il-line);border-radius:6px;background:#000;padding:0;position:relative;}
@@ -3490,8 +3491,10 @@ const IL_CSS = `
 .il-mini:hover{border-color:var(--il-dim);color:var(--il-txt);}
 .il-mini:disabled{opacity:0.4;cursor:default;}
 .il-mini.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
-/* 整列の絵アイコンボタン（揃った形を描画・正方形に近い当たり判定） */
-.il-mini.il-icn{min-width:32px;padding:5px 7px;line-height:0;color:var(--il-dim);display:inline-flex;align-items:center;justify-content:center;}
+/* 整列の絵アイコンボタン（揃った形を描画）。横一列に均等配置＝はみ出さず1行に収める。 */
+.il-alignrow{align-items:stretch;}
+.il-mini.il-icn{flex:1 1 0;min-width:0;padding:5px 2px;line-height:0;color:var(--il-dim);display:inline-flex;align-items:center;justify-content:center;}
+.il-mini.il-icn svg{width:16px;height:16px;}
 .il-mini.il-icn:hover{color:var(--il-txt);}
 .il-root hr{border:none;border-top:0.5px solid var(--il-line);margin:0;}
 .il-card{border:0.5px solid var(--il-line);border-radius:8px;padding:8px 11px;display:flex;flex-direction:column;gap:6px;}
