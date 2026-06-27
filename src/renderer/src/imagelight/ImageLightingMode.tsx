@@ -276,6 +276,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   //（ローカルmirror state を持たない＝保存復元・MIDIでズレない）。UIだけの状態は下記2つ。
   const [sfxType, setSfxType] = useState<'flame' | 'sparkler' | 'rain' | 'smoke'>('flame')
   const [showAdv, setShowAdv] = useState(false) // 「詳しく」（細かい設定）の開閉
+  const [showRigSize, setShowRigSize] = useState(false) // 照明モード: サイズ(出口幅/広がり/伸び)の折りたたみ。普段は隠す
   const hudTabRef = useRef(hudTab)
   useEffect(() => {
     hudTabRef.current = hudTab
@@ -1025,7 +1026,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       )}
       <header className="il-header">
         <h1>
-          LIGHT SKETCH
+          {lightingOnly ? 'LIGHTING' : 'LIGHT SKETCH'}
         </h1>
         <div style={{ flex: 1 }} />
         <span
@@ -1285,11 +1286,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               </button>
             )}
             {!lightingOnly && <StrobeSpecial engine={engine} />}
+            <div className="il-lbl" style={{ marginTop: 6 }}>出力（Arena連携）</div>
             <div className="il-toggles">
               <button
                 className={'il-toggle' + (engine.lightOnly ? ' on' : '')}
                 onClick={() => engine.setLightOnly(!engine.lightOnly)}
-                title="ON=写真を使わず光だけを出力(Syphon/NDI)（Arena側で 映像×光）。OFF=写真照らし"
+                title="ON=写真を使わず「光マップ」だけを出力(Syphon/NDI)→Arena側で映像と光を重ねる(Multiply)。OFF=写真を照らした絵をそのまま出力。"
               >
                 光だけ出力
               </button>
@@ -1362,6 +1364,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 max={100}
                 value={masterPct}
                 onChange={(e) => engine.setMaster(+e.target.value / 100)}
+                title="全体の明るさ（左右どちらも同じ操作）"
               />
               <div className="il-val">{masterPct}%</div>
               <button
@@ -1498,6 +1501,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     max={100}
                     value={masterPct}
                     onChange={(e) => engine.setMaster(+e.target.value / 100)}
+                    title="全体の明るさ（左右どちらも同じ操作）"
                   />
                   <span className="il2hud-mval">
                     {masterPct}
@@ -1624,7 +1628,45 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   )}
 
                   {(sfxType === 'flame' || sfxType === 'sparkler') && (
-                    <SeqGrid engine={engine} />
+                    <div className="il-sfxfire">
+                      <div className="il-lbl" style={{ marginTop: 10 }}>発射パターン</div>
+                      <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                        {(['all', 'inout', 'outin', 'random'] as const).map((m) => (
+                          <button
+                            key={m}
+                            className={'il-mini' + (engine.sfxChaseMode === m ? ' on' : '')}
+                            onClick={() => engine.setSfxChaseMode(m)}
+                            title={
+                              m === 'all'
+                                ? '置いた全部を同時に出す'
+                                : m === 'inout'
+                                  ? '中央から外へ、順に出る波'
+                                  : m === 'outin'
+                                    ? '外から中央へ、順に出る波'
+                                    : '位置順でばらばらに出る（毎回同じ並び）'
+                            }
+                          >
+                            {m === 'all' ? '全部同時' : m === 'inout' ? '内→外' : m === 'outin' ? '外→内' : 'ランダム'}
+                          </button>
+                        ))}
+                      </div>
+                      {engine.sfxChaseMode !== 'all' && (
+                        <>
+                          <div className="il-lbl" style={{ marginTop: 6 }}>間隔 {Math.round(engine.sfxChaseMs)}ms（1点ごと）</div>
+                          <input
+                            type="range"
+                            min="80"
+                            max="1500"
+                            step="10"
+                            value={engine.sfxChaseMs}
+                            onChange={(e) => engine.setSfxChaseMs(parseFloat(e.target.value))}
+                          />
+                          <div className="il-lbl" style={{ marginTop: 4, opacity: 0.6 }}>
+                            順番は置いた位置から自動（内→外＝中央から外へ／外→内＝外から中央へ／ランダム＝位置順でばらばら）。
+                          </div>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -2186,6 +2228,18 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <span className="il2-kind">選択灯体</span>
                     <b>SELECTED</b>
                   </div>
+                  {lightingOnly && (
+                    <button
+                      className="il-mini"
+                      style={{ width: '100%', textAlign: 'left', marginBottom: showRigSize ? 6 : 0 }}
+                      onClick={() => setShowRigSize((v) => !v)}
+                      title="ビームの見た目(大きさ)の微調整。広がりは卓の zoom が動かすので、普段は触らなくてOK。"
+                    >
+                      サイズ（出口幅・広がり・伸び） {showRigSize ? '▾' : '▸'}
+                    </button>
+                  )}
+                  {(!lightingOnly || showRigSize) && (
+                    <>
                   <RigRow
                     label="出口幅"
                     min={8}
@@ -2213,6 +2267,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     engine={engine}
                     learnId="rig.len"
                   />
+                    </>
+                  )}
                   <div className="il2-act">
                     <button
                       className="il-mini"
@@ -2225,88 +2281,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 </div>
               )}
 
-              {lightingOnly && hudTab === 'light' && ref && (
-                <div className="il2-sec">
-                  <div className="il2-eb">
-                    <span className="il2-kind">DMX 控え</span>
-                    <b>DMX PATCH</b>
-                  </div>
-                  {ref.dmx ? (
-                    <>
-                      <div className="il2-dmxrow">
-                        <label>MODE</label>
-                        <select
-                          className="il2-dmxsel"
-                          value={ref.dmx.mode}
-                          onChange={(e) => engine.setBeamDmx({ mode: e.target.value as ChannelMode })}
-                        >
-                          <option value="beam8">beam8 · P/T/Dim/Sh/RGB/Zoom</option>
-                          <option value="beam6">beam6 · RGB/P/T/Zoom</option>
-                          <option value="rgb">rgb · RGB</option>
-                        </select>
-                      </div>
-                      <div className="il2-dmxrow">
-                        <label>UNIV</label>
-                        <input
-                          className="il2-dmxnum"
-                          type="number"
-                          min={1}
-                          max={32768}
-                          value={ref.dmx.universe + 1}
-                          onChange={(e) =>
-                            engine.setBeamDmx({
-                              universe: Math.max(0, Math.min(32767, (Math.floor(+e.target.value) || 1) - 1))
-                            })
-                          }
-                        />
-                        <label>ADDR</label>
-                        <input
-                          className="il2-dmxnum"
-                          type="number"
-                          min={1}
-                          max={512}
-                          value={ref.dmx.start}
-                          onChange={(e) =>
-                            engine.setBeamDmx({
-                              start: Math.max(1, Math.min(512, Math.floor(+e.target.value) || 1))
-                            })
-                          }
-                        />
-                      </div>
-                      <div className="il2-dmxinfo">
-                        {formatDmx(ref.dmx.universe, ref.dmx.start)} ・ ch {ref.dmx.start}–
-                        {Math.min(512, ref.dmx.start + channelCount(ref.dmx.mode) - 1)}
-                      </div>
-                      <div className="il2-act">
-                        <button
-                          className="il-mini"
-                          onClick={() => engine.autoPatchSelected()}
-                          title="次の空きアドレスを自動で割り当て"
-                        >
-                          AUTO
-                        </button>
-                        <button
-                          className="il-mini"
-                          onClick={() => engine.setBeamDmx(null)}
-                          title="DMX控えを外す（アプリ内/MIDI操作に戻す）"
-                        >
-                          解除
-                        </button>
-                      </div>
-                      <div className="il2-dmxnote">この灯体は卓(DMX)が色・向き・明るさを操作します</div>
-                    </>
-                  ) : (
-                    <button
-                      className="il-mini"
-                      style={{ width: '100%' }}
-                      onClick={() => engine.autoPatchSelected()}
-                      title="DMXチャンネルを割り当てて、外部卓で動かせるようにする"
-                    >
-                      ＋ DMX控えを付ける（卓で動かす）
-                    </button>
-                  )}
-                </div>
-              )}
+              {/* DMX PATCH カードは各灯体の行(パッチ表)に移動＝行内で MODE/UNIV/ADDR を編集 */}
             </div>
 
             {hudTab === 'light' && (
@@ -2333,8 +2308,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     const psSel = engine.isSelected(i)
                     const psClash = dmxClash.includes(i + 1)
                     return (
+                      <div key={i} className="il-psrow-wrap">
                       <div
-                        key={i}
                         className={'il-psrow' + (psSel ? ' on' : '')}
                         onClick={(ev) => (ev.shiftKey ? engine.toggleSelectBeam(i) : engine.selectBeam(i))}
                         title={'灯体 ' + (i + 1)}
@@ -2356,9 +2331,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                               engine.selectBeam(i)
                               engine.autoPatchSelected()
                             }}
-                            title="この灯体に空き番地をつける"
+                            title="この灯体をパッチ（空きアドレスを割当・卓で動かせるように）"
                           >
-                            ＋番地
+                            Patch
                           </button>
                         )}
                         <span className="il-psmode">
@@ -2384,6 +2359,59 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                             S
                           </b>
                         </span>
+                      </div>
+                      {ref === b && b.dmx && (
+                        <div className="il-psedit">
+                          <div className="il2-dmxrow">
+                            <label>MODE</label>
+                            <select
+                              className="il2-dmxsel"
+                              value={b.dmx.mode}
+                              onChange={(e) => engine.setBeamDmx({ mode: e.target.value as ChannelMode })}
+                            >
+                              <option value="beam8">beam8 · P/T/Dim/Sh/RGB/Zoom</option>
+                              <option value="beam6">beam6 · RGB/P/T/Zoom</option>
+                              <option value="rgb">rgb · RGB</option>
+                            </select>
+                          </div>
+                          <div className="il2-dmxrow">
+                            <label>UNIV</label>
+                            <input
+                              className="il2-dmxnum"
+                              type="number"
+                              min={1}
+                              max={32768}
+                              value={b.dmx.universe + 1}
+                              onChange={(e) =>
+                                engine.setBeamDmx({
+                                  universe: Math.max(0, Math.min(32767, (Math.floor(+e.target.value) || 1) - 1))
+                                })
+                              }
+                            />
+                            <label>ADDR</label>
+                            <input
+                              className="il2-dmxnum"
+                              type="number"
+                              min={1}
+                              max={512}
+                              value={b.dmx.start}
+                              onChange={(e) =>
+                                engine.setBeamDmx({
+                                  start: Math.max(1, Math.min(512, Math.floor(+e.target.value) || 1))
+                                })
+                              }
+                            />
+                          </div>
+                          <div className="il2-dmxinfo">
+                            {formatDmx(b.dmx.universe, b.dmx.start)} ・ ch {b.dmx.start}–
+                            {Math.min(512, b.dmx.start + channelCount(b.dmx.mode) - 1)}
+                          </div>
+                          <div className="il2-act">
+                            <button className="il-mini" onClick={() => engine.autoPatchSelected()} title="次の空きアドレスへ">AUTO</button>
+                            <button className="il-mini" onClick={() => engine.setBeamDmx(null)} title="アドレスを外す（卓で動かさない）">解除</button>
+                          </div>
+                        </div>
+                      )}
                       </div>
                     )
                   })}
@@ -2480,18 +2508,18 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               </button>
               {lightingOnly && (
                 <>
-                  <div className="il-lbl" style={{ marginTop: 8 }}>DMX（卓で動かす番地）</div>
+                  <div className="il-lbl" style={{ marginTop: 8 }}>DMX（卓で動かすアドレス）</div>
                   <button
                     className="il-mini"
                     style={{ width: '100%', textAlign: 'center' }}
                     onClick={() => engine.autoPatchAll()}
-                    title="すべての灯体に、番号順で重ならない DMX 番地を一括で割り当てます（universe 0・1 から順番に・⌘Z で戻せる）。"
+                    title="すべての灯体に、番号順で重ならない DMX アドレスを一括で割り当てます（universe 1・2 から順番に・⌘Z で戻せる）。"
                   >
                     全灯体に一括で割り当てる（DMX）
                   </button>
                   {dmxClash.length > 0 && (
                     <div className="il2-dmxwarn">
-                      アドレス重複：灯体 {dmxClash.join(', ')} が同じ番地です（卓で取り合いになります）。上のボタンか各灯体の AUTO で直せます。
+                      アドレス重複：灯体 {dmxClash.join(', ')} が同じアドレスです（卓で取り合いになります）。上のボタンか各灯体の AUTO で直せます。
                     </div>
                   )}
                 </>
@@ -3216,7 +3244,7 @@ const sp = (
 export const SFX_PARAMS: Record<'flame' | 'sparkler' | 'rain' | 'smoke', { core: SfxParamDef[]; more: SfxParamDef[] }> = {
   flame: {
     core: [
-      sp('sfx.flame.height', 'HEIGHT', 0.4, 2.2, 0.05, (e) => e.getFlameParams().height, (e, v) => e.setFlameParams({ height: v })),
+      sp('sfx.flame.height', 'HEIGHT', 0.5, 2.5, 0.05, (e) => e.getFlameParams().height, (e, v) => e.setFlameParams({ height: v })),
       sp('sfx.flame.thick', 'WIDTH', 0.5, 2.4, 0.05, (e) => e.getFlameParams().thick, (e, v) => e.setFlameParams({ thick: v }))
     ],
     more: [
@@ -3290,75 +3318,6 @@ function SfxRow({ engine, p }: { engine: ImageLightEngine; p: SfxParamDef }): Re
 }
 
 /** 特効ステップシーケンサー（ドラムマシン風の格子）。行＝置いた炎/火花、列＝ステップ。 */
-function SeqGrid({ engine }: { engine: ImageLightEngine }): React.JSX.Element {
-  const marks = engine.sfxMarks
-  const steps = engine.sfxSeqStepCount
-  const head = engine.sfxSeqPlaying ? engine.sfxSeqIndexNow : -1
-  const cols = Array.from({ length: steps }, (_, i) => i)
-  const seqMs = engine.sfxSeqMs
-  return (
-    <div className="il-seq">
-      <div className="il-lbl"><b>STEP SEQUENCER</b>（マスをタップ）</div>
-      <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-        <button
-          className={'il-mini' + (engine.sfxSeqPlaying ? ' on' : '')}
-          onClick={() => engine.setSfxSeqPlay(!engine.sfxSeqPlaying)}
-          title="組んだステップをテンポで自動ループ"
-        >
-          {engine.sfxSeqPlaying ? '■ STOP' : '▶ PLAY'}
-        </button>
-        <button className="il-mini" onClick={() => engine.setSfxSeqStepCount(steps - 1)} title="ステップを1つ減らす">−</button>
-        <span className="il-lbl" style={{ minWidth: 64, textAlign: 'center' }}>{steps} STEPS</span>
-        <button className="il-mini" onClick={() => engine.setSfxSeqStepCount(steps + 1)} title="ステップを1つ増やす">＋</button>
-        <button className="il-mini" onClick={() => engine.sfxSeqClearCells()} title="マスを全部消す">CLEAR</button>
-      </div>
-      <div className="il-lbl" style={{ marginTop: 6 }}>SPEED {Math.round(seqMs)}ms / step</div>
-      <input
-        type="range"
-        min="80"
-        max="1500"
-        step="10"
-        value={seqMs}
-        onChange={(e) => engine.setSfxSeqMs(parseFloat(e.target.value))}
-      />
-      {marks.length === 0 ? (
-        <div className="il-lbl" style={{ marginTop: 8, opacity: 0.7 }}>
-          Place FLAMER / SPARKLER (⌘+click) to add rows here.
-        </div>
-      ) : (
-        <div className="il-seqgrid">
-          <div className="il-seqhead">
-            {cols.map((c) => (
-              <div key={c} className={'il-seqnum' + (c === head ? ' head' : '')}>{c + 1}</div>
-            ))}
-          </div>
-          {marks.map((m) => (
-            <div className="il-seqrow" key={m.id}>
-              <div className="il-seqlbl">
-                <span style={{ color: m.motif === 'flame' ? '#ff9636' : '#e6e4b4' }}>
-                  {m.motif === 'flame' ? 'F' : 'S'}
-                </span>
-                {m.idx + 1}
-              </div>
-              {cols.map((c) => (
-                <button
-                  key={c}
-                  className={
-                    'il-cell ' +
-                    (m.motif === 'flame' ? 'flame' : 'spark') +
-                    (engine.isSfxStepOn(m.id, c) ? ' on' : '') +
-                    (c === head ? ' head' : '')
-                  }
-                  onClick={() => engine.toggleSfxStep(m.id, c)}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 /** 整列ボタンの絵アイコン（揃った形を実際に描く＝一目で分かる）。currentColorで色追従。 */
 function AlignIcon({ kind }: { kind: 'left' | 'cx' | 'right' | 'top' | 'my' | 'bottom' | 'dx' | 'dy' }): React.JSX.Element {
@@ -3474,7 +3433,7 @@ function drawMarkers(ctx: CanvasRenderingContext2D, engine: ImageLightEngine, sc
         : 'rgba(255,110,110,0.55)'
     ctx.fillText(String(i + 1), b.x, b.y + 1)
     if (b.dmx) {
-      // 卓で動かす灯体は DMX 番地（universe.address）を頭上に小さく表示。衝突は赤。
+      // 卓で動かす灯体は DMX アドレス（universe.address）を頭上に小さく表示。衝突は赤。
       ctx.font = '700 ' + 9 / scale + 'px sans-serif'
       ctx.fillStyle = dmxClash.has(i + 1) ? 'rgba(224,114,106,1)' : 'rgba(123,197,232,0.92)'
       ctx.fillText(formatDmx(b.dmx.universe, b.dmx.start), b.x, b.y - 15)
@@ -3654,12 +3613,18 @@ const IL_CSS = `
 .il-psaddr.none{color:var(--il-faint);}
 .il-psmode{flex:1;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:var(--il-dim);}
 .il-pspatch{width:66px;flex:none;border:0.5px solid var(--il-amber);color:var(--il-amber);background:none;border-radius:6px;padding:5px 4px;font-size:11px;cursor:pointer;font-family:inherit;}
-.il-psms{display:flex;gap:7px;flex:none;}
-.il-psms b{font-size:11px;width:16px;text-align:center;color:var(--il-faint);cursor:pointer;}
+.il-pspatch:hover{background:rgba(123,197,232,0.08);}
+.il-psms{display:flex;gap:8px;flex:none;}
+.il-psms b{font-size:11px;min-width:26px;padding:5px 0;text-align:center;color:var(--il-faint);cursor:pointer;border-radius:5px;}
+.il-psms b:hover{background:rgba(255,255,255,0.04);}
 .il-psms b.m.on{color:var(--il-red);}
 .il-psms b.s.on{color:var(--il-cyan);}
 .il-psadd{margin-top:8px;border:0.5px dashed var(--il-line);color:var(--il-dim);background:none;border-radius:8px;padding:10px;font-size:12px;cursor:pointer;font-family:inherit;width:100%;}
 .il-psadd:hover{border-color:var(--il-amber);color:var(--il-amber);}
+.il-sfxfire{margin-top:10px;border-top:0.5px solid var(--il-line);padding-top:8px;}
+.il-psedit{margin:0 0 6px;padding:9px 10px 10px;background:var(--il-inset);border-radius:8px;}
+.il-psedit .il2-dmxrow{margin:4px 0;}
+.il-psedit .il2-dmxrow:first-child{margin-top:0;}
 .il-header{display:flex;align-items:baseline;gap:14px;padding:10px 16px 8px;}
 .il-header h1{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.14em;font-weight:400;}
 .il-header small{font-size:12px;color:var(--il-dim);}
@@ -3913,19 +3878,6 @@ const IL_CSS = `
 .il-sfxguide{margin:7px 0 2px;padding:7px 9px;border:0.5px solid var(--il-line);border-radius:6px;background:rgba(255,180,80,0.06);color:var(--il-txt);font-size:11px;line-height:1.65;}
 /* ON など大きめ操作ボタン（当たり判定だけ大きく・文字/線は規約どおり据え置き） */
 .il-livebtn.big{padding:10px 16px;font-size:12px;border-radius:6px;}
-/* ステップシーケンサー（ドラムマシン格子）。本番でタップしやすいようマスを大きく。 */
-.il-seq{margin-top:10px;border-top:0.5px solid var(--il-line);padding-top:8px;}
-.il-seqgrid{display:flex;flex-direction:column;gap:4px;margin-top:6px;overflow-x:auto;}
-.il-seqrow{display:flex;align-items:center;gap:4px;}
-.il-seqlbl{flex:0 0 34px;font-size:11px;color:var(--il-dim);display:flex;align-items:center;gap:3px;}
-.il-cell{flex:0 0 27px;height:27px;border:0.5px solid var(--il-line);border-radius:4px;background:var(--il-inset);cursor:pointer;padding:0;}
-.il-cell.on{background:var(--il-amber);border-color:var(--il-amber);}
-.il-cell.flame.on{background:#ff9636;border-color:#ff9636;}
-.il-cell.spark.on{background:#e6e4b4;border-color:#e6e4b4;}
-.il-cell.head{box-shadow:inset 0 0 0 2px rgba(120,255,160,0.95);}
-.il-seqhead{display:flex;gap:4px;margin-left:38px;}
-.il-seqnum{flex:0 0 27px;text-align:center;font-size:10px;color:var(--il-faint);}
-.il-seqnum.head{color:rgba(120,255,160,0.95);}
 .il2hud-scroll{flex:1;overflow-y:auto;padding:7px 10px 9px;display:flex;flex-direction:column;gap:6px;}
 .il2hud-foot{flex-shrink:0;border-top:0.5px solid var(--il-line);padding:8px 10px 9px;display:flex;flex-direction:column;gap:5px;background:#0a0908;}
 `

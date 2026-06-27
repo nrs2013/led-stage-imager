@@ -247,6 +247,8 @@ interface Snap {
   userColors: RGB3[]
   chasePalette: RGB3[]
   scenes: Scene[]
+  sfxChaseMode: 'random' | 'all' | 'inout' | 'outin'
+  sfxChaseMs: number
 }
 
 /** 灯体を「中央の一番下を1番に、左右の外側ほど大きく（同距離は右が先）、下の段→上の段」へ
@@ -375,6 +377,7 @@ export interface ShowFile {
     seqSteps?: number[][]
     seqMs?: number
     flameChase?: { on?: boolean; pattern?: 'random' | 'all' | 'inout' | 'outin'; ms?: number }
+    sfxChase?: { mode?: 'random' | 'all' | 'inout' | 'outin'; ms?: number }
   }
 }
 
@@ -548,9 +551,7 @@ export class ImageLightEngine {
       if ((b.motif === 'flame' || b.motif === 'sparkler') && b.sfxId == null) b.sfxId = this.sfxIdSeq++
     }
   }
-  get sfxSeqStepCount(): number { return this.sfxSeqSteps.length }
-  get sfxSeqIndexNow(): number { return this.sfxSeqIndex }
-  /** グリッドの行＝置いた炎/火花マーク（番号付き）。 */
+  /** 炎/火花マークの一覧（sfxId 採番に使用）。 */
   get sfxMarks(): { id: number; idx: number; motif: 'flame' | 'sparkler' }[] {
     this.ensureSfxIds()
     const out: { id: number; idx: number; motif: 'flame' | 'sparkler' }[] = []
@@ -560,43 +561,9 @@ export class ImageLightEngine {
     }
     return out
   }
-  /** ステップ数（列）を変える（1〜32）。増やすと空列、減らすと末尾を削る。 */
-  setSfxSeqStepCount(n: number): void {
-    n = Math.max(1, Math.min(32, Math.round(n)))
-    const cur = this.sfxSeqSteps
-    while (cur.length < n) cur.push([])
-    if (cur.length > n) cur.length = n
-    if (this.sfxSeqIndex >= n) this.sfxSeqIndex = 0
-    this.bump()
-  }
-  /** マス(マークid × 列)をトグル。 */
-  toggleSfxStep(id: number, col: number): void {
-    const step = this.sfxSeqSteps[col]
-    if (!step) return
-    const k = step.indexOf(id)
-    if (k >= 0) step.splice(k, 1)
-    else step.push(id)
-    this.bump()
-  }
-  isSfxStepOn(id: number, col: number): boolean {
-    const step = this.sfxSeqSteps[col]
-    return !!step && step.includes(id)
-  }
-  /** グリッドを全消し（列数は保ったまま中身を空に）。 */
-  sfxSeqClearCells(): void {
-    for (const s of this.sfxSeqSteps) s.length = 0
-    this.bump()
-  }
   private currentSeqSet(): Set<number> {
     return new Set(this.sfxSeqSteps[this.sfxSeqIndex] || [])
   }
-  setSfxSeqPlay(v: boolean): void {
-    this.sfxSeqPlaying = v && this.sfxSeqSteps.length > 0
-    this.sfxSeqIndex = 0
-    this.sfxSeqLast = 0
-    this.bump()
-  }
-  setSfxSeqMs(ms: number): void { this.sfxSeqMs = ms; this.bump() }
   /** テンポでステップを進める（renderFrame から毎フレーム）。ループする。
    *  進めるのはステップ番号だけ＝点く炎/火花の集合(sfxOn)が切替わり、持続描画が追従する。 */
   private tickSfxSeq(now: number): void {
@@ -618,60 +585,49 @@ export class ImageLightEngine {
   }
   flameChaseOn = false
   flameChasePattern: 'random' | 'all' | 'inout' | 'outin' = 'inout'
-  flameChaseMs = 420
-  private chaseIdx = 0
-  private lastChaseAt = 0
+  flameChaseMs = 420 // 旧チェイスの保存互換用フィールド（発射は sfxChase に統一）
   /** 置いた炎を全部いっぺんに発射（無ければ標準4本）。 */
   flameFireAll(): void {
     if (this.flamePoints.length) this.flamePoints.forEach((p) => this.flame.fire(p.fx, p.fy, 1, p.dir))
     else this.flame.fireRow()
     this.bump()
   }
-  setFlameChase(on: boolean): void {
-    this.flameChaseOn = on
-    this.lastChaseAt = 0
-    this.chaseIdx = 0
+  // ---- SFX 発射パターン（炎・火花 共通）：置いた点を 全部同時/内→外/外→内/ランダム で順に発射 ----
+  //  順番は「置いた位置」から自動判定（番号に依らない）。all 以外は 1 つずつ進む波（速さ=sfxChaseMs）。
+  sfxChaseMode: 'all' | 'random' | 'inout' | 'outin' = 'all'
+  sfxChaseMs = 420
+  setSfxChaseMode(m: 'all' | 'random' | 'inout' | 'outin'): void {
+    this.pushHistory('sfxchase')
+    this.sfxChaseMode = m
     this.bump()
   }
-  setFlameChasePattern(p: 'random' | 'all' | 'inout' | 'outin'): void {
-    this.flameChasePattern = p
+  setSfxChaseMs(ms: number): void {
+    this.pushHistory('sfxchase')
+    this.sfxChaseMs = Math.max(60, Math.min(2000, ms))
     this.bump()
   }
-  setFlameChaseMs(ms: number): void {
-    this.flameChaseMs = ms
-  }
-  /** チェイス進行（renderFrame から now を渡して毎フレーム呼ぶ）。置いた点を順番/全部/交互/往復/ランダムで発火。 */
-  private tickFlameChase(now: number): void {
-    if (!this.flameChaseOn) return
-    const up = -Math.PI / 2
-    const pts = this.flamePoints.length
-      ? this.flamePoints
-      : [
-          { fx: 0.17, fy: 1, dir: up },
-          { fx: 0.42, fy: 1, dir: up },
-          { fx: 0.63, fy: 1, dir: up },
-          { fx: 0.79, fy: 1, dir: up }
-        ]
+  /** 発射順（index 配列）。inout=中央に近い順／outin=遠い順／random=決定的な擬似ランダム（毎フレーム同じ＝ちらつかない）。 */
+  private sfxChaseOrder(pts: { fx: number; fy: number }[]): number[] {
     const n = pts.length
-    if (!n) return
-    if (this.lastChaseAt && now - this.lastChaseAt < this.flameChaseMs) return
-    this.lastChaseAt = now
-    const pat = this.flameChasePattern
-    const dirOf = (p: { dir?: number }): number => p.dir ?? -Math.PI / 2
-    if (pat === 'all') {
-      pts.forEach((p) => this.flame.fire(p.fx, p.fy, 1, dirOf(p)))
-    } else if (pat === 'random') {
-      const p = pts[Math.floor(this.rnd() * n) % n]
-      this.flame.fire(p.fx, p.fy, 1, dirOf(p))
-    } else {
-      // 内→外(inout)/外→内(outin): 画面中央(fx=0.5)からの距離で並べ、1つずつ順に発火
-      const order = pts
-        .map((p, i) => ({ i, d: Math.abs(p.fx - 0.5) }))
-        .sort((a, b) => (pat === 'outin' ? b.d - a.d : a.d - b.d))
-      const p = pts[order[this.chaseIdx % n].i]
-      this.flame.fire(p.fx, p.fy, 1, dirOf(p))
-      this.chaseIdx = (this.chaseIdx + 1) % n
+    const idx = pts.map((_, i) => i)
+    if (this.sfxChaseMode === 'random') {
+      const h = (i: number): number => {
+        const s = Math.sin((i + 1) * 127.1) * 43758.5453
+        return s - Math.floor(s)
+      }
+      return idx.sort((a, b) => h(a) - h(b))
     }
+    const cx = pts.reduce((s, p) => s + p.fx, 0) / n
+    const cy = pts.reduce((s, p) => s + p.fy, 0) / n
+    const d = (p: { fx: number; fy: number }): number => Math.hypot(p.fx - cx, p.fy - cy)
+    return idx.sort((a, b) => (this.sfxChaseMode === 'outin' ? d(pts[b]) - d(pts[a]) : d(pts[a]) - d(pts[b])))
+  }
+  /** 今この瞬間に「発射中」の点だけを返す。all=全部、それ以外=発射順で 1 つずつ進む（残りは自然に燃え尽き/消える）。 */
+  private sfxChaseActive<T extends { fx: number; fy: number }>(pts: T[], now: number): T[] {
+    if (this.sfxChaseMode === 'all' || pts.length <= 1) return pts
+    const order = this.sfxChaseOrder(pts)
+    const head = Math.floor(now / Math.max(60, this.sfxChaseMs)) % pts.length
+    return [pts[order[head]]]
   }
   setFlameParams(p: Partial<FlameParams>): void {
     this.flame.params = { ...this.flame.params, ...p }
@@ -946,7 +902,9 @@ export class ImageLightEngine {
       userColors: this.userColors.map((c) => c.slice() as RGB3),
       chasePalette: this.chasePalette.map((c) => c.slice() as RGB3),
       // 写真/動画オブジェクトは参照共有・fix だけ独立コピー
-      scenes: this.scenes.map((s) => ({ ...s, fix: s.fix?.map((f) => ({ ...f })) }))
+      scenes: this.scenes.map((s) => ({ ...s, fix: s.fix?.map((f) => ({ ...f })) })),
+      sfxChaseMode: this.sfxChaseMode,
+      sfxChaseMs: this.sfxChaseMs
     }
   }
   private restore(s: Snap): void {
@@ -958,6 +916,8 @@ export class ImageLightEngine {
     this.userColors = s.userColors.map((c) => c.slice() as RGB3)
     this.chasePalette = s.chasePalette.map((c) => c.slice() as RGB3)
     this.scenes = s.scenes.map((sc) => ({ ...sc, fix: sc.fix?.map((f) => ({ ...f })) }))
+    this.sfxChaseMode = s.sfxChaseMode
+    this.sfxChaseMs = s.sfxChaseMs
     const ai = s.activeScene >= 0 && s.activeScene < this.scenes.length ? s.activeScene : -1
     // 動画: 表示中だけ再生・他は停止
     this.scenes.forEach((sc, i) => {
@@ -1429,14 +1389,13 @@ export class ImageLightEngine {
     // 特効: 炎も火花と同じく「置いて点いていれば出続ける」。点灯中の炎マークを毎フレーム持続。
     // （単発バースト=手で発射、チェイスは追加で乗る。OFF=炎マーク0個なら何も触らない）
     if (this.flameEnabled) {
-      this.flame.setSustain(this.flamePoints)
-      this.tickFlameChase(now)
+      this.flame.setSustain(this.sfxChaseActive(this.flamePoints, now)) // 発射パターン(全部/内→外/外→内/ランダム)で点を絞る
       this.flame.tick(now)
     }
     const flameLit = this.flameEnabled && this.flame.active
     // 特効: 火花フォンテンは点灯中の点から連続噴出（OFF時は一切触らない）
     if (this.sparklerEnabled) {
-      this.sparkler.setActive(this.sparklerPoints)
+      this.sparkler.setActive(this.sfxChaseActive(this.sparklerPoints, now))
       this.sparkler.tick(now)
     }
     const sparklerLit = this.sparklerEnabled && this.sparkler.active
@@ -4175,7 +4134,8 @@ export class ImageLightEngine {
         lowSmoke: { ...this.lowSmoke.params, on: this.lowSmoke.on },
         seqSteps: this.sfxSeqSteps.map((s) => s.slice()),
         seqMs: this.sfxSeqMs,
-        flameChase: { on: this.flameChaseOn, pattern: this.flameChasePattern, ms: this.flameChaseMs }
+        flameChase: { on: this.flameChaseOn, pattern: this.flameChasePattern, ms: this.flameChaseMs },
+        sfxChase: { mode: this.sfxChaseMode, ms: this.sfxChaseMs }
       }
     }
     return { json: JSON.stringify(show, null, 2), media }
@@ -4278,6 +4238,14 @@ export class ImageLightEngine {
         this.flameChaseOn = !!sfx.flameChase.on
         if (sfx.flameChase.pattern) this.flameChasePattern = sfx.flameChase.pattern
         if (typeof sfx.flameChase.ms === 'number') this.flameChaseMs = sfx.flameChase.ms
+      }
+      // 発射パターン(sfxChase)の復元。古い保存(sfxChase 無し)は旧 flameChase の pattern から引き継ぐ。
+      if (sfx.sfxChase) {
+        if (sfx.sfxChase.mode) this.sfxChaseMode = sfx.sfxChase.mode
+        if (typeof sfx.sfxChase.ms === 'number') this.sfxChaseMs = sfx.sfxChase.ms
+      } else if (sfx.flameChase && sfx.flameChase.on && sfx.flameChase.pattern) {
+        this.sfxChaseMode = sfx.flameChase.pattern
+        if (typeof sfx.flameChase.ms === 'number') this.sfxChaseMs = sfx.flameChase.ms
       }
     }
     this.sfxSeqPlaying = false

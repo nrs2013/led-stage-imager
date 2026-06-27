@@ -150,7 +150,7 @@ function mkCanvas(w: number, h: number): HTMLCanvasElement {
 }
 
 export class FlameFX {
-  params: FlameParams = { thick: 1.0, dense: 1.0, churn: 1.0, speed: 1.0, height: 1.0, dur: 1.0 }
+  params: FlameParams = { thick: 1.0, dense: 1.0, churn: 1.0, speed: 1.0, height: 1.5, dur: 1.0 }
 
   private bodyGL = mkCanvas(FW, FH) // WebGL: 火球本体(透過)
   private glowCv = mkCanvas(FW, FH) // Canvas2D: 照らし用(ぼかし)
