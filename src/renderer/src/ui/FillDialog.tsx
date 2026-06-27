@@ -102,8 +102,8 @@ export function FillDialog({ onClose }: { onClose: () => void }): React.JSX.Elem
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <Field label="Universe">
-                <NumberField value={universe} min={0}
-                  onChange={(v) => { setDone(null); setUniverse(Math.max(0, v)) }} />
+                <NumberField value={universe + 1} min={1}
+                  onChange={(v) => { setDone(null); setUniverse(Math.max(0, v - 1)) }} />
               </Field>
               <Field label="DMX Addr">
                 <NumberField value={start} min={1} max={512}

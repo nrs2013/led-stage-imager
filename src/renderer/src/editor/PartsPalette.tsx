@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { C, F } from '../ui/tokens'
-import { useStore } from '../state/store'
-import { familyOfType, type PaletteFilter } from '../model/part-family'
+import { PART_ICON } from '../render/part-icons'
+import { familyOfType } from '../model/part-family'
 import type { ShapeType, PartFamily } from '../model/types'
 import { drawBulbGlass, drawBulbLit, BULB_DEFAULT_DIAMETER, type RGB } from '../render/bulb'
 import { drawNeonGlyphLit, clearNeonLayoutCache } from '../render/neon'
@@ -443,8 +443,7 @@ const CARDS: {
 /** アイコン棚 — drag a part onto the chart to place it (part centre = the dropped
  *  cell). 4-up grid so every card stays readable as the family grows. */
 export function PartsPalette(): React.JSX.Element {
-  const paletteFilter = useStore((s) => s.paletteFilter)
-  const setPaletteFilter = useStore((s) => s.setPaletteFilter)
+  // 電飾モード＝電飾(decor)パーツのみ。照明灯体(Spot/Moving/PAR等)は照明モードへ。照明/電飾フィルタは廃止。
 
   const card = (c: (typeof CARDS)[number]): React.JSX.Element => (
     <div
@@ -457,7 +456,11 @@ export function PartsPalette(): React.JSX.Element {
       title={c.title}
       style={cardStyle}
     >
-      {c.thumb}
+      <svg
+        viewBox="0 0 24 24"
+        style={partIconStyle}
+        dangerouslySetInnerHTML={{ __html: PART_ICON[c.part] }}
+      />
       <div
         style={{
           fontSize: 10,
@@ -483,34 +486,12 @@ export function PartsPalette(): React.JSX.Element {
     </div>
   )
 
-  const GROUPS: { family: PartFamily; label: string }[] = [
-    { family: 'light', label: 'Light' },
-    { family: 'decor', label: 'Decor' }
-  ]
-  const shown = GROUPS.filter((g) => paletteFilter === 'all' || paletteFilter === g.family)
-  const FILTERS: { id: PaletteFilter; label: string }[] = [
-    { id: 'all', label: 'All' },
-    { id: 'light', label: 'Light' },
-    { id: 'decor', label: 'Decor' }
-  ]
+  // 電飾モードは電飾(decor)パーツだけを並べる（照明灯体は照明モードへ）。
+  const shown: { family: PartFamily; label: string }[] = [{ family: 'decor', label: 'Decor' }]
 
   return (
     <div style={wrapStyle}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{ ...titleStyle, marginBottom: 0 }}>Parts</div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 5 }}>
-          {FILTERS.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setPaletteFilter(f.id)}
-              title="棚とチャートの表示を、照明だけ／電飾だけ／両方 に切り替え"
-              style={filterBtnStyle(paletteFilter === f.id)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <div style={titleStyle}>Parts</div>
       {shown.map((g) => {
         const cards = CARDS.filter((c) => familyOfType(c.part as ShapeType) === g.family)
         return (
@@ -545,6 +526,16 @@ const titleStyle: React.CSSProperties = {
   textTransform: 'uppercase'
 }
 
+// 電飾モードのParts＝共有の線アイコン（render/part-icons.ts）を cyan アクセントで描く。
+const partIconStyle = {
+  width: 30,
+  height: 30,
+  display: 'block',
+  margin: '4px auto 2px',
+  color: C.label,
+  '--icon-accent': C.accent
+} as unknown as React.CSSProperties
+
 const cardStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -566,16 +557,3 @@ const groupHeadStyle: React.CSSProperties = {
   marginBottom: 5
 }
 
-/** フィルタの小トグル：0.5px細線＋半透明＋白文字（規約）。選択中だけアクセント線。 */
-function filterBtnStyle(active: boolean): React.CSSProperties {
-  return {
-    fontFamily: F.ui,
-    fontSize: 10,
-    padding: '4px 9px',
-    borderRadius: 5,
-    border: `0.5px solid ${active ? C.accent : C.border}`,
-    background: active ? `rgba(${C.accentRGB},0.14)` : 'transparent',
-    color: active ? C.accent : C.label,
-    cursor: 'pointer'
-  }
-}

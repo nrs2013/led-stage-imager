@@ -76,6 +76,9 @@ interface AppState {
   /** 画像照明モード（のむさんが本番で回す・卓なし）。true の間はエディタ/Liveに代えて
    *  ImageLightingMode を全画面表示し、自前で Syphon へ publish する。 */
   imageLight: boolean
+  /** 照明モード(LIGHTING)=true は LIGHT SKETCH から電飾(DECOR)タブを隠した照明特化版。
+   *  簡単モード(EASY)=false は全部入り。imageLight が true の時だけ意味を持つ。 */
+  lightingOnly: boolean
   /** Undo/redo: snapshots of `chart` (immutable, so stacking references is cheap). */
   history: Chart[]
   future: Chart[]
@@ -89,6 +92,7 @@ interface AppState {
   redo: () => void
   setStarted: (on: boolean) => void
   setImageLight: (on: boolean) => void
+  setLightingOnly: (on: boolean) => void
   /** 画像照明モードが提供する Undo/Redo/Copy/Paste（⌘Z/⌘C/⌘V をエンジンへ橋渡し）。モード外は null。 */
   imageLightUndo: (() => void) | null
   imageLightRedo: (() => void) | null
@@ -286,6 +290,7 @@ export const useStore = create<AppState>()((set, get) => ({
   lastDup: null,
   started: initialStarted(),
   imageLight: false,
+  lightingOnly: false,
   imageLightUndo: null,
   imageLightRedo: null,
   imageLightCopy: null,
@@ -334,6 +339,7 @@ export const useStore = create<AppState>()((set, get) => ({
     }),
   setStarted: (started) => set({ started }),
   setImageLight: (imageLight) => set({ imageLight }),
+  setLightingOnly: (lightingOnly) => set({ lightingOnly }),
   setImageLightHandlers: (h) =>
     set(
       h

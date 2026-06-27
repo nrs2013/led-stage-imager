@@ -41,7 +41,7 @@ export function PatchTable(): React.JSX.Element {
     const header = ['shape', 'type', 'universe', 'start', 'end', 'mode']
     const rows = chart.fixtures.map((f) => {
       const [, e] = channelRange(f)
-      return [shapeName(f.shapeId), f.mode, String(f.universe), String(f.start), String(e), f.mode]
+      return [shapeName(f.shapeId), f.mode, String(f.universe + 1), String(f.start), String(e), f.mode]
     })
     const csv = [header, ...rows].map((r) => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })

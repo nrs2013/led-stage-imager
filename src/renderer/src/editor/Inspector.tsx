@@ -203,10 +203,10 @@ export function Inspector(): React.JSX.Element {
           <div style={{ display: 'flex', gap: 8 }}>
             <Field label="Universe" flex={1}>
               <NumberField
-                value={common('universe', 0)}
-                min={0}
-                max={32767}
-                onChange={(v) => bulkPatch(ids, { universe: v })}
+                value={common('universe', 0) + 1}
+                min={1}
+                max={32768}
+                onChange={(v) => bulkPatch(ids, { universe: Math.max(0, v - 1) })}
               />
             </Field>
             <Field label="DMX Addr" flex={1}>
@@ -849,10 +849,10 @@ export function Inspector(): React.JSX.Element {
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <Field label="Universe" flex={1}>
               <NumberField
-                value={fixture.universe}
-                min={0}
-                max={32767}
-                onChange={(v) => upsertFixture(shape.id, { universe: v })}
+                value={fixture.universe + 1}
+                min={1}
+                max={32768}
+                onChange={(v) => upsertFixture(shape.id, { universe: Math.max(0, v - 1) })}
               />
             </Field>
             <Field label="DMX Addr" flex={1}>

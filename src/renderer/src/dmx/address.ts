@@ -9,8 +9,10 @@ export interface Addr {
   start: number
 }
 
-/** grandMA2-style DMX notation: `universe.address` (Art-Net universe, 0-based). */
-export const formatDmx = (universe: number, address: number): string => `${universe}.${address}`
+/** grandMA 流の DMX 表記 `universe.address`：universe は 1 始まり・address は 3 桁ゼロ埋め（例 `1.001`）。
+ *  内部の universe は Art-Net の 0 始まりなので、表示でだけ +1 する＝**表示専用**（受信/MVR書き出しは 0 始まりのまま）。 */
+export const formatDmx = (universe: number, address: number): string =>
+  `${universe + 1}.${String(address).padStart(3, '0')}`
 
 /** How many addressed instances a shape expands to: repeat arrays = count,
  *  neon signs = one per non-space character, star fields = 2 (white sky / blue sky),

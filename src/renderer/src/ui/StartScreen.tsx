@@ -17,6 +17,7 @@ export function StartScreen(): React.JSX.Element {
   const setChart = useStore((s) => s.setChart)
   const setTool = useStore((s) => s.setTool)
   const setImageLight = useStore((s) => s.setImageLight)
+  const setLightingOnly = useStore((s) => s.setLightingOnly)
   const [error, setError] = useState<string | null>(null)
   const [backup, setBackup] = useState<Chart | null>(null)
 
@@ -112,7 +113,7 @@ export function StartScreen(): React.JSX.Element {
           <button
             className="ss-mode ss-show"
             onClick={enterShowMode}
-            title="Place fixtures on a chart, visualize live DMX, output to Syphon / NDI"
+            title="電飾モード — 透明な図面に電飾を本格描画し、卓のDMXで可視化して Syphon / NDI 出力"
           >
             <span className="ss-mi">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" strokeWidth="1">
@@ -124,8 +125,8 @@ export function StartScreen(): React.JSX.Element {
               </svg>
             </span>
             <span className="ss-mt">
-              <span className="ss-mh">Show Mode</span>
-              <span className="ss-ms">Fixtures on a chart · live DMX · Syphon / NDI</span>
+              <span className="ss-mh">Decor Mode</span>
+              <span className="ss-ms">Draw decor on a chart · DMX · Syphon / NDI</span>
             </span>
             <svg className="ss-ar" width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
               <path d="M5 3 L9 7 L5 11" />
@@ -133,20 +134,46 @@ export function StartScreen(): React.JSX.Element {
           </button>
 
           <button
-            className="ss-mode ss-sketch"
-            onClick={() => setImageLight(true)}
-            title="Light a photo with virtual fixtures (no console / Art-Net needed)"
+            className="ss-mode ss-light"
+            onClick={() => {
+              setLightingOnly(true)
+              setImageLight(true)
+            }}
+            title="照明モード — 写真を読み込んで照明を当てる。⌘+クリックで灯体を置き、DMXで色・動き。深度（立体）対応"
           >
             <span className="ss-mi">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" strokeWidth="1">
-                <rect x="3" y="3" width="14" height="11" rx="1" />
-                <path d="M3 11 L7 8 L10 10 L14 6 L17 9" />
-                <circle cx="13" cy="6" r="1.4" />
+                <rect x="8" y="2" width="4" height="3" rx="0.5" />
+                <path d="M8.3 5 L4 16 L16 16 L11.7 5 Z" />
+                <circle cx="10" cy="13" r="1.4" />
               </svg>
             </span>
             <span className="ss-mt">
-              <span className="ss-mh">Light Sketch</span>
-              <span className="ss-ms">Light a photo with virtual fixtures</span>
+              <span className="ss-mh">Lighting Mode</span>
+              <span className="ss-ms">Light a photo · ⌘-click fixtures · DMX · depth</span>
+            </span>
+            <svg className="ss-ar" width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
+              <path d="M5 3 L9 7 L5 11" />
+            </svg>
+          </button>
+
+          <button
+            className="ss-mode ss-easy"
+            onClick={() => {
+              setLightingOnly(false)
+              setImageLight(true)
+            }}
+            title="簡単モード — 電飾＋照明の両方を1画面で簡単に（卓 / Art-Net なしでOK）"
+          >
+            <span className="ss-mi">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" strokeWidth="1">
+                <rect x="2.5" y="6.5" width="10" height="8" rx="1" />
+                <rect x="7.5" y="3.5" width="10" height="8" rx="1" />
+              </svg>
+            </span>
+            <span className="ss-mt">
+              <span className="ss-mh">Easy Mode</span>
+              <span className="ss-ms">Decor + lighting, the simple way</span>
             </span>
             <svg className="ss-ar" width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
               <path d="M5 3 L9 7 L5 11" />
@@ -195,16 +222,18 @@ const SS_CSS = `
 .ss-mode{width:100%;display:flex;align-items:center;gap:18px;padding:18px 22px;border:0.5px solid #2c2a27;border-radius:10px;background:rgba(255,255,255,0.008);cursor:pointer;transition:border-color .2s,background .2s;font-family:'Inter',sans-serif;}
 .ss-mode:hover{background:rgba(255,255,255,0.02);}
 .ss-show:hover{border-color:#7bc5e8;}
-.ss-sketch:hover{border-color:#f5c878;}
+.ss-light:hover{border-color:#7bc5e8;}
+.ss-easy:hover{border-color:#f5c878;}
 .ss-mi{flex:none;width:30px;display:flex;justify-content:center;}
 .ss-mi svg{stroke:#7bc5e8;opacity:.85;}
-.ss-sketch .ss-mi svg{stroke:#f5c878;}
+.ss-easy .ss-mi svg{stroke:#f5c878;}
 .ss-mt{flex:1;}
 .ss-mh{display:block;font-size:13px;font-weight:300;letter-spacing:.2em;color:#e8e5dc;text-transform:uppercase;}
 .ss-ms{display:block;margin-top:5px;font-size:10px;font-weight:300;letter-spacing:.06em;color:#888780;}
 .ss-ar{flex:none;stroke:#5a5a55;transition:stroke .2s,transform .2s;}
 .ss-show:hover .ss-ar{stroke:#7bc5e8;transform:translateX(3px);}
-.ss-sketch:hover .ss-ar{stroke:#f5c878;transform:translateX(3px);}
+.ss-light:hover .ss-ar{stroke:#7bc5e8;transform:translateX(3px);}
+.ss-easy:hover .ss-ar{stroke:#f5c878;transform:translateX(3px);}
 .ss-foot{margin-top:30px;display:flex;align-items:center;justify-content:space-between;}
 .ss-open{display:inline-flex;align-items:center;gap:9px;font-size:10px;font-weight:300;letter-spacing:.22em;text-transform:uppercase;color:#a8a8a0;cursor:pointer;background:none;border:none;font-family:'Inter',sans-serif;padding:6px 2px;}
 .ss-open:hover{color:#fafaf8;}

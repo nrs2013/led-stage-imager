@@ -7,6 +7,7 @@
  * （screen混色・アルベド乗算・色比保持トーン・パン非対称・Smoke連動）。
  */
 import { WHITE, COLORS, sameRgb, hexToRgb, type RGB3 } from './colors'
+import { fixtureColor, beamPose, shutterGate, channelCount } from '../dmx/channel-math'
 import { FlameFX, type FlameParams } from './flame'
 import { SparklerFX, type SparklerParams } from './sparkler'
 import { RainFX, type RainParams } from './rain'
@@ -52,7 +53,7 @@ import {
 } from '../render/fixtures'
 import { drawStarsLit } from '../render/stars'
 import { drawFestoonWireLit, drawFestoonBulbLit, festoonBulbs } from '../render/festoon'
-import type { Shape } from '../model/types'
+import type { Shape, ChannelMode, Fixture } from '../model/types'
 
 /** 写真×光の合成方式。
  *  'mock'  = 出荷モック準拠（乗算＋暗部トー）。のむさんが v7 で検証済みの見え方。既定。
@@ -64,6 +65,9 @@ const PHOTO_TONE: 'mock' | 'ratio' = 'mock'
 /** 論理座標系（モックと同じ）。内部解像度は Q 倍＝出力 1920×1080。 */
 export const LW = 1600
 export const LH = 900
+
+/** 受信DMXが無い universe 用のゼロフレーム（照明モードのDMX駆動で参照）。 */
+const DMX_ZERO512 = new Uint8Array(512)
 // 内部/出力解像度の倍率。1.2＝1920×1080（写真のシャープさ優先・のむさん 2026-06-13）。
 // カクつきは「静止画は描き直さない(dirty-skip)＋スモークのブルームを半解像度」で対処。
 export const Q = 1.2
@@ -133,6 +137,16 @@ export interface Beam {
   // 特効(炎/火花)の噴き出す向きは照明と同じ TILT（b.tilt 度）から計算する＝専用フィールドは持たない。
   // 特効ステップシーケンサー用の安定ID（炎/火花マークに付与・並び替え/削除に強い）。
   sfxId?: number
+  /** DMX控え（任意）。設定された灯体は外部卓(Art-Net)が色・向き・明るさを駆動する＝照明モードの
+   *  「位置を置いたら、あとはDMXで操作」。電飾モードと同じ dmx/channel-math を流用。
+   *  undefined＝未パッチ＝従来どおりアプリ内/MIDIで操作（既存ショーは全部こちら）。 */
+  dmx?: {
+    universe: number
+    start: number
+    mode: ChannelMode
+    addressStep?: number
+    fixedColor?: [number, number, number]
+  }
 }
 
 /** シーンに保存されるFXの点き具合（master/smoke は含めない＝呼び出しても親フェーダーは動かない）。 */
@@ -233,6 +247,63 @@ interface Snap {
   userColors: RGB3[]
   chasePalette: RGB3[]
   scenes: Scene[]
+}
+
+/** 灯体を「中央の一番下を1番に、左右の外側ほど大きく（同距離は右が先）、下の段→上の段」へ
+ *  並べる順番 perm を返す（perm[newIndex]=oldIndex）。renumberByPosition と単体テストで共有する純関数。 */
+export function renumberOrder(pts: { x: number; y: number }[], lh: number = LH): number[] {
+  const n = pts.length
+  if (n < 2) return pts.map((_, i) => i)
+  const xs = pts.map((p) => p.x)
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2
+  const bandTol = lh * 0.05 // 縦これ以内＝同じ段とみなす
+  const items = pts.map((p, i) => ({ i, x: p.x, y: p.y })).sort((a, b) => b.y - a.y) // 下(yが大)から
+  const rows: { i: number; x: number; y: number }[][] = []
+  for (const it of items) {
+    const row = rows[rows.length - 1]
+    if (row && Math.abs(it.y - row[0].y) <= bandTol) row.push(it)
+    else rows.push([it])
+  }
+  const spread = Math.max(...xs) - Math.min(...xs)
+  const eps = Math.max(0.5, spread * 0.01) // この幅以内のx＝中央とみなす
+  const perm: number[] = []
+  for (const row of rows) {
+    const mid = row.filter((it) => Math.abs(it.x - cx) <= eps)
+    const right = row.filter((it) => it.x - cx > eps).sort((a, b) => a.x - b.x) // 中央寄りの右から
+    const left = row.filter((it) => cx - it.x > eps).sort((a, b) => b.x - a.x) // 中央寄りの左から
+    for (const it of mid) perm.push(it.i)
+    const m = Math.max(right.length, left.length)
+    for (let k = 0; k < m; k++) {
+      if (right[k]) perm.push(right[k].i) // 右を先
+      if (left[k]) perm.push(left[k].i) // 次に左
+    }
+  }
+  return perm
+}
+
+/** DMX 番地が衝突している灯体の index 集合を返す純関数。2 灯が衝突＝同じ universe かつ
+ *  占有チャンネル [start, start+count) が重なる（start は 1 始まり・count はモードの ch 数）。
+ *  index 安定（呼び出し側が灯体に対応づけられる）。null/undefined（未パッチ）は無視。
+ *  dmxOverlaps と単体テストで共有する純関数。 */
+export function detectDmxOverlaps(
+  patches: ({ universe: number; start: number; count: number } | null | undefined)[]
+): Set<number> {
+  const hit = new Set<number>()
+  for (let i = 0; i < patches.length; i++) {
+    const a = patches[i]
+    if (!a) continue
+    for (let j = i + 1; j < patches.length; j++) {
+      const b = patches[j]
+      if (!b) continue
+      if (a.universe !== b.universe) continue
+      // 半開区間 [start, start+count) が交わるか
+      if (a.start < b.start + b.count && b.start < a.start + a.count) {
+        hit.add(i)
+        hit.add(j)
+      }
+    }
+  }
+  return hit
 }
 
 // v3: リグ保存を「配置と仕込みだけ」に変更（向き/色/明るさを焼かない）＝旧保存に残った
@@ -866,7 +937,7 @@ export class ImageLightEngine {
   private histAt = 0
   private snapshot(): Snap {
     return {
-      beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp } })),
+      beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined })),
       st: { ...this.st },
       fxp: JSON.parse(JSON.stringify(this.fxp)),
       selected: [...this.selected],
@@ -879,7 +950,7 @@ export class ImageLightEngine {
     }
   }
   private restore(s: Snap): void {
-    this.beams = s.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp } }))
+    this.beams = s.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined }))
     this.st = { ...s.st }
     this.fxp = JSON.parse(JSON.stringify(s.fxp))
     this.selected = s.selected.filter((i) => i >= 0 && i < s.beams.length)
@@ -1011,7 +1082,8 @@ export class ImageLightEngine {
     this.rain.active ||
     this.lowSmoke.active ||
     this.sfxSeqPlaying ||
-    this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars')
+    this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars') ||
+    this.hasDmxPatched()
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
 
@@ -1292,7 +1364,51 @@ export class ImageLightEngine {
 
   // ---------- フレーム描画 ----------
   /** frame キャンバスに1フレーム描く（マーカー無し）。React の30fpsループから呼ぶ。 */
+  // ---------- DMX駆動（照明モード）：dmxパッチされた灯体だけ外部卓(Art-Net)が支配 ----------
+  private dmxFrame: Record<number, Uint8Array> | null = null
+  private dmxGamma = false
+  /** いずれかの灯体に dmx パッチがあるか（再描画ゲート判定に使う）。 */
+  hasDmxPatched(): boolean {
+    return this.beams.some((b) => !!b.dmx)
+  }
+  /** 今フレームの Art-Net（signal-loss/Hold 処理済み）を渡す。renderFrame の頭で適用。 */
+  setDmxFrame(eff: Record<number, Uint8Array>, gamma: boolean): void {
+    this.dmxFrame = eff
+    this.dmxGamma = gamma
+  }
+  /** パッチ灯体に卓の値を直書き（色=色相, gauge=明るさ×Shutter, pan/tilt/zoom）。setter は
+   *  通さない（毎フレーム pushHistory＝undo爆発・選択干渉を避ける）。未パッチ灯体は触らない
+   *  ＝従来どおりアプリ内/MIDIで操作。電飾モードと同じ dmx/channel-math を流用。 */
+  private applyDmx(eff: Record<number, Uint8Array>, gamma: boolean): void {
+    for (const b of this.beams) {
+      const p = b.dmx
+      if (!p) continue
+      const data = eff[p.universe] ?? DMX_ZERO512
+      const fx: Fixture = {
+        id: '',
+        shapeId: '',
+        universe: p.universe,
+        start: p.start,
+        mode: p.mode,
+        addressStep: p.addressStep,
+        fixedColor: p.fixedColor
+      }
+      const pose = beamPose(fx, data)
+      const col = fixtureColor(fx, data, gamma)
+      const m = Math.max(col[0], col[1], col[2]) / 255 // 明るさ
+      const hue: RGB3 =
+        m > 0.004 ? [col[0] / m, col[1] / m, col[2] / m] : [col[0], col[1], col[2]]
+      const gate = p.mode === 'beam8' ? shutterGate(fx, data) : 1
+      b.pan = pose.pan * 90 // ±90°
+      b.tilt = pose.tilt * 180 // ±180°
+      b.zoom = pose.zoom >= 0 ? 1 + pose.zoom * 3 : 1 + pose.zoom * 0.85 // 128=×1 / 全開×4 / 全閉×0.15
+      b.color = hue
+      b.gauge = m * gate
+    }
+  }
+
   renderFrame(now = performance.now()): void {
+    if (this.dmxFrame) this.applyDmx(this.dmxFrame, this.dmxGamma) // 卓(DMX)支配の灯体に先に焼く
     this.updateVideoFrame() // 動画シーンなら mat を今のコマへ
     const ms = now - this.t0
     const decorT = this.decorTime(now) // 電飾チェイス用の時計（playing 中だけ進む・1フレーム1回）
@@ -1942,6 +2058,31 @@ export class ImageLightEngine {
     })
     this.bump()
   }
+
+  /** 灯体の番号(=並び順)を「置いた場所」で振り直す。中央の一番下を1番に、左右の外側へ
+   *  行くほど大きく（同距離は右が先）、下の段→上の段へ。事故防止＝各シーンの保存(fix)と
+   *  各パターンの保存(look.lights)も同じ並びに揃える（呼び出しがズレない）。⌘Zで戻せる。 */
+  renumberByPosition(): void {
+    const n = this.beams.length
+    if (n < 2) return
+    this.pushHistory()
+    this.rigCustomized = true
+    // perm[newIdx] = oldIdx ＝ index に連動する全配列を同じ順に並べ替える（純関数・テスト済）
+    const perm = renumberOrder(this.beams)
+    const beams = this.beams
+    this.beams = perm.map((i) => beams[i])
+    for (const sc of this.scenes) {
+      const fx = sc.fix
+      if (fx && fx.length === n) sc.fix = perm.map((i) => fx[i])
+    }
+    for (const p of this.patterns) {
+      const lights = p?.look?.lights
+      if (lights && lights.length === n) p!.look.lights = perm.map((i) => lights[i])
+    }
+    this.selected = []
+    this.bump()
+  }
+
   addFixtureAt(x: number, y: number): void {
     if (this.beams.length >= MAX_BEAMS) return
     this.pushHistory()
@@ -2296,6 +2437,62 @@ export class ImageLightEngine {
     this.pushHistory('color')
     this.wake()
     this.targets().forEach((b) => (b.color = rgb.slice() as RGB3))
+    this.bump()
+  }
+  /** 選択灯体の DMX 控えを設定/部分更新（null＝外す）。user 編集なので pushHistory。
+   *  毎フレームの applyDmx（卓→灯体の直書き）とは別物。 */
+  setBeamDmx(patch: Partial<NonNullable<Beam['dmx']>> | null): void {
+    this.pushHistory('dmx')
+    for (const b of this.targets()) {
+      if (patch === null) {
+        b.dmx = undefined
+        continue
+      }
+      const cur = b.dmx ?? { universe: 0, start: 1, mode: 'beam8' as ChannelMode }
+      b.dmx = { ...cur, ...patch }
+    }
+    this.bump()
+  }
+  /** 選択灯体に空きアドレスを自動割当（universe 0・選択外のパッチ済みの後ろから順に・step-up）。 */
+  autoPatchSelected(): void {
+    const sel = this.targets()
+    if (!sel.length) return
+    this.pushHistory('dmx')
+    let next = 1
+    for (const b of this.beams) {
+      if (b.dmx && b.dmx.universe === 0 && !sel.includes(b)) {
+        next = Math.max(next, b.dmx.start + channelCount(b.dmx.mode))
+      }
+    }
+    for (const b of sel) {
+      const mode = b.dmx?.mode ?? ('beam8' as ChannelMode)
+      const start = Math.min(512, next)
+      b.dmx = { universe: 0, start, mode, fixedColor: b.dmx?.fixedColor, addressStep: b.dmx?.addressStep }
+      next = start + channelCount(mode)
+    }
+    this.bump()
+  }
+  /** 卓アドレスが衝突している灯体の番号(1 始まり) 一覧。空＝衝突なし。UI / canvas の警告に使う。 */
+  dmxOverlaps(): number[] {
+    const patches = this.beams.map((b) =>
+      b.dmx
+        ? { universe: b.dmx.universe, start: b.dmx.start, count: channelCount(b.dmx.mode) }
+        : null
+    )
+    return [...detectDmxOverlaps(patches)].sort((a, b) => a - b).map((i) => i + 1)
+  }
+  /** 全灯体に空きアドレスを一括自動割当（universe 0・番号順に 1 から step-up＝衝突しない）。
+   *  既存の控えのモード/色は維持し、番地だけ詰め直す。⌘Z で戻せる。 */
+  autoPatchAll(): void {
+    if (!this.beams.length) return
+    this.pushHistory('dmx')
+    let next = 1
+    for (const b of this.beams) {
+      const mode = b.dmx?.mode ?? ('beam8' as ChannelMode)
+      const start = Math.min(512, next)
+      b.dmx = { universe: 0, start, mode, fixedColor: b.dmx?.fixedColor, addressStep: b.dmx?.addressStep }
+      next = start + channelCount(mode)
+    }
     this.bump()
   }
   setPan(v: number): void {
@@ -3963,7 +4160,7 @@ export class ImageLightEngine {
       version: 1,
       rig: this.rigData(),
       // 灯体配置を丸ごと保存（runtime 専用の _tn/_cn/_zp は復元時に再計算されるので含めてOK）。
-      beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp } })),
+      beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined })),
       scenes: scenesMeta,
       mask: maskMeta,
       decor: {
