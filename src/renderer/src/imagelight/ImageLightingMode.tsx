@@ -977,15 +977,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const masterPct = Math.round(engine.st.master * 100)
   const outCapLabel = engine.outCap >= 3840 ? '高精細' : engine.outCap >= 2560 ? 'バランス' : 'なめらか'
   const falloffLabel = engine.falloffPow >= 4 ? 'きつめ' : engine.falloffPow >= 2.5 ? '標準' : 'ソフト'
-  const depthStat = engine.activeDepthStatus()
-  const depthStatLabel =
-    depthStat === 'ready'
-      ? 'READY'
-      : depthStat === 'pending'
-        ? 'COMPUTING…'
-        : depthStat === 'failed'
-          ? 'FAILED'
-          : '—'
   const ms = engine.muteSoloCount() // ソロ/ミュート中の台数（注意表示・全解除ボタン用）
   const curCue = engine.activePattern >= 0 ? engine.patterns[engine.activePattern] : null // 今アクティブな明かり
 
@@ -1827,63 +1818,20 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <div className="il2-sec">
                 <div className="il2-eb">
                   <span className="il2-kind">立体</span>
-                  <b>DEPTH</b>
+                  <b>RELIEF</b>
                 </div>
                 <div className="il2-segrow">
-                  <span className="il2-seglbl">3D</span>
+                  <span className="il2-seglbl">立体強調</span>
                   <input
                     type="range"
                     min={0}
                     max={100}
-                    value={Math.round(engine.depthStrength * 100)}
-                    onChange={(e) => engine.setDepthStrength(+e.target.value / 100)}
-                    title="背景写真の奥行きで光の乗り方を変える（0=今まで通り／上げるほど手前が明るく奥が落ちて立体的に見える）。写真を読み込むと自動で奥行きを計算します。"
+                    value={Math.round(engine.relief * 100)}
+                    onChange={(e) => engine.setRelief(+e.target.value / 100)}
+                    title="もとの写真に描き込まれた陰影を濃くして“立体”を呼び戻す（コントラスト＋彩度）。0=今まで通り。上げ過ぎるとギラつくので控えめに。AIなし・軽い後処理。"
                     style={{ flex: 1 }}
                   />
-                  <span className="il2-pv">{Math.round(engine.depthStrength * 100)}</span>
-                </div>
-                <div className="il2-segrow">
-                  <span className="il2-seglbl">WIDTH</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={Math.round(engine.depthWidth * 100)}
-                    onChange={(e) => engine.setDepthWidth(+e.target.value / 100)}
-                    title="彫りの太さ。小さい=細部(窓枠/フチ)中心、大きい=柱など面で太く出る。動かすと即反映。"
-                    style={{ flex: 1 }}
-                  />
-                  <span className="il2-pv">{Math.round(engine.depthWidth * 100)}</span>
-                </div>
-                <div className="il2-segrow">
-                  <span className="il2-seglbl">SHADOW</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={Math.round(engine.depthShadow * 100)}
-                    onChange={(e) => engine.setDepthShadow(+e.target.value / 100)}
-                    title="出っ張りの上に落ちる影。0=自然(影なし)。上げると下から光のリアルな落ち影。上げ過ぎると作り物っぽくなるので控えめが◎。"
-                    style={{ flex: 1 }}
-                  />
-                  <span className="il2-pv">{Math.round(engine.depthShadow * 100)}</span>
-                </div>
-                <button
-                  className={'il2-switch' + (engine.showDepth ? ' on' : '')}
-                  onClick={() => engine.setShowDepth(!engine.showDepth)}
-                  title="ON=立体感に実際に使う“彫り(凹凸)”を強調表示。中立=灰/出っ張り=明/凹み=暗。柱や窓が浮けば効いてる証拠。AIの生グラデ(下が明るい)は使ってないのでここにも出ない。出力(Syphon)は通常のまま。"
-                >
-                  <span className="il2-sw-track">
-                    <span className="il2-sw-knob" />
-                  </span>
-                  <span className="il2-sw-nm">
-                    DEPTH MAP<i>確認</i>
-                  </span>
-                  <span className="il2-sw-st">{engine.showDepth ? 'ON' : 'OFF'}</span>
-                </button>
-                <div className="il2-segrow">
-                  <span className="il2-seglbl">STATUS</span>
-                  <span className="il2-pv">{depthStatLabel}</span>
+                  <span className="il2-pv">{Math.round(engine.relief * 100)}</span>
                 </div>
               </div>
 
@@ -2535,6 +2483,23 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   </button>
                 )}
               </div>
+              )}
+              {engine.box && (
+                <button
+                  className="il-psadd"
+                  style={{ marginTop: 8 }}
+                  onClick={() => {
+                    const n = engine.addLanternsFromImage()
+                    flash(
+                      n > 0
+                        ? `行灯を ${n} 個 見つけて置きました（要らないのは選んで削除／足りないのは写真をクリックで追加）`
+                        : '行灯が見つかりません（点いている行灯がある写真で試すか、写真をクリックして手で足してください）'
+                    )
+                  }}
+                  title="表示中の写真から「明るく光っている行灯」を自動で見つけて灯体を置く（仕込み用・本番では走りません）"
+                >
+                  行灯をさがす（写真から自動・試作）
+                </button>
               )}
               <div className="il-lbl" style={{ marginTop: 8 }}>ALIGN（選んだ灯体をそろえる）</div>
               <div className="il2-act il-alignrow" style={{ flexWrap: 'nowrap', gap: 3 }}>
@@ -3294,7 +3259,7 @@ const sp = (
 export const SFX_PARAMS: Record<'flame' | 'sparkler' | 'rain' | 'smoke', { core: SfxParamDef[]; more: SfxParamDef[] }> = {
   flame: {
     core: [
-      sp('sfx.flame.height', 'HEIGHT', 0.5, 2.5, 0.05, (e) => e.getFlameParams().height, (e, v) => e.setFlameParams({ height: v })),
+      sp('sfx.flame.height', 'HEIGHT', 0.1, 1.0, 0.02, (e) => e.getFlameParams().height, (e, v) => e.setFlameParams({ height: v })),
       sp('sfx.flame.thick', 'WIDTH', 0.5, 2.4, 0.05, (e) => e.getFlameParams().thick, (e, v) => e.setFlameParams({ thick: v }))
     ],
     more: [

@@ -31,10 +31,6 @@ asarUnpack:
   # koffi (FFI) loads a prebuilt .node per platform at runtime — must be unpacked from asar.
   # Windows の NDI 直送に使う（import 自体は全プラットフォームで走る）。
   - '**/node_modules/koffi/**'
-  # onnxruntime-node は prebuilt の .node + dylib を実行時にロード（深度推定の同梱エンジン）。
-  - '**/node_modules/onnxruntime-node/**'
-  # 深度AIを別スレッドで回す worker。asar 内からの Worker 起動は不確実なので実ファイルで展開する。
-  - out/main/depth-worker.js
 win:
   executableName: decor-studio
   files:

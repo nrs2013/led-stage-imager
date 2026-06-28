@@ -25,7 +25,6 @@ import {
   resolveNdiLibPath
 } from './output/ndi-direct'
 import { startMidiInput, stopMidiInput, getMidiPorts } from './midi/midi-input'
-import { runDepth } from './depth/depth-engine'
 
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
@@ -314,11 +313,6 @@ app.whenReady().then(() => {
     return `data:image/${mime};base64,${readFileSync(file).toString('base64')}`
   })
 
-  // 画像照明モード: 前処理済みテンソル(1x3xHxW float32) → 生深度(float32 H*W)。
-  // 完全同梱の onnxruntime-node(Depth Anything V2 Small)で推論。Python/ComfyUI 不要。
-  ipcMain.handle('depth:run', async (_e, input: Float32Array, w: number, h: number) => {
-    return await runDepth(input, w, h)
-  })
 
   // Text fields need native clipboard ops (the menu items above are app-level).
   ipcMain.on('edit:native-copy', () => {

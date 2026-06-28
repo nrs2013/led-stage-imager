@@ -150,7 +150,7 @@ export function StartScreen(): React.JSX.Element {
             </span>
             <span className="ss-mt">
               <span className="ss-mh">Lighting Mode</span>
-              <span className="ss-ms">Light a photo · ⌘-click fixtures · DMX · depth</span>
+              <span className="ss-ms">Light a photo · ⌘-click fixtures · DMX · relief</span>
             </span>
             <svg className="ss-ar" width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
               <path d="M5 3 L9 7 L5 11" />

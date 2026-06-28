@@ -3,12 +3,6 @@ import { ElectronAPI } from '@electron-toolkit/preload'
 export interface DecorApi {
   /** Opens a native file dialog and returns the chosen image as a data URL (or null). */
   openImage: () => Promise<string | null>
-  /** Run bundled monocular depth (Depth Anything V2 Small) on a preprocessed NCHW tensor. */
-  runDepth: (
-    input: Float32Array,
-    w: number,
-    h: number
-  ) => Promise<{ depth?: Float32Array; w?: number; h?: number; error?: string }>
   /** Subscribe to Art-Net DMX packets forwarded from the main process. Returns an unsubscribe. */
   onDmx: (
     cb: (pkt: { universe: number; sequence: number; data: Uint8Array }) => void

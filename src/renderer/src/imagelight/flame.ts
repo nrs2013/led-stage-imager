@@ -150,7 +150,9 @@ function mkCanvas(w: number, h: number): HTMLCanvasElement {
 }
 
 export class FlameFX {
-  params: FlameParams = { thick: 1.0, dense: 1.0, churn: 1.0, speed: 1.0, height: 1.5, dur: 1.0 }
+  // 既定の高さ(=炎の大きさ)は小さめ。置いた瞬間に巨大にならないよう、小さい側を既定に。
+  // スライダーは 0.1〜1.0（小さい炎を細かく触れる範囲）なので、既定 0.25 はその下寄り＝小さな炎。
+  params: FlameParams = { thick: 1.0, dense: 1.0, churn: 1.0, speed: 1.0, height: 0.25, dur: 1.0 }
 
   private bodyGL = mkCanvas(FW, FH) // WebGL: 火球本体(透過)
   private glowCv = mkCanvas(FW, FH) // Canvas2D: 照らし用(ぼかし)

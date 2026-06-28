@@ -37,7 +37,7 @@ import {
   type SearchParams
 } from './effects'
 import { composeColorRatio } from '../render/compose'
-import { buildDepthShadeCanvas } from '../render/depth-shade'
+import { findWarmBlobs } from './lantern-detect'
 import { alignSnap, equalSnapX, type Pt } from './snap'
 import { drawStreetLampLit } from '../render/streetlamp'
 import { drawChandelierLit } from '../render/chandelier'
@@ -210,14 +210,6 @@ export interface Scene {
   /** ピース（写真の一部を切り抜いて 4 隅コーナーピンで貼り付ける）の並び。
    *  シーンに紐づき、後ろにあるピースほど上に描かれる。 */
   pieces?: Piece[]
-  /** 背景写真の深度マップ(8bit グレー・near=明)。立体ライティング用。mat と同寸。 */
-  depth?: HTMLCanvasElement | null
-  /** 深度から焼いた「立体感ゲイン」canvas（mat と同寸・光に multiply で掛ける）。 */
-  depthShade?: HTMLCanvasElement | null
-  /** 深度PNGの dataURL（公演ファイル保存用・Phase3）。 */
-  depthSrc?: string | null
-  /** 深度生成の状態（UI表示・確認用）。 */
-  depthStatus?: 'pending' | 'ready' | 'failed'
 }
 
 /** 写真の一部を切り抜いて、ステージ上に 4 隅コーナーピンで貼り付ける単位。 */
@@ -471,6 +463,8 @@ export class ImageLightEngine {
   private smoothCv = mk(IW, IH)
   private vmCv = mk(IW, IH) // 受け系(雨/雪/煙)の「matter×光マップ」合成用スクラッチ（drawImageのみ）
   private vmc = this.vmCv.getContext('2d')!
+  private reliefCv = mk(IW, IH) // 立体強調の後処理用スクラッチ（編集フレーム）
+  private reliefOutCv = mk(16, 9) // 立体強調の後処理用スクラッチ（出力・サイズ可変）
   private noiseCv = mk(IW, IH)
   private noiseTile: HTMLCanvasElement
   private noisePattern: CanvasPattern | null = null // 静的タイル→毎フレーム createPattern しないよう一度だけ生成して使い回す
@@ -762,19 +756,9 @@ export class ImageLightEngine {
   } | null = null
   /** 光だけ出力モード: 写真を使わず光マップだけをSyphonへ出力。Arena側で 映像×光(Multiply) して使う。 */
   lightOnly = false
-  /** 立体感(深度ライティング)の強さ 0..1。0=今と完全一致(無効果)。 */
-  depthStrength = 0
-  /** 彫りの太さ 0..1（小=細部/大=面で太く）。depthShade のDoG基準半径に対応。 */
-  depthWidth = 0.4
-  /** 出っ張りの上の影の強さ 0..1（0=自然/上げると落ち影・上げ過ぎると作り物っぽい）。 */
-  depthShadow = 0
-  /** 深度スライダーのドラッグ中、毎tickで全解像度の彫りを焼き直すとメインスレッドが固まるので、
-   *  焼き直しは止めてから ~120ms にまとめる（値の反映と再描画は即時・彫りだけ遅延）。 */
-  private depthShadeTimer: ReturnType<typeof setTimeout> | null = null
-  /** 深度確認ビュー: ON で編集画面に「AIが読んだ奥行きマップ」を表示（出力は通常のまま）。 */
-  showDepth = false
-  /** 深度生成を1枚ずつ直列化（torch多重起動でのOOM回避）。 */
-  private depthChain: Promise<void> = Promise.resolve()
+  /** 立体強調 0..1。もとの写真に描き込まれた陰影をコントラストで濃くして“立体”を呼び戻す後処理。
+   *  0=今と完全一致（後処理なし）。線も形もAIも足さない・GPU後処理1回。 */
+  relief = 0
   selected: number[] = [0] // 選択中の灯体index（複数可）。空=未選択／全部入=ALL
   scenes: Scene[] = []
   activeScene = -1
@@ -1548,17 +1532,6 @@ export class ImageLightEngine {
           wc.drawImage(this.lightCv, 0, 0)
           wc.globalAlpha = 1
         }
-        // 立体感: 深度レリーフ(彫り)を mat と同じ box/Q 変換で overlay で1回重ねる。
-        // 出っぱり=明/凹み=暗の明暗両方＝立体に。128中立×globalAlpha なので強さ0なら今と完全一致。readback無し・GPU1回。
-        const dshade = this.activeScene >= 0 ? this.scenes[this.activeScene]?.depthShade : null
-        if (dshade && this.depthStrength > 0) {
-          wc.setTransform(Q, 0, 0, Q, 0, 0)
-          wc.globalCompositeOperation = 'soft-light'
-          wc.globalAlpha = this.depthStrength
-          wc.drawImage(dshade, b.x, b.y, b.w, b.h)
-          wc.globalAlpha = 1
-          wc.setTransform(1, 0, 0, 1, 0, 0)
-        }
         wc.setTransform(Q, 0, 0, Q, 0, 0)
         wc.globalCompositeOperation = 'destination-in'
         wc.drawImage(this.mat, b.x, b.y, b.w, b.h)
@@ -1574,18 +1547,6 @@ export class ImageLightEngine {
     // 光だけ出力モードは編集画面も写真なしで光マップを表示（プレビュー）
     if (this.lightOnly) {
       fc.drawImage(this.lightCv, 0, 0)
-      // 立体感: 光だけ出力でも彫り(影)を光に乗せる。Arena側 映像×光 で映像に影が出る（写真不要）。
-      const dshadeL = this.activeScene >= 0 ? this.scenes[this.activeScene]?.depthShade : null
-      if (dshadeL && this.depthStrength > 0 && this.box) {
-        const lb = this.box
-        fc.setTransform(Q, 0, 0, Q, 0, 0)
-        fc.globalCompositeOperation = 'soft-light'
-        fc.globalAlpha = this.depthStrength
-        fc.drawImage(dshadeL, lb.x, lb.y, lb.w, lb.h)
-        fc.globalAlpha = 1
-        fc.setTransform(1, 0, 0, 1, 0, 0)
-        fc.globalCompositeOperation = 'source-over'
-      }
     } else {
       fc.drawImage(this.workCv, 0, 0)
     }
@@ -1694,26 +1655,8 @@ export class ImageLightEngine {
       fc.globalCompositeOperation = 'source-over'
     }
 
-    // 深度確認ビュー: ON のとき編集画面に「AIが読んだ奥行きマップ」を表示（手前=明/奥=暗）。
-    // 出力(Syphon)は通常のまま＝あくまで画面での確認用。
-    if (this.showDepth) {
-      // 実際に立体感へ使ってる“彫り(凹凸)”を強調表示。中立=灰/出っ張り=明/凹み=暗。
-      // AIの生グラデ(下が明るい)は使ってないので、ここにも出ない＝何を拾ってるかが分かる。
-      const dview = this.activeScene >= 0 ? this.scenes[this.activeScene]?.depthShade : null
-      if (dview && this.box) {
-        const bx = this.box
-        fc.setTransform(1, 0, 0, 1, 0, 0)
-        fc.globalCompositeOperation = 'source-over'
-        fc.globalAlpha = 1
-        fc.fillStyle = '#000'
-        fc.fillRect(0, 0, QW, QH)
-        fc.setTransform(Q, 0, 0, Q, 0, 0)
-        fc.filter = 'contrast(320%)' // 彫りを見やすく強調（確認用・実際の効きの量はスライダー）
-        fc.drawImage(dview, bx.x, bx.y, bx.w, bx.h)
-        fc.filter = 'none'
-        fc.setTransform(1, 0, 0, 1, 0, 0)
-      }
-    }
+    // 立体強調: 編集フレームの仕上げ（もとの陰影を濃くして立体を呼び戻す・relief=0なら無処理）
+    this.reliefPass(this.frame, this.fc, this.reliefCv, QW, QH)
 
     // ---- Syphon出力: 写真の部分だけを写真の解像度で（余白なし・写真フル解像度）
     this.composeOutput(maxI)
@@ -1734,6 +1677,12 @@ export class ImageLightEngine {
     // 特効: 出力にも炎本体を重ねる（glowは光マップ経由でcomposeOutputに既に反映済み）
     if (flameLit) this.drawFlameOnOutput()
     if (sparklerLit) this.drawSparklerOnOutput()
+
+    // 立体強調: 出力(Syphon/NDI)も編集画面と同じ仕上げにする（relief=0なら無処理）
+    if (this.relief > 0 && this.outW > 16) {
+      const oc2 = this.outCv.getContext('2d', { willReadFrequently: true })!
+      this.reliefPass(this.outCv, oc2, this.reliefOutCv, this.outW, this.outH)
+    }
   }
 
   /** 出力(outCv)にモチーフを重ねる。outCv は box 領域を出力解像度に伸ばしたものなので、
@@ -1753,6 +1702,42 @@ export class ImageLightEngine {
     })
     oc.setTransform(1, 0, 0, 1, 0, 0)
     oc.globalCompositeOperation = 'source-over'
+  }
+
+  /** 立体強調: 仕上がった絵(cv)のコントラストと彩度を上げ、もとの写真の陰影を濃くして立体を呼び戻す。
+   *  元絵をスクラッチへコピー → contrast/saturate フィルタで描き戻す。relief=0 なら何もしない。 */
+  private reliefPass(
+    cv: HTMLCanvasElement,
+    cx: CanvasRenderingContext2D,
+    scratch: HTMLCanvasElement,
+    w: number,
+    h: number
+  ): void {
+    if (this.relief <= 0 || w <= 0 || h <= 0) return
+    if (scratch.width !== w) scratch.width = w
+    if (scratch.height !== h) scratch.height = h
+    const sx = scratch.getContext('2d')!
+    sx.setTransform(1, 0, 0, 1, 0, 0)
+    sx.globalAlpha = 1
+    sx.globalCompositeOperation = 'source-over'
+    sx.filter = 'none'
+    sx.clearRect(0, 0, w, h)
+    sx.drawImage(cv, 0, 0, w, h)
+    // 立体は「コントラスト（陰影の濃さ）」で出す。色（彩度）はわざと上げない＝照明の色が濃くなりすぎない。
+    const c = 100 + this.relief * 55 // contrast 100→155%（控えめ・影を濃くハイライトを強く＝彫りが立つ）
+    cx.setTransform(1, 0, 0, 1, 0, 0)
+    cx.globalAlpha = 1
+    cx.globalCompositeOperation = 'source-over'
+    cx.clearRect(0, 0, w, h)
+    cx.filter = `contrast(${c}%)`
+    cx.drawImage(scratch, 0, 0, w, h)
+    cx.filter = 'none'
+  }
+
+  /** 立体強調の強さを設定。0=今と完全一致。 */
+  setRelief(v: number): void {
+    this.relief = Math.max(0, Math.min(1, v))
+    this.bump()
   }
 
   /** 出力(outCv)を「写真の部分だけ・写真の解像度・余白なし」で合成する。写真(mat)はフル解像度、
@@ -1797,15 +1782,6 @@ export class ImageLightEngine {
       oc.globalCompositeOperation = 'source-over'
       oc.clearRect(0, 0, ow, oh)
       oc.drawImage(this.lightCv, lbx, lby, lbw, lbh, 0, 0, ow, oh) // 光の box 領域→出力（写真モードと同じ枠取り）
-      // 立体感: 光だけ出力にも彫り(影)を乗せる（mat空間→出力）。Arena側 映像×光 で映像に影が出る。
-      const dshadeLO = this.activeScene >= 0 ? this.scenes[this.activeScene]?.depthShade : null
-      if (dshadeLO && this.depthStrength > 0) {
-        oc.globalCompositeOperation = 'soft-light'
-        oc.globalAlpha = this.depthStrength
-        oc.drawImage(dshadeLO, 0, 0, ow, oh)
-        oc.globalAlpha = 1
-        oc.globalCompositeOperation = 'source-over'
-      }
       return
     }
     if (!this.mat || !this.box || (maxI <= 0.004 && !flameLit)) {
@@ -1843,14 +1819,6 @@ export class ImageLightEngine {
     if (tone > 0.01) {
       oc.globalAlpha = tone
       oc.drawImage(this.lightCv, bx, by, bw, bh, 0, 0, ow, oh)
-      oc.globalAlpha = 1
-    }
-    // 立体感: 深度レリーフ(彫り)を写真と同寸(mat空間→出力)で overlay で1回重ねる。出力(Syphon/Arena)にも反映。
-    const dshadeOut = this.activeScene >= 0 ? this.scenes[this.activeScene]?.depthShade : null
-    if (dshadeOut && this.depthStrength > 0) {
-      oc.globalCompositeOperation = 'soft-light'
-      oc.globalAlpha = this.depthStrength
-      oc.drawImage(dshadeOut, 0, 0, ow, oh)
       oc.globalAlpha = 1
     }
     oc.globalCompositeOperation = 'destination-in'
@@ -2214,6 +2182,59 @@ export class ImageLightEngine {
     this.selected = [this.beams.length - 1]
     this.bump()
   }
+  /** 行灯さがし: 表示中の写真から「明るくて暖色に光っている塊」を見つけ、ステージ座標(LW×LH)で返す。
+   *  写真読込時/ボタン押下時に一回だけ走らせる想定（本番では走らせない）。重いAIは使わない。 */
+  detectLanterns(): { x: number; y: number }[] {
+    if (!this.mat || !this.box) return []
+    const dw = 240 // 縮小して走査（速い＆細かいノイズが潰れる）
+    const dh = Math.max(1, Math.round((dw * this.mat.height) / this.mat.width))
+    const sc = mk(dw, dh, true)
+    const ctx = sc.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return []
+    ctx.drawImage(this.mat, 0, 0, dw, dh)
+    const img = ctx.getImageData(0, 0, dw, dh)
+    const blobs = findWarmBlobs(img.data, dw, dh)
+    const box = this.box
+    // 縮小画像の重心 → 写真内割合 → 写真枠(box)経由でステージ座標へ。
+    return blobs.map((b) => ({
+      x: Math.round(box.x + (b.cx / dw) * box.w),
+      y: Math.round(box.y + (b.cy / dh) * box.h)
+    }))
+  }
+
+  /** 行灯さがしの結果を「光る玉(bulb)」の灯体として追加する（非破壊＝既存灯体は消さない・足すだけ）。
+   *  戻り値＝追加できた個数。0 なら見つからなかった（or 空きが無い）。⌘Z で一括で戻せる。 */
+  addLanternsFromImage(): number {
+    const pts = this.detectLanterns()
+    if (!pts.length || this.beams.length >= MAX_BEAMS) return 0
+    this.pushHistory()
+    this.rigCustomized = true // 配置をいじった → 写真下端への自動追従を止める（データ事故防止）
+    const warm: RGB3 = [255, 180, 90]
+    const start = this.beams.length
+    for (const p of pts) {
+      if (this.beams.length >= MAX_BEAMS) break
+      this.beams.push({
+        x: p.x,
+        y: p.y,
+        w0: 0,
+        w1: 0,
+        len: 0,
+        pan: 0,
+        tilt: 0,
+        zoom: 1,
+        gauge: 0.95,
+        color: warm.slice() as RGB3,
+        sp: makeSearchParams(this.rnd),
+        motif: 'bulb',
+        motifDiam: 44
+      })
+    }
+    const added = this.beams.length - start
+    if (added > 0) this.selected = Array.from({ length: added }, (_, i) => start + i)
+    this.bump()
+    return added
+  }
+
   setMotifDiam(v: number): void {
     const n = Math.max(4, Math.round(v))
     this.targets().forEach((b) => { b.motifDiam = n })
@@ -2727,7 +2748,6 @@ export class ImageLightEngine {
         this.pushHistory()
         this.scenes.push(scene)
         this.selectScene(this.scenes.length - 1)
-        this.generateDepthForScene(scene) // 背景の奥行きを裏で計算（立体感ライティング用）
         resolve()
       }
       im.onerror = (): void => resolve()
@@ -2735,143 +2755,6 @@ export class ImageLightEngine {
     })
   }
 
-  /** 立体感(深度ライティング)の強さを設定。0=今と完全一致。 */
-  setDepthStrength(v: number): void {
-    this.depthStrength = Math.max(0, Math.min(1, v))
-    this.bump()
-  }
-
-  /** 彫りの太さを設定（0=細部/1=面で太く）。彫りの焼き直しはデバウンス（ドラッグ中の固まり防止）。 */
-  setDepthWidth(v: number): void {
-    this.depthWidth = Math.max(0, Math.min(1, v))
-    this.scheduleDepthShadeRebuild()
-    this.bump()
-  }
-
-  /** 出っ張りの上の影の強さを設定（0=自然/上げると落ち影）。焼き直しはデバウンス。 */
-  setDepthShadow(v: number): void {
-    this.depthShadow = Math.max(0, Math.min(1, v))
-    this.scheduleDepthShadeRebuild()
-    this.bump()
-  }
-
-  /** 表示中シーンの彫り(depthShade)を ~120ms 後に1回だけ焼き直す。連続呼び出しは最後だけ実行。 */
-  private scheduleDepthShadeRebuild(): void {
-    if (this.depthShadeTimer) clearTimeout(this.depthShadeTimer)
-    this.depthShadeTimer = setTimeout(() => {
-      this.depthShadeTimer = null
-      const s = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
-      if (s?.depth) {
-        s.depthShade = this.buildShadeFor(s.depth)
-        this.bump()
-      }
-    }, 120)
-  }
-
-  /** 現在の設定(強さの天井gain・彫り幅・影)で 深度canvas → 立体感ゲイン(彫り) を焼く。 */
-  private buildShadeFor(dc: HTMLCanvasElement): HTMLCanvasElement {
-    const baseFrac = 0.04 + this.depthWidth * 0.16 // 4%..20%（大きいほど面で太く）
-    const baseRadius = Math.max(8, Math.round(Math.min(dc.width, dc.height) * baseFrac))
-    return buildDepthShadeCanvas(dc, { gain: 8, baseRadius, shadowGain: this.depthShadow * 6 })
-  }
-
-  /** 深度確認ビューの ON/OFF（編集画面にAIが読んだ奥行きを表示）。 */
-  setShowDepth(v: boolean): void {
-    this.showDepth = v
-    this.bump()
-  }
-
-  /** 表示中シーンの深度生成状態（UI表示用）。 */
-  activeDepthStatus(): 'none' | 'pending' | 'ready' | 'failed' {
-    const s = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
-    if (!s || s.kind !== 'photo') return 'none'
-    return s.depthStatus ?? 'none'
-  }
-
-  /** 背景写真の深度マップを(外部エンジンがあれば)生成し、立体感ゲインを焼いてシーンに持たせる。
-   *  失敗しても何もしない(立体感が使えないだけ＝今の見た目のまま)。1枚ずつ直列で torch 多重起動を防ぐ。 */
-  generateDepthForScene(scene: Scene): void {
-    if (scene.kind !== 'photo' || scene.depthShade) return
-    const api = (
-      globalThis as unknown as {
-        api?: {
-          runDepth?: (
-            input: Float32Array,
-            w: number,
-            h: number
-          ) => Promise<{ depth?: Float32Array; w?: number; h?: number; error?: string }>
-        }
-      }
-    ).api
-    const run = api?.runDepth
-    if (!run) {
-      scene.depthStatus = 'failed'
-      console.warn('[depth] エンジン未接続（runDepth が無い）')
-      return
-    }
-    scene.depthStatus = 'pending'
-    if (this.activeScene >= 0 && this.scenes[this.activeScene] === scene) this.bump()
-    console.log('[depth] 計算開始', scene.name)
-    this.depthChain = this.depthChain.then(async () => {
-      if (scene.depthShade) return
-      try {
-        const S = 518 // モデル入力(14の倍数)。アスペクトは後で mat へ伸ばし直すので固定でOK。
-        // 前処理: mat → 518×518 → ÷255 → ImageNet正規化 → NCHW float32
-        const pre = mk(S, S, true)
-        const pctx = pre.getContext('2d', { willReadFrequently: true })!
-        pctx.drawImage(scene.mat, 0, 0, S, S)
-        const px = pctx.getImageData(0, 0, S, S).data
-        const mean = [0.485, 0.456, 0.406]
-        const std = [0.229, 0.224, 0.225]
-        const plane = S * S
-        const input = new Float32Array(3 * plane)
-        for (let p = 0; p < plane; p++) {
-          const i = p * 4
-          input[p] = (px[i] / 255 - mean[0]) / std[0]
-          input[plane + p] = (px[i + 1] / 255 - mean[1]) / std[1]
-          input[2 * plane + p] = (px[i + 2] / 255 - mean[2]) / std[2]
-        }
-        const res = await run(input, S, S)
-        if (!res?.depth) {
-          scene.depthStatus = 'failed'
-          console.warn('[depth] 生成失敗', scene.name, res?.error || '')
-          if (this.activeScene >= 0 && this.scenes[this.activeScene] === scene) this.bump()
-          return
-        }
-        // 後処理: 生深度(near=大) → 0..255 グレー(near=明)の518×518 → mat サイズへ拡大
-        const depth = res.depth
-        let mn = Infinity
-        let mx = -Infinity
-        for (let i = 0; i < depth.length; i++) {
-          const v = depth[i]
-          if (v < mn) mn = v
-          if (v > mx) mx = v
-        }
-        const range = mx - mn || 1
-        const dimg = new ImageData(S, S)
-        for (let p = 0; p < plane; p++) {
-          const g = Math.max(0, Math.min(255, Math.round(((depth[p] - mn) / range) * 255)))
-          const i = p * 4
-          dimg.data[i] = g
-          dimg.data[i + 1] = g
-          dimg.data[i + 2] = g
-          dimg.data[i + 3] = 255
-        }
-        const small = mk(S, S)
-        small.getContext('2d')!.putImageData(dimg, 0, 0)
-        const dc = mk(scene.mat.width, scene.mat.height)
-        dc.getContext('2d')!.drawImage(small, 0, 0, dc.width, dc.height)
-        scene.depth = dc
-        scene.depthShade = this.buildShadeFor(dc)
-        scene.depthStatus = 'ready'
-        console.log('[depth] 計算完了', scene.name)
-        if (this.activeScene >= 0 && this.scenes[this.activeScene] === scene) this.bump()
-      } catch (e) {
-        scene.depthStatus = 'failed'
-        console.warn('[depth] 例外', String(e))
-      }
-    })
-  }
 
   /** ループ動画を棚に追加→即そのシーンへ。動画＝「動くアルベド（反射面）」として毎コマ
    *  取り込む。重い素材対策で内部は最大幅1280pxへ縮小（出力1080pには十分・以降は軽い）。 */
