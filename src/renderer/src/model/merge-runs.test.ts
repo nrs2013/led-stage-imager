@@ -59,4 +59,22 @@ describe('mergeRunCells + applyMerge (1本に結合)', () => {
     const a = run('a', [[0, 0], [1, 0]])
     expect(mergeRunCells(chartWith(a), ['a'])).toBeNull()
   })
+
+  it('preserves an orphan fixture (shape missing) while dropping the merged-away run', () => {
+    const a = run('a', [[0, 0], [1, 0], [2, 0]], true)
+    const b = run('b', [[4, 0], [5, 0], [6, 0]], true)
+    const base = chartWith(a, b)
+    const chart: Chart = {
+      ...base,
+      fixtures: [
+        ...base.fixtures,
+        { id: 'fx-orphan', shapeId: 'ghost', universe: 0, start: 100, mode: 'rgb' }
+      ]
+    }
+    const m = mergeRunCells(chart, ['a', 'b'])!
+    const { points, verts } = regenChain(m.vertCells)
+    const merged = applyMerge(chart, m.keepId, points, verts, m.dropIds)
+    expect(merged.fixtures.find((f) => f.id === 'fx-orphan')).toBeTruthy() // 無関係な孤児は残る
+    expect(merged.fixtures.find((f) => f.id === 'fx-b')).toBeFalsy() // 統合された run の灯体は消える
+  })
 })

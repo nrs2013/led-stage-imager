@@ -100,9 +100,8 @@ export function applyMerge(
   const shapes = chart.shapes
     .filter((s) => !drop.has(s.id))
     .map((s) => (s.id === keepId ? { ...s, points, verts } : s))
-  const fixtures: Fixture[] = chart.fixtures.filter((f) => {
-    const sh = chart.shapes.find((s) => s.id === f.shapeId)
-    return sh ? !drop.has(sh.id) : false
-  })
+  // 統合で消すのは drop(=統合された run)の灯体だけ。shape が見つからない孤児灯体は
+  // 巻き込まずそのまま残す（旧 ': false' は無関係な灯体まで消していた）。
+  const fixtures: Fixture[] = chart.fixtures.filter((f) => !drop.has(f.shapeId))
   return { ...chart, shapes, fixtures }
 }

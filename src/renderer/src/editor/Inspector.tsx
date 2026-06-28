@@ -224,7 +224,10 @@ export function Inspector(): React.JSX.Element {
               style={{ ...inputStyle, fontFamily: F.ui }}
               onChange={(e) => bulkPatch(ids, { mode: e.target.value as ChannelMode })}
             >
-              {CHANNEL_MODES.map((m) => (
+              {modesForFamily(
+                selShapes[0] ? (selShapes[0].family ?? familyOfType(selShapes[0].type)) : 'decor',
+                fxs[0]?.mode ?? 'rgb'
+              ).map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
                 </option>

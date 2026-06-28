@@ -9,18 +9,20 @@ export interface DecorApi {
     w: number,
     h: number
   ) => Promise<{ depth?: Float32Array; w?: number; h?: number; error?: string }>
-  /** Subscribe to Art-Net DMX packets forwarded from the main process. */
-  onDmx: (cb: (pkt: { universe: number; sequence: number; data: Uint8Array }) => void) => void
+  /** Subscribe to Art-Net DMX packets forwarded from the main process. Returns an unsubscribe. */
+  onDmx: (
+    cb: (pkt: { universe: number; sequence: number; data: Uint8Array }) => void
+  ) => () => void
   /** Publish an RGBA frame to the Syphon server. */
   publishFrame: (width: number, height: number, buffer: Uint8ClampedArray) => void
   /** Toggle the fullscreen preview window; resolves to the new open state. */
   togglePreview: () => Promise<boolean>
-  /** Notified when the preview window opens (true) or closes (false). */
-  onPreviewActive: (cb: (active: boolean) => void) => void
+  /** Notified when the preview window opens (true) or closes (false). Returns an unsubscribe. */
+  onPreviewActive: (cb: (active: boolean) => void) => () => void
   /** Push the current chart to the preview window. */
   sendChart: (chart: unknown) => void
-  /** Receive chart updates (preview window). */
-  onChartUpdate: (cb: (chart: unknown) => void) => void
+  /** Receive chart updates (preview window). Returns an unsubscribe. */
+  onChartUpdate: (cb: (chart: unknown) => void) => () => void
   /** List bindable IPv4 network interfaces. */
   listInterfaces: () => Promise<{ name: string; address: string }[]>
   /** Re-bind the Art-Net receiver to a NIC address. */

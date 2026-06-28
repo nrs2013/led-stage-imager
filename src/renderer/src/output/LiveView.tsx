@@ -27,19 +27,30 @@ export function LiveView({
     if (!canvas) return
     const renderer = new OutputRenderer(canvas)
     const api = (window as unknown as { api?: DecorApi }).api
+    let lastErrLog = 0
     const tick = (): void => {
-      const st = useStore.getState()
-      const { chart, dmxByUniverse } = st
-      // On Signal Loss: 信号が切れたユニバースを「保持」か「黒」かに（chart.settings.holdOnTimeout）
-      const dmx = effectiveDmxByUniverse(
-        dmxByUniverse,
-        st.lastSeenByUniverse,
-        chart.settings.holdOnTimeout,
-        Date.now()
-      )
-      renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
-      if (publish && api?.publishFrame) {
-        api.publishFrame(chart.canvas.w, chart.canvas.h, renderer.readRGBA())
+      // 1フレームの例外で出力(Syphon)が本番中ずっと固まらないよう、毎フレーム握って次へ進む。
+      try {
+        const st = useStore.getState()
+        const { chart, dmxByUniverse } = st
+        if (chart.canvas.w <= 0 || chart.canvas.h <= 0) return // 退化フレームはスキップ
+        // On Signal Loss: 信号が切れたユニバースを「保持」か「黒」かに（chart.settings.holdOnTimeout）
+        const dmx = effectiveDmxByUniverse(
+          dmxByUniverse,
+          st.lastSeenByUniverse,
+          chart.settings.holdOnTimeout,
+          Date.now()
+        )
+        renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
+        if (publish && api?.publishFrame) {
+          api.publishFrame(chart.canvas.w, chart.canvas.h, renderer.readRGBA())
+        }
+      } catch (err) {
+        const now = Date.now()
+        if (now - lastErrLog > 2000) {
+          lastErrLog = now
+          console.error('[LiveView] render tick failed, skipping frame', err)
+        }
       }
     }
     // setInterval (not requestAnimationFrame) so the Syphon output keeps publishing even

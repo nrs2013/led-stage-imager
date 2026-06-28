@@ -23,16 +23,16 @@ import { C, chrome } from './ui/tokens'
 const isOutput = typeof window !== 'undefined' && window.location.search.includes('output')
 
 interface DecorApi {
-  onPreviewActive?: (cb: (active: boolean) => void) => void
+  onPreviewActive?: (cb: (active: boolean) => void) => (() => void) | void
   sendChart?: (chart: unknown) => void
-  onChartUpdate?: (cb: (chart: unknown) => void) => void
-  onEditUndo?: (cb: () => void) => void
-  onEditRedo?: (cb: () => void) => void
-  onEditCopy?: (cb: () => void) => void
-  onEditPaste?: (cb: () => void) => void
+  onChartUpdate?: (cb: (chart: unknown) => void) => (() => void) | void
+  onEditUndo?: (cb: () => void) => (() => void) | void
+  onEditRedo?: (cb: () => void) => (() => void) | void
+  onEditCopy?: (cb: () => void) => (() => void) | void
+  onEditPaste?: (cb: () => void) => (() => void) | void
   nativeCopy?: () => void
   nativePaste?: () => void
-  onOpenChartPath?: (cb: (json: string) => void) => void
+  onOpenChartPath?: (cb: (json: string) => void) => (() => void) | void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -42,25 +42,32 @@ function usePreviewMirror(): void {
   useEffect(() => {
     const a = getApi()
     if (!a?.onPreviewActive) return
-    a.onPreviewActive((active) => {
+    const off = a.onPreviewActive((active) => {
       activeRef.current = active
       if (active) a.sendChart?.(useStore.getState().chart)
     })
-    return useStore.subscribe((state, prev) => {
+    const unsub = useStore.subscribe((state, prev) => {
       if (activeRef.current && state.chart !== prev.chart) a.sendChart?.(state.chart)
     })
+    return () => {
+      off?.()
+      unsub()
+    }
   }, [])
 }
 
 /** Output window: receive chart updates from the editor, Esc to close. */
 function useOutputReceiver(): void {
   useEffect(() => {
-    getApi()?.onChartUpdate?.((chart) => useStore.getState().setChart(chart as Chart))
+    const off = getApi()?.onChartUpdate?.((chart) => useStore.getState().setChart(chart as Chart))
     const onKey = (e: KeyboardEvent): void => {
       if (e.code === 'Escape') window.close()
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      off?.()
+      window.removeEventListener('keydown', onKey)
+    }
   }, [])
 }
 
@@ -83,7 +90,7 @@ function useMenuUndo(): void {
       const t = document.activeElement as HTMLElement | null
       return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
     }
-    a?.onEditUndo?.(() => {
+    const offUndo = a?.onEditUndo?.(() => {
       if (inText()) {
         document.execCommand('undo')
         return
@@ -92,7 +99,7 @@ function useMenuUndo(): void {
       if (st.imageLight && st.imageLightUndo) st.imageLightUndo()
       else st.undo()
     })
-    a?.onEditRedo?.(() => {
+    const offRedo = a?.onEditRedo?.(() => {
       if (inText()) {
         document.execCommand('redo')
         return
@@ -101,7 +108,7 @@ function useMenuUndo(): void {
       if (st.imageLight && st.imageLightRedo) st.imageLightRedo()
       else st.redo()
     })
-    a?.onEditCopy?.(() => {
+    const offCopy = a?.onEditCopy?.(() => {
       if (inText()) {
         a?.nativeCopy?.()
         return
@@ -110,7 +117,7 @@ function useMenuUndo(): void {
       if (st.imageLight && st.imageLightCopy) st.imageLightCopy()
       else st.copySelection()
     })
-    a?.onEditPaste?.(() => {
+    const offPaste = a?.onEditPaste?.(() => {
       if (inText()) {
         a?.nativePaste?.()
         return
@@ -131,16 +138,29 @@ function useMenuUndo(): void {
         }
       }
     })
+    return () => {
+      offUndo?.()
+      offRedo?.()
+      offCopy?.()
+      offPaste?.()
+    }
   }, [])
 }
 
 /** ダブルクリックで開かれた .ledimager（main から JSON が届く）を読み込んで表示する。 */
 function useOpenFile(): void {
   useEffect(() => {
-    getApi()?.onOpenChartPath?.((json) => {
+    const off = getApi()?.onOpenChartPath?.((json) => {
       try {
         const c = parseChart(json)
         const st = useStore.getState()
+        // 未保存の作業があるなら開く前に確認（ダブルクリック展開で黙って消えるのを防ぐ）
+        if (
+          st.chart.shapes.length > 0 &&
+          !window.confirm('現在の作品を閉じて開きますか？（保存していない変更は消えます）')
+        ) {
+          return
+        }
         st.setImageLight(false)
         st.setChart(c)
         st.setStarted(true)
@@ -148,6 +168,7 @@ function useOpenFile(): void {
         console.error('[open-file] parse failed', e)
       }
     })
+    return () => off?.()
   }, [])
 }
 

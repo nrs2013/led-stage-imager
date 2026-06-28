@@ -117,10 +117,8 @@ export function patchRows(chart: Chart): MvrFixtureRow[] {
     const reps = repeatCount(sh)
     const p0 = sh.points[0] ?? { x: 0, y: 0 }
     for (let i = 0; i < reps; i++) {
-      const a =
-        reps > 1
-          ? addressAt(fx.universe, fx.start, fx.mode, fx.addressStep, i)
-          : { universe: fx.universe, start: fx.start }
+      // reps===1 でも addressAt を通す＝範囲外の start を universe 跨ぎで正規化（i=0 は従来と同値）。
+      const a = addressAt(fx.universe, fx.start, fx.mode, fx.addressStep, i)
       // neon: each tube (character) lands at its real glyph centre on the chart;
       // stars: both skies (White/Blue) sit at the field's centre;
       // festoon: each bulb at its true spot on the sagging wire

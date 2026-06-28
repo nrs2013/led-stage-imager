@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { inputStyle, C } from './tokens'
 
 /**
@@ -62,6 +62,8 @@ export function NumberField({
       holdRef.current = null
     }
   }
+  // 押しっぱなしの最中にこのフィールドが消えても（Inspector の作り替え等）タイマーを必ず止める。
+  useEffect(() => () => endHold(), [])
 
   const spinBtn: React.CSSProperties = {
     flex: 1,

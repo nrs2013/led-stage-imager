@@ -654,13 +654,18 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => {
       if (s.chart.layers.length <= 1) return {}
       const layers = s.chart.layers.filter((l) => l.id !== id)
-      const dead = new Set(s.chart.shapes.filter((sh) => sh.layerId === id).map((sh) => sh.id))
+      // 旧データ等で layerId 未設定(孤児)の図形は「先頭レイヤー所属」とみなすのがアプリ全体のルール
+      // (sh.layerId ?? layers[0].id)。削除判定も同じ規則に合わせないと、先頭レイヤーを消したとき
+      // 孤児図形が消えずに別の曲ページへ勝手に移動してしまう。homeId は削除前の先頭から取る。
+      const homeId = s.chart.layers[0]?.id
+      const belongs = (sh: (typeof s.chart.shapes)[number]): boolean => (sh.layerId ?? homeId) === id
+      const dead = new Set(s.chart.shapes.filter(belongs).map((sh) => sh.id))
       return {
         chart: {
           ...s.chart,
           layers,
           activeLayerId: s.chart.activeLayerId === id ? layers[0].id : s.chart.activeLayerId,
-          shapes: s.chart.shapes.filter((sh) => sh.layerId !== id),
+          shapes: s.chart.shapes.filter((sh) => !belongs(sh)),
           fixtures: s.chart.fixtures.filter((f) => !dead.has(f.shapeId))
         },
         selectedId: null,

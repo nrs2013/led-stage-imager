@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cellsBetween, shapeIntersectsRect, shapeBounds, pasteDelta } from './geometry'
+import { cellsBetween, shapeIntersectsRect, shapeBounds, pasteDelta, isCellRun } from './geometry'
 import { BULB_DEFAULT_DIAMETER } from '../render/bulb'
 
 describe('cellsBetween (paint path)', () => {
@@ -110,5 +110,24 @@ describe('bulb geometry', () => {
     }
     const d = pasteDelta([line], { x: 100, y: 200 })
     expect(d).toEqual({ x: 90, y: 180 })
+  })
+})
+
+describe('isCellRun（.5刻みセル列の判定・負座標でも崩れない）', () => {
+  const run = (pts: [number, number][]): import('../model/types').Shape => ({
+    id: 'r',
+    type: 'freehand',
+    points: pts.map(([x, y]) => ({ x, y })),
+    display: 'fill',
+    strokeWidth: 1
+  })
+  it('正座標のセル中心は true', () => {
+    expect(isCellRun(run([[0.5, 0.5], [1.5, 0.5], [2.5, 0.5]]))).toBe(true)
+  })
+  it('原点より外（負座標）へ動いてもセル列のままなら true', () => {
+    expect(isCellRun(run([[-0.5, -0.5], [-1.5, 0.5]]))).toBe(true)
+  })
+  it('セル中心でない点は false', () => {
+    expect(isCellRun(run([[0.5, 0.5], [1.2, 0.5]]))).toBe(false)
   })
 })

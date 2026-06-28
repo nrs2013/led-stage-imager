@@ -16,6 +16,16 @@ describe('chart-file', () => {
   it('rejects an unsupported version', () => {
     expect(() => parseChart(JSON.stringify({ version: 99 }))).toThrow(/version/i)
   })
+  it('throws a clear error on JSON null / non-object (not a raw TypeError)', () => {
+    expect(() => parseChart('null')).toThrow(/invalid chart file/i)
+    expect(() => parseChart('42')).toThrow(/invalid chart file/i)
+  })
+  it('repairs a v2 chart missing layers/activeLayerId so render cannot crash later', () => {
+    const c = parseChart(JSON.stringify({ version: 2, shapes: [] }))
+    expect(Array.isArray(c.layers)).toBe(true)
+    expect(c.layers.length).toBeGreaterThan(0)
+    expect(c.activeLayerId).toBe(c.layers[0].id)
+  })
   it('migrates a v1 chart: underlay and shapes wrapped into one layer', () => {
     const v1 = {
       version: 1,

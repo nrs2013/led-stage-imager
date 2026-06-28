@@ -134,7 +134,9 @@ export class LowSmokeFX {
     const gl = this.gl
     if (!gl || !this.ok || !this.prog) return
     if (!this.t0) this.t0 = now
-    const dt = this.last ? Math.min(0.05, (now - this.last) / 1000) : 1 / 60
+    // 長く OFF だった後の再開は this.last が古く dt が巨大 → 初回扱いにして1コマ目の飛びを防ぐ。
+    const gap = now - this.last
+    const dt = !this.last || gap > 250 ? 1 / 60 : Math.min(0.05, gap / 1000)
     this.last = now
     const P = this.params
     // 溜まり: ON でゆっくり溜まる / OFF で引く

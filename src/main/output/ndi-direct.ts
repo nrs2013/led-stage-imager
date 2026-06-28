@@ -112,6 +112,7 @@ export function startNdiDirect(name: string, libPath: string): boolean {
 
     if (!init()) {
       console.warn('[ndi-direct] NDIlib_initialize 失敗（CPU 非対応の可能性）')
+      sendVideo = getConns = sendDestroy = null // 失敗時に関数ポインタを残さない（再起動でリーク防止）
       return false
     }
     sender = create({
@@ -122,6 +123,7 @@ export function startNdiDirect(name: string, libPath: string): boolean {
     })
     if (!sender) {
       console.warn('[ndi-direct] NDI 送信機の作成失敗')
+      sendVideo = getConns = sendDestroy = null
       return false
     }
     // 受け手の接続数を 1 秒ごとにポーリングしてキャッシュ。
@@ -137,6 +139,7 @@ export function startNdiDirect(name: string, libPath: string): boolean {
   } catch (e) {
     console.warn('[ndi-direct] 起動失敗（ライブラリ未配置/非対応）:', e)
     sender = null
+    sendVideo = getConns = sendDestroy = null
     return false
   }
 }

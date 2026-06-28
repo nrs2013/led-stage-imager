@@ -38,4 +38,16 @@ describe('parseArtDmx', () => {
     const r = parseArtDmx(pkt)
     expect(r!.data.length).toBe(4)
   })
+
+  it('rejects a packet whose declared length exceeds the real payload (runt/corrupt)', () => {
+    const pkt = buildPacket(0, 5, [1, 2, 3, 4])
+    pkt[16] = 0x02 // overwrite declared length to 512 while only 4 bytes follow
+    pkt[17] = 0x00
+    expect(parseArtDmx(pkt)).toBeNull()
+  })
+
+  it('rejects length 0 and length > 512', () => {
+    expect(parseArtDmx(buildPacket(0, 0, []))).toBeNull()
+    expect(parseArtDmx(buildPacket(0, 0, new Array(520).fill(7)))).toBeNull()
+  })
 })

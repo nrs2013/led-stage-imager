@@ -34,7 +34,7 @@ interface DecorApi {
     media: { file: string; dataUrl: string }[]
   ) => Promise<boolean>
   autosaveImageLightRead?: () => Promise<{ json: string; media: Record<string, string> } | null>
-  onMidiMessage?: (cb: (msg: [number, number, number]) => void) => void
+  onMidiMessage?: (cb: (msg: [number, number, number]) => void) => (() => void) | void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -142,7 +142,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   useEffect(() => {
     engine.onMidiInputs = (names) => getApi()?.reportMidiInputs?.(names)
     // CoreMIDI(ネイティブ)から届く MIDI を engine の共通処理へ。LEARN も発火もこれで動く。
-    getApi()?.onMidiMessage?.((msg) => engine.handleMidiMessage(msg[0], msg[1], msg[2]))
+    const off = getApi()?.onMidiMessage?.((msg) => engine.handleMidiMessage(msg[0], msg[1], msg[2]))
+    // 照明モードを出入りする度に古い engine へリスナーが積もる(=多重発火/リーク)のを防ぐ。
+    return () => {
+      off?.()
+      engine.onMidiInputs = null
+    }
   }, [engine])
 
   // 起動時は前回データを自動で開かない＝普通のアプリと同じ「開いたら真っ白」
@@ -165,6 +170,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         // 🔴 最重要: このセッションでユーザーが触るまでは絶対に書かない（起動時の自動現出/
         // race でも前回データを潰さない）。
         if (!userTouchedRef.current) return
+        // 🔴 復元の途中では絶対に書かない＝作りかけのショーで il-autosave を上書きする事故を防ぐ。
+        // 復元が終わると最後の bump() でこのタイマーが再スケジュールされ、完全な状態が保存される。
+        if (engine.restoring) return
         // さらに“本物の中身”がある時だけ書く（デフォルト灯体だけの状態では書かない）。
         if (!engine.hasSaveableContent()) return
         const { json, media } = await engine.serializeShow()
@@ -189,6 +197,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const maskInputRef = useRef<HTMLInputElement>(null)
   const imageMotifInputRef = useRef<HTMLInputElement>(null)
   const colorPickRef = useRef<HTMLInputElement>(null)
+  const psheetRef = useRef<HTMLDivElement>(null) // パッチ表（行リスト）— ↑↓キーで選択行を移動
+  const savingRef = useRef(false) // ⌘S 保存中フラグ（二重起動防止）
   // 写真の 4 辺スケールワープ — どの辺をつかんでいるか + 開始位置 + ドラッグ開始時の box
   const warpDragRef = useRef<{
     edge: 'top' | 'bottom' | 'left' | 'right'
@@ -611,6 +621,33 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     return () => window.removeEventListener('keydown', onKey)
   }, [engine])
 
+  // パッチ表（行リスト）に焦点がある時だけ ↑↓ で選択行を前後に移動。
+  // 単独選択を動かすので下のインライン編集パネルも自動で追従。
+  // グローバル矢印（灯体微移動／マスター）とは stopPropagation で衝突回避。
+  const onPatchKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.code !== 'ArrowUp' && e.code !== 'ArrowDown') return
+    // 行内の入力欄（UNIV/ADDR/MODE）編集中は奪わない＝数値スピナー優先。
+    const tag = (e.target as HTMLElement).tagName
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+    const n = engine.beams.length
+    if (n === 0) return
+    const cur = engine.selected.length === 1 ? engine.selected[0] : -1
+    const next =
+      e.code === 'ArrowDown'
+        ? cur < 0
+          ? 0
+          : Math.min(n - 1, cur + 1)
+        : cur < 0
+          ? n - 1
+          : Math.max(0, cur - 1)
+    engine.selectBeam(next)
+    e.preventDefault()
+    e.stopPropagation()
+    psheetRef.current
+      ?.querySelector(`[data-psrow="${next}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }
+
   // ---- 仕込み操作（ステージ上のポインタ）
   const evPos = (e: React.PointerEvent | React.MouseEvent): { x: number; y: number } => {
     const cv = displayRef.current!
@@ -906,6 +943,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const saveShow = async (): Promise<void> => {
     const a = getApi()
     if (!a?.saveImageLightShow) return
+    if (savingRef.current) return // 保存中の二重起動を防ぐ（⌘S 連打で保存ダイアログが重なるのを止める）
+    savingRef.current = true
     flash('保存中…')
     try {
       const { json, media } = await engine.serializeShow()
@@ -913,6 +952,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       flash(path ? '保存しました' : 'キャンセル')
     } catch {
       flash('保存に失敗')
+    } finally {
+      savingRef.current = false
     }
   }
   const openShow = async (): Promise<void> => {
@@ -2293,7 +2334,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 <span className="il-stepn">1</span>Select
               </div>
               {lightingOnly ? (
-                <div className="il-psheet">
+                <div
+                  className="il-psheet"
+                  ref={psheetRef}
+                  tabIndex={0}
+                  onKeyDown={onPatchKey}
+                >
                   <div className="il-pshd">
                     <button
                       className={'il-fxall' + (engine.isAllSelected() ? ' on' : '')}
@@ -2308,11 +2354,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     const psSel = engine.isSelected(i)
                     const psClash = dmxClash.includes(i + 1)
                     return (
-                      <div key={i} className="il-psrow-wrap">
+                      <div key={i} className="il-psrow-wrap" data-psrow={i}>
                       <div
                         className={'il-psrow' + (psSel ? ' on' : '')}
-                        onClick={(ev) => (ev.shiftKey ? engine.toggleSelectBeam(i) : engine.selectBeam(i))}
-                        title={'灯体 ' + (i + 1)}
+                        onClick={(ev) => {
+                          if (ev.shiftKey) engine.toggleSelectBeam(i)
+                          else engine.selectBeam(i)
+                          psheetRef.current?.focus({ preventScroll: true })
+                        }}
+                        title={'灯体 ' + (i + 1) + '（クリック後 ↑↓ で行を移動）'}
                       >
                         <span className="il-psnum">{i + 1}</span>
                         <span
@@ -3597,7 +3647,8 @@ const IL_CSS = `
 .il2-dmxinfo{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--il-amber);margin:5px 0 2px;}
 .il2-dmxnote{font-size:9px;color:var(--il-dim);line-height:1.4;margin-top:4px;}
 .il2-dmxwarn{font-size:10px;line-height:1.45;color:var(--il-red);background:rgba(224,114,106,0.08);border:0.5px solid rgba(224,114,106,0.4);border-radius:5px;padding:6px 8px;margin:6px 0 2px;}
-.il-psheet{display:flex;flex-direction:column;margin-top:2px;}
+.il-psheet{display:flex;flex-direction:column;margin-top:2px;outline:none;}
+.il-psheet:focus-visible{outline:0.5px solid rgba(123,197,232,0.45);outline-offset:2px;border-radius:8px;}
 .il-pshd{display:flex;align-items:center;gap:10px;padding:0 4px 6px;}
 .il-pscol{flex:1;display:flex;gap:10px;font-size:10px;letter-spacing:0.12em;color:var(--il-faint);}
 .il-pscol span:first-child{width:30px;}

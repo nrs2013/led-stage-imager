@@ -16,6 +16,10 @@ export function parseArtDmx(buf: Buffer): ArtDmxPacket | null {
   const subUni = buf.readUInt8(14)
   const net = buf.readUInt8(15)
   const length = buf.readUInt16BE(16) // length is big-endian
+  // 宣言長が DMX 範囲外、または実ペイロードより長い（=ラント/破損パケット）なら丸ごと捨てる。
+  // subarray は黙ってクランプするので、信用すると本番中にチャンネルが欠けて灯体が消える。
+  if (length < 1 || length > 512) return null
+  if (18 + length > buf.length) return null
   const universe = (net << 8) | subUni
   const data = new Uint8Array(buf.subarray(18, 18 + length))
   return { universe, sequence, data }

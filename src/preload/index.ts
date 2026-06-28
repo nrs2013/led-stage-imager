@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 // Custom APIs for renderer
@@ -11,20 +11,28 @@ const api = {
     h: number
   ): Promise<{ depth?: Float32Array; w?: number; h?: number; error?: string }> =>
     ipcRenderer.invoke('depth:run', input, w, h),
-  onDmx: (cb: (pkt: { universe: number; sequence: number; data: Uint8Array }) => void): void => {
-    ipcRenderer.on('artnet:dmx', (_e, pkt) => cb(pkt))
+  onDmx: (
+    cb: (pkt: { universe: number; sequence: number; data: Uint8Array }) => void
+  ): (() => void) => {
+    const h = (_e: IpcRendererEvent, pkt: { universe: number; sequence: number; data: Uint8Array }): void => cb(pkt)
+    ipcRenderer.on('artnet:dmx', h)
+    return () => ipcRenderer.removeListener('artnet:dmx', h)
   },
   publishFrame: (width: number, height: number, buffer: Uint8ClampedArray): void => {
     ipcRenderer.send('syphon:frame', { width, height, buffer })
   },
   // Fullscreen preview window (output on a second display).
   togglePreview: (): Promise<boolean> => ipcRenderer.invoke('preview:toggle'),
-  onPreviewActive: (cb: (active: boolean) => void): void => {
-    ipcRenderer.on('preview:active', (_e, v) => cb(v))
+  onPreviewActive: (cb: (active: boolean) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, v: boolean): void => cb(v)
+    ipcRenderer.on('preview:active', h)
+    return () => ipcRenderer.removeListener('preview:active', h)
   },
   sendChart: (chart: unknown): void => ipcRenderer.send('chart:sync', chart),
-  onChartUpdate: (cb: (chart: unknown) => void): void => {
-    ipcRenderer.on('chart:update', (_e, c) => cb(c))
+  onChartUpdate: (cb: (chart: unknown) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, c: unknown): void => cb(c)
+    ipcRenderer.on('chart:update', h)
+    return () => ipcRenderer.removeListener('chart:update', h)
   },
   // Status / network
   listInterfaces: (): Promise<{ name: string; address: string }[]> =>
@@ -35,21 +43,31 @@ const api = {
   // renderer が検出した MIDI 入力ポート名をメインへ通知（ステータスバー表示用・Web MIDI 用の名残）
   reportMidiInputs: (names: string[]): void => ipcRenderer.send('midi:inputs', names),
   // CoreMIDI(ネイティブ)からの MIDI メッセージ受信 [status, data1, data2]
-  onMidiMessage: (cb: (msg: [number, number, number]) => void): void => {
-    ipcRenderer.on('midi:message', (_e, msg) => cb(msg))
+  onMidiMessage: (cb: (msg: [number, number, number]) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, msg: [number, number, number]): void => cb(msg)
+    ipcRenderer.on('midi:message', h)
+    return () => ipcRenderer.removeListener('midi:message', h)
   },
   // Edit menu (Cmd+Z/C/V routed from the app menu so the canvas gets them)
-  onEditUndo: (cb: () => void): void => {
-    ipcRenderer.on('edit:undo', () => cb())
+  onEditUndo: (cb: () => void): (() => void) => {
+    const h = (): void => cb()
+    ipcRenderer.on('edit:undo', h)
+    return () => ipcRenderer.removeListener('edit:undo', h)
   },
-  onEditRedo: (cb: () => void): void => {
-    ipcRenderer.on('edit:redo', () => cb())
+  onEditRedo: (cb: () => void): (() => void) => {
+    const h = (): void => cb()
+    ipcRenderer.on('edit:redo', h)
+    return () => ipcRenderer.removeListener('edit:redo', h)
   },
-  onEditCopy: (cb: () => void): void => {
-    ipcRenderer.on('edit:copy', () => cb())
+  onEditCopy: (cb: () => void): (() => void) => {
+    const h = (): void => cb()
+    ipcRenderer.on('edit:copy', h)
+    return () => ipcRenderer.removeListener('edit:copy', h)
   },
-  onEditPaste: (cb: () => void): void => {
-    ipcRenderer.on('edit:paste', () => cb())
+  onEditPaste: (cb: () => void): (() => void) => {
+    const h = (): void => cb()
+    ipcRenderer.on('edit:paste', h)
+    return () => ipcRenderer.removeListener('edit:paste', h)
   },
   nativeCopy: (): void => ipcRenderer.send('edit:native-copy'),
   nativePaste: (): void => ipcRenderer.send('edit:native-paste'),
@@ -61,8 +79,10 @@ const api = {
   chartNew: (): Promise<boolean> => ipcRenderer.invoke('chart:new'),
   openChartFile: (): Promise<string | null> => ipcRenderer.invoke('chart:open'),
   // ダブルクリックで開かれたファイルの中身(JSON)がメインから届く
-  onOpenChartPath: (cb: (json: string) => void): void => {
-    ipcRenderer.on('chart:open-path', (_e, json) => cb(json))
+  onOpenChartPath: (cb: (json: string) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, json: string): void => cb(json)
+    ipcRenderer.on('chart:open-path', h)
+    return () => ipcRenderer.removeListener('chart:open-path', h)
   },
   autosaveWrite: (json: string): Promise<boolean> =>
     ipcRenderer.invoke('chart:autosave-write', json),

@@ -29,11 +29,11 @@ export function fileToDataUrl(file: File): Promise<string | null> {
 }
 
 /** Natural pixel size of an image — this is what the canvas snaps to on chart load. */
-export function imageSize(dataUrl: string): Promise<{ w: number; h: number }> {
-  return new Promise((resolve, reject) => {
+export function imageSize(dataUrl: string): Promise<{ w: number; h: number } | null> {
+  return new Promise((resolve) => {
     const img = new Image()
     img.onload = (): void => resolve({ w: img.naturalWidth, h: img.naturalHeight })
-    img.onerror = reject
+    img.onerror = (): void => resolve(null) // 壊れた/非対応画像は reject せず null（呼び側で握りつぶし防止）
     img.src = dataUrl
   })
 }

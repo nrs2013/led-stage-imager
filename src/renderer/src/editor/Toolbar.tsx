@@ -105,7 +105,7 @@ const TOOL_GROUPS: { label: string | null; tools: ToolDef[] }[] = [
 
 interface PreviewApi {
   togglePreview?: () => Promise<boolean>
-  onPreviewActive?: (cb: (active: boolean) => void) => void
+  onPreviewActive?: (cb: (active: boolean) => void) => (() => void) | void
 }
 const previewApi = (): PreviewApi | undefined =>
   (window as unknown as { api?: PreviewApi }).api
@@ -128,7 +128,8 @@ export function Toolbar({
   const [previewOpen, setPreviewOpen] = useState(false)
   const hasPreview = !!previewApi()?.togglePreview
   useEffect(() => {
-    previewApi()?.onPreviewActive?.(setPreviewOpen)
+    const off = previewApi()?.onPreviewActive?.(setPreviewOpen)
+    return () => off?.()
   }, [])
 
   return (

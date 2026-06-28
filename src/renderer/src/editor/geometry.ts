@@ -271,7 +271,11 @@ export function isCellRun(shape: Shape): boolean {
     shape.type === 'freehand' &&
     shape.points.length >= 1 &&
     shape.points.every(
-      (p) => Math.abs((p.x % 1) - 0.5) < 1e-6 && Math.abs((p.y % 1) - 0.5) < 1e-6
+      // p.x - floor(p.x) は負座標でも 0..1 の小数部を返す（JS の % は被除数の符号を残すため
+      // 負側で .5 判定が壊れる＝原点より外へドラッグしたセル列がくっきり描画から外れる事故を防ぐ）
+      (p) =>
+        Math.abs(p.x - Math.floor(p.x) - 0.5) < 1e-6 &&
+        Math.abs(p.y - Math.floor(p.y) - 0.5) < 1e-6
     )
   )
 }

@@ -257,7 +257,8 @@ export class FlameFX {
       const k = p.fx.toFixed(4) + ',' + p.fy.toFixed(4)
       seen.add(k)
       const cur = this.sustained.get(k)
-      if (!cur || cur.relAt != null) {
+      // cur が MAXSHOTS の shift() で this.shots から押し出されていたら作り直す（消えっぱなし防止）
+      if (!cur || cur.relAt != null || !this.shots.includes(cur)) {
         const s = this.mk(p.fx, p.fy, p.str ?? 1, true, p.dir ?? -Math.PI / 2)
         this.sustained.set(k, s)
       } else {

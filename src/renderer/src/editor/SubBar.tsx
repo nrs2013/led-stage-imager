@@ -54,8 +54,13 @@ export function SubBar(): React.JSX.Element {
   const loadUnderlay = async (): Promise<void> => {
     const dataUrl = await pickImage()
     if (!dataUrl) return
-    const { w, h } = await imageSize(dataUrl)
-    applyChartImage(dataUrl, w, h)
+    const size = await imageSize(dataUrl)
+    if (!size) {
+      // eslint-disable-next-line no-alert
+      alert('画像を読み込めませんでした（壊れているか、対応していない形式です）')
+      return
+    }
+    applyChartImage(dataUrl, size.w, size.h)
   }
   const newChart = (): void => {
     if (
@@ -73,6 +78,13 @@ export function SubBar(): React.JSX.Element {
     window.dispatchEvent(new CustomEvent('decor:fit')) // ビューを全体表示にリセット
   }
   const openChart = async (): Promise<void> => {
+    // 新規と同じく、未保存の作業があるなら開く前に確認（Open で黙って消えるのを防ぐ）
+    if (
+      chart.shapes.length > 0 &&
+      !window.confirm('現在の作品を閉じて開きますか？（保存していない変更は消えます）')
+    ) {
+      return
+    }
     try {
       const c = await openChartFromFile()
       if (c) setChart(c)

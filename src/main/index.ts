@@ -1,6 +1,14 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, screen, Menu, session } from 'electron'
 import { join, extname } from 'path'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync, unlinkSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, renameSync } from 'fs'
+import {
+  writeFile as writeFileAsync,
+  rename as renameAsync,
+  unlink as unlinkAsync,
+  readdir as readdirAsync,
+  mkdir as mkdirAsync,
+  stat as statAsync
+} from 'fs/promises'
 import { networkInterfaces } from 'os'
 import { createServer } from 'http'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -151,13 +159,19 @@ function openPreview(): void {
       backgroundThrottling: false
     }
   })
+  // 本番出力ウィンドウでも window.open / target=_blank は新規ウィンドウを作らせず外部ブラウザへ。
+  previewWindow.webContents.setWindowOpenHandler((details) => {
+    shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     previewWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '?output&live')
   } else {
     previewWindow.loadFile(join(__dirname, '../renderer/index.html'), { search: 'output&live' })
   }
   previewWindow.webContents.on('did-finish-load', () => {
-    if (lastChart) previewWindow?.webContents.send('chart:update', lastChart)
+    if (lastChart && previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed())
+      previewWindow.webContents.send('chart:update', lastChart)
   })
   previewWindow.on('closed', () => {
     previewWindow = null
@@ -343,7 +357,10 @@ app.whenReady().then(() => {
   })
   ipcMain.on('chart:sync', (_e, chart) => {
     lastChart = chart
-    previewWindow?.webContents.send('chart:update', chart)
+    // Esc/ディスプレイ抜けで出力窓を閉じた直後、webContents は破棄済みでも previewWindow は
+    // まだ非nullの瞬間がある。破棄済みへ send すると本番中に例外が飛ぶので二重ガード。
+    if (previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed())
+      previewWindow.webContents.send('chart:update', chart)
   })
 
   // Network interface list + receiver re-bind + engine status (for the status lamps).
@@ -484,7 +501,12 @@ app.whenReady().then(() => {
   const autosavePath = (): string => join(app.getPath('userData'), 'autosave.decor.json')
   ipcMain.handle('chart:autosave-write', (_e, json: string) => {
     try {
-      writeFileSync(autosavePath(), json, 'utf8')
+      // アトミック書き込み: tmp に書いてから rename（同一フォルダの rename は APFS で不可分）。
+      // 直書きだと書き込み中にクラッシュ＝唯一のクラッシュ復元ファイルが壊れて復元不能になる。
+      const p = autosavePath()
+      const tmp = p + '.tmp'
+      writeFileSync(tmp, json, 'utf8')
+      renameSync(tmp, p)
       return true
     } catch {
       return false
@@ -504,30 +526,38 @@ app.whenReady().then(() => {
   const ilAutoDir = (): string => join(app.getPath('userData'), 'il-autosave')
   ipcMain.handle(
     'imagelight:autosave-write',
-    (_e, json: string, media: { file: string; dataUrl: string }[]) => {
+    async (_e, json: string, media: { file: string; dataUrl: string }[]) => {
       try {
         const dir = ilAutoDir()
-        mkdirSync(join(dir, 'media'), { recursive: true })
-        writeFileSync(join(dir, 'show.json'), json, 'utf8')
-        const keep = new Set((media ?? []).map((m) => m.file.replace(/^media\//, '')))
-        try {
-          for (const f of readdirSync(join(dir, 'media'))) {
-            if (!keep.has(f)) unlinkSync(join(dir, 'media', f)) // 使われなくなった素材を掃除
-          }
-        } catch {
-          /* noop */
-        }
+        // すべて非同期(libuv threadpool)で書く＝大きな写真/動画の書き込みでメインスレッド(＝Syphon/NDI
+        // 発行・Art-Net中継)を止めないようにする。順序は維持: ①新素材→②show.json確定→③旧素材掃除。
+        await mkdirAsync(join(dir, 'media'), { recursive: true })
+        // ① 新しい素材を書く
         for (const m of media ?? []) {
           const b64 = m.dataUrl.slice(m.dataUrl.indexOf(',') + 1)
           const buf = Buffer.from(b64, 'base64')
           const p = join(dir, m.file)
           // 同名・同サイズなら書き直さない（写真の無駄な再書き込み＝ディスク負荷を避ける）
           try {
-            if (existsSync(p) && statSync(p).size === buf.length) continue
+            const st = await statAsync(p)
+            if (st.size === buf.length) continue
           } catch {
-            /* noop */
+            /* 無ければ新規書き込みへ */
           }
-          writeFileSync(p, buf)
+          await writeFileAsync(p, buf)
+        }
+        // ② show.json をアトミックに確定（tmp→rename）
+        const tmp = join(dir, 'show.json.tmp')
+        await writeFileAsync(tmp, json, 'utf8')
+        await renameAsync(tmp, join(dir, 'show.json'))
+        // ③ 使われなくなった素材を掃除（確定後に行うので欠落リスク無し）
+        const keep = new Set((media ?? []).map((m) => m.file.replace(/^media\//, '')))
+        try {
+          for (const f of await readdirAsync(join(dir, 'media'))) {
+            if (!keep.has(f)) await unlinkAsync(join(dir, 'media', f))
+          }
+        } catch {
+          /* noop */
         }
         return true
       } catch {

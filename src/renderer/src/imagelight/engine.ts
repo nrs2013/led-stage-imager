@@ -457,7 +457,7 @@ function makeSearchParams(rnd: () => number): SearchParams {
 
 export class ImageLightEngine {
   /** 編集画面の表示用フレーム（写真＋余白・マーカー無し）。 */
-  readonly frame = mk(IW, IH, true)
+  readonly frame = mk(IW, IH)
   /** Syphon出力用（写真の部分だけ・写真の解像度・余白なし）。編集画面は frame、出力は outCv。 */
   readonly outCv = mk(16, 9, true)
   outW = 16
@@ -465,17 +465,19 @@ export class ImageLightEngine {
   private outBlurCv = mk(16, 9)
 
   // 内部バッファ
-  private lightCv = mk(IW, IH, true)
-  private workCv = mk(IW, IH, true)
+  private lightCv = mk(IW, IH)
+  private workCv = mk(IW, IH)
   private airCv = mk(IW, IH)
   private smoothCv = mk(IW, IH)
   private vmCv = mk(IW, IH) // 受け系(雨/雪/煙)の「matter×光マップ」合成用スクラッチ（drawImageのみ）
   private vmc = this.vmCv.getContext('2d')!
   private noiseCv = mk(IW, IH)
   private noiseTile: HTMLCanvasElement
+  private noisePattern: CanvasPattern | null = null // 静的タイル→毎フレーム createPattern しないよう一度だけ生成して使い回す
+  private motifRankCache: number[] = [] // モチーフチェイスの順位を毎フレーム1回 O(n) で先計算（effI の O(n^2) 回避）
   private fc = this.frame.getContext('2d')!
-  private lc = this.lightCv.getContext('2d', { willReadFrequently: true })!
-  private wc = this.workCv.getContext('2d', { willReadFrequently: true })!
+  private lc = this.lightCv.getContext('2d')!
+  private wc = this.workCv.getContext('2d')!
 
   // ---- スペシャルエフェクト(特効): プロシージャル炎(フレーマー) ----
   // flame.glow を光マップに足す→既存の写真×光で「セットが炎に照らされる」。flame.body は前面に重ねる。
@@ -766,6 +768,9 @@ export class ImageLightEngine {
   depthWidth = 0.4
   /** 出っ張りの上の影の強さ 0..1（0=自然/上げると落ち影・上げ過ぎると作り物っぽい）。 */
   depthShadow = 0
+  /** 深度スライダーのドラッグ中、毎tickで全解像度の彫りを焼き直すとメインスレッドが固まるので、
+   *  焼き直しは止めてから ~120ms にまとめる（値の反映と再描画は即時・彫りだけ遅延）。 */
+  private depthShadeTimer: ReturnType<typeof setTimeout> | null = null
   /** 深度確認ビュー: ON で編集画面に「AIが読んだ奥行きマップ」を表示（出力は通常のまま）。 */
   showDepth = false
   /** 深度生成を1枚ずつ直列化（torch多重起動でのOOM回避）。 */
@@ -846,6 +851,9 @@ export class ImageLightEngine {
   box: { x: number; y: number; w: number; h: number } | null = null
   // ユーザーが灯体の配置を一度でもいじったか（写真下端への自動追従を止めるフラグ）
   private rigCustomized = false
+  // 公演を復元している最中か。復元は async で途中に await を挟むため、その間に自動保存タイマーが
+  // 走ると「作りかけのショー」で il-autosave を上書き＝データ消失する。復元中は自動保存を止める。
+  restoring = false
   // 灯体コピペ用の内部クリップボード（選択した複数灯体を丸ごと複製）
   private beamClip: Beam[] | null = null
 
@@ -901,8 +909,21 @@ export class ImageLightEngine {
       patterns: JSON.parse(JSON.stringify(this.patterns)),
       userColors: this.userColors.map((c) => c.slice() as RGB3),
       chasePalette: this.chasePalette.map((c) => c.slice() as RGB3),
-      // 写真/動画オブジェクトは参照共有・fix だけ独立コピー
-      scenes: this.scenes.map((s) => ({ ...s, fix: s.fix?.map((f) => ({ ...f })) })),
+      // 写真/動画オブジェクトは参照共有・fix と pieces(配置)だけ独立コピー（Undoで戻せるように）
+      scenes: this.scenes.map((s) => ({
+        ...s,
+        fix: s.fix?.map((f) => ({ ...f })),
+        pieces: s.pieces?.map((p) => ({
+          id: p.id,
+          src: { ...p.src },
+          corners: [
+            { ...p.corners[0] },
+            { ...p.corners[1] },
+            { ...p.corners[2] },
+            { ...p.corners[3] }
+          ] as Piece['corners']
+        }))
+      })),
       sfxChaseMode: this.sfxChaseMode,
       sfxChaseMs: this.sfxChaseMs
     }
@@ -915,7 +936,20 @@ export class ImageLightEngine {
     this.patterns = JSON.parse(JSON.stringify(s.patterns))
     this.userColors = s.userColors.map((c) => c.slice() as RGB3)
     this.chasePalette = s.chasePalette.map((c) => c.slice() as RGB3)
-    this.scenes = s.scenes.map((sc) => ({ ...sc, fix: sc.fix?.map((f) => ({ ...f })) }))
+    this.scenes = s.scenes.map((sc) => ({
+      ...sc,
+      fix: sc.fix?.map((f) => ({ ...f })),
+      pieces: sc.pieces?.map((p) => ({
+        id: p.id,
+        src: { ...p.src },
+        corners: [
+          { ...p.corners[0] },
+          { ...p.corners[1] },
+          { ...p.corners[2] },
+          { ...p.corners[3] }
+        ] as Piece['corners']
+      }))
+    }))
     this.sfxChaseMode = s.sfxChaseMode
     this.sfxChaseMs = s.sfxChaseMs
     const ai = s.activeScene >= 0 && s.activeScene < this.scenes.length ? s.activeScene : -1
@@ -1024,8 +1058,14 @@ export class ImageLightEngine {
   /** 表示中シーンが動画か（毎フレーム描き直しが要る）。 */
   activeIsVideo = (): boolean =>
     this.activeScene >= 0 && this.scenes[this.activeScene]?.kind === 'video'
-  /** ESCパニックのフェード進行中フラグ。 */
-  fading = false
+  /** シーン明かりフェード／パニックフェードを別々に持つ。共有1個だと、片方の完了が
+   *  もう片方の「描き続けて」信号を消し、暗転(panic)中に画面が固まる事故になる。 */
+  private sceneFadeActive = false
+  private panicActive = false
+  /** どちらかのフェードが進行中か（描画ループの継続判定 isAnimating に使う）。 */
+  get fading(): boolean {
+    return this.sceneFadeActive || this.panicActive
+  }
   /** モチーフ専用チェイス（テスト用＝モチーフだけを順番に点けたり消したり）。 */
   motifChase = false
   /** 毎フレーム描き直しが必要か（FX中・動画・パニックフェード中）。これが false かつ
@@ -1066,8 +1106,7 @@ export class ImageLightEngine {
     // モチーフ専用チェイス：モチーフだけを「モチーフ内の並び順」で順番に点滅
     // （通常灯体が間に挟まっても等間隔になるよう、モチーフ内の順位で位相をずらす）。
     if (b.motif && this.motifChase) {
-      let rank = 0
-      for (let j = 0; j < i; j++) if (this.beams[j].motif) rank++
+      const rank = this.motifRankCache[i] ?? 0 // 先計算済み（render frame 冒頭で O(n)）
       v *= chaseK(this.fxp.chase, ms, rank)
     }
     return v
@@ -1359,9 +1398,14 @@ export class ImageLightEngine {
       const hue: RGB3 =
         m > 0.004 ? [col[0] / m, col[1] / m, col[2] / m] : [col[0], col[1], col[2]]
       const gate = p.mode === 'beam8' ? shutterGate(fx, data) : 1
-      b.pan = pose.pan * 90 // ±90°
-      b.tilt = pose.tilt * 180 // ±180°
-      b.zoom = pose.zoom >= 0 ? 1 + pose.zoom * 3 : 1 + pose.zoom * 0.85 // 128=×1 / 全開×4 / 全閉×0.15
+      // PTZ チャンネルを持つモード(beam6/beam8)だけ向き/ズームを上書き。
+      // rgb/dim 等の非ビームモードでは beamPose が 0 を返すため、上書きすると
+      // 仕込んだ pan/tilt/zoom が毎フレーム home に潰れる＝配置データ事故になる。
+      if (p.mode === 'beam6' || p.mode === 'beam8') {
+        b.pan = pose.pan * 90 // ±90°
+        b.tilt = pose.tilt * 180 // ±180°
+        b.zoom = pose.zoom >= 0 ? 1 + pose.zoom * 3 : 1 + pose.zoom * 0.85 // 128=×1 / 全開×4 / 全閉×0.15
+      }
       b.color = hue
       b.gauge = m * gate
     }
@@ -1375,6 +1419,13 @@ export class ImageLightEngine {
     const QW = IW
     const QH = IH
     const beams = this.beams
+    // モチーフ順位を1パスで先計算（effI 内の 0..i 走査＝O(n^2) を O(n) に）
+    const mr = this.motifRankCache
+    mr.length = beams.length
+    for (let k = 0, rc = 0; k < beams.length; k++) {
+      mr[k] = rc
+      if (beams[k].motif) rc++
+    }
     const Is = beams.map((b, i) => this.effI(b, i, ms))
     const maxI = Is.length ? Math.max(...Is) : 0
     let maxNonMotifI = 0
@@ -1437,7 +1488,7 @@ export class ImageLightEngine {
       // ノイズは「光があるところだけ」（無灯部の底上げ禁止）
       const nmc = this.noiseCv.getContext('2d')!
       nmc.globalCompositeOperation = 'source-over'
-      const pat = nmc.createPattern(this.noiseTile, 'repeat')
+      const pat = this.noisePattern ?? (this.noisePattern = nmc.createPattern(this.noiseTile, 'repeat'))
       if (pat) {
         nmc.fillStyle = pat
         nmc.fillRect(0, 0, QW, QH)
@@ -2417,17 +2468,25 @@ export class ImageLightEngine {
     const sel = this.targets()
     if (!sel.length) return
     this.pushHistory('dmx')
-    let next = 1
+    // 選択外のパッチ済み灯体が占有する最大の「次の空き」絶対チャンネル(0始まり)を全 universe 横断で求める。
+    let maxAbs = 0
     for (const b of this.beams) {
-      if (b.dmx && b.dmx.universe === 0 && !sel.includes(b)) {
-        next = Math.max(next, b.dmx.start + channelCount(b.dmx.mode))
+      if (b.dmx && !sel.includes(b)) {
+        const end = b.dmx.universe * 512 + (b.dmx.start - 1) + channelCount(b.dmx.mode)
+        maxAbs = Math.max(maxAbs, end)
       }
     }
+    let universe = Math.floor(maxAbs / 512)
+    let next = (maxAbs % 512) + 1
     for (const b of sel) {
       const mode = b.dmx?.mode ?? ('beam8' as ChannelMode)
-      const start = Math.min(512, next)
-      b.dmx = { universe: 0, start, mode, fixedColor: b.dmx?.fixedColor, addressStep: b.dmx?.addressStep }
-      next = start + channelCount(mode)
+      const count = channelCount(mode)
+      if (next + count - 1 > 512) {
+        universe++
+        next = 1
+      }
+      b.dmx = { universe, start: next, mode, fixedColor: b.dmx?.fixedColor, addressStep: b.dmx?.addressStep }
+      next += count
     }
     this.bump()
   }
@@ -2440,17 +2499,22 @@ export class ImageLightEngine {
     )
     return [...detectDmxOverlaps(patches)].sort((a, b) => a - b).map((i) => i + 1)
   }
-  /** 全灯体に空きアドレスを一括自動割当（universe 0・番号順に 1 から step-up＝衝突しない）。
+  /** 全灯体に空きアドレスを一括自動割当（番号順に 1 から step-up＝衝突しない・512を超えたら次のuniverseへ繰り上げ）。
    *  既存の控えのモード/色は維持し、番地だけ詰め直す。⌘Z で戻せる。 */
   autoPatchAll(): void {
     if (!this.beams.length) return
     this.pushHistory('dmx')
+    let universe = 0
     let next = 1
     for (const b of this.beams) {
       const mode = b.dmx?.mode ?? ('beam8' as ChannelMode)
-      const start = Math.min(512, next)
-      b.dmx = { universe: 0, start, mode, fixedColor: b.dmx?.fixedColor, addressStep: b.dmx?.addressStep }
-      next = start + channelCount(mode)
+      const count = channelCount(mode)
+      if (next + count - 1 > 512) {
+        universe++
+        next = 1
+      }
+      b.dmx = { universe, start: next, mode, fixedColor: b.dmx?.fixedColor, addressStep: b.dmx?.addressStep }
+      next += count
     }
     this.bump()
   }
@@ -2677,20 +2741,31 @@ export class ImageLightEngine {
     this.bump()
   }
 
-  /** 彫りの太さを設定（0=細部/1=面で太く）。表示中シーンの彫りを焼き直して即反映。 */
+  /** 彫りの太さを設定（0=細部/1=面で太く）。彫りの焼き直しはデバウンス（ドラッグ中の固まり防止）。 */
   setDepthWidth(v: number): void {
     this.depthWidth = Math.max(0, Math.min(1, v))
-    const s = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
-    if (s?.depth) s.depthShade = this.buildShadeFor(s.depth)
+    this.scheduleDepthShadeRebuild()
     this.bump()
   }
 
-  /** 出っ張りの上の影の強さを設定（0=自然/上げると落ち影）。表示中シーンを焼き直して即反映。 */
+  /** 出っ張りの上の影の強さを設定（0=自然/上げると落ち影）。焼き直しはデバウンス。 */
   setDepthShadow(v: number): void {
     this.depthShadow = Math.max(0, Math.min(1, v))
-    const s = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
-    if (s?.depth) s.depthShade = this.buildShadeFor(s.depth)
+    this.scheduleDepthShadeRebuild()
     this.bump()
+  }
+
+  /** 表示中シーンの彫り(depthShade)を ~120ms 後に1回だけ焼き直す。連続呼び出しは最後だけ実行。 */
+  private scheduleDepthShadeRebuild(): void {
+    if (this.depthShadeTimer) clearTimeout(this.depthShadeTimer)
+    this.depthShadeTimer = setTimeout(() => {
+      this.depthShadeTimer = null
+      const s = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+      if (s?.depth) {
+        s.depthShade = this.buildShadeFor(s.depth)
+        this.bump()
+      }
+    }, 120)
   }
 
   /** 現在の設定(強さの天井gain・彫り幅・影)で 深度canvas → 立体感ゲイン(彫り) を焼く。 */
@@ -3232,9 +3307,11 @@ export class ImageLightEngine {
     s.breath = s.fire = s.wave = s.bolt = s.rainbow = s.zoompulse = false
     Object.assign(s, L.fxst)
     if (L.fxp) this.fxp = JSON.parse(JSON.stringify(L.fxp))
-    L.lights.forEach((f, i) => {
+    // 復元データ(古い/壊れた/手編集 show.json)で lights が無い/壊れていても落ちないよう防御。
+    const lights = Array.isArray(L.lights) ? L.lights : []
+    lights.forEach((f, i) => {
       const b = this.beams[i]
-      if (!b) return
+      if (!b || !f || !Array.isArray(f.color)) return
       b.gauge = f.gauge
       b.color = f.color.slice() as RGB3
       b.pan = f.pan
@@ -3302,6 +3379,8 @@ export class ImageLightEngine {
    *  現在値→目標値へ補間。FX(真偽)は即適用（補間不可）。panicFade と同じ rAF 方式。 */
   private startSceneFade(L: Look): void {
     if (!L) return
+    // 復元データが壊れていても落ちないよう lights を検証して使う。
+    const lights = Array.isArray(L.lights) ? L.lights : []
     const from = this.beams.map((b) => ({
       gauge: b.gauge,
       color: b.color.slice() as RGB3,
@@ -3319,7 +3398,7 @@ export class ImageLightEngine {
     this.chasePalette = (L.chasePalette ?? []).map((c) => c.slice() as RGB3)
     // mute/solo は真偽値＝フェード不可。明かり切替と同時に即反映する。
     this.beams.forEach((b, i) => {
-      const t = L.lights[i]
+      const t = lights[i]
       if (t) {
         b.mute = !!t.mute
         b.solo = !!t.solo
@@ -3329,16 +3408,16 @@ export class ImageLightEngine {
     const dur = this.sceneFadeMs
     const seq = this.sceneFadeSeq
     const t0 = performance.now()
-    this.fading = true
+    this.sceneFadeActive = true
     const lerp = (a: number, b: number, k: number): number => a + (b - a) * k
     const step = (now: number): void => {
-      if (this.sceneFadeSeq !== seq || !this.fading) return // 割込み/暗転で中断
+      if (this.sceneFadeSeq !== seq || !this.sceneFadeActive) return // 割込み/暗転で中断
       const k = dur > 0 ? Math.min(1, (now - t0) / dur) : 1
       const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2 // easeInOut
       this.beams.forEach((b, i) => {
         const f = from[i]
-        const t = L.lights[i]
-        if (!f || !t) return
+        const t = lights[i]
+        if (!f || !t || !Array.isArray(t.color)) return
         b.gauge = lerp(f.gauge, t.gauge, e)
         b.color = [
           Math.round(lerp(f.color[0], t.color[0], e)),
@@ -3352,16 +3431,16 @@ export class ImageLightEngine {
       this.bump(false)
       if (k < 1) requestAnimationFrame(step)
       else {
-        L.lights.forEach((t, i) => {
+        lights.forEach((t, i) => {
           const b = this.beams[i]
-          if (!b) return
+          if (!b || !t || !Array.isArray(t.color)) return
           b.gauge = t.gauge
           b.color = t.color.slice() as RGB3
           b.pan = t.pan
           b.tilt = t.tilt
           b.zoom = t.zoom
         })
-        this.fading = false
+        this.sceneFadeActive = false
         this.bump(false)
       }
     }
@@ -3736,7 +3815,8 @@ export class ImageLightEngine {
   wake(): void {
     this.panicSeq++
     this.panicGain = 1
-    this.fading = false
+    this.panicActive = false
+    this.sceneFadeActive = false
   }
   blackout(): void {
     // 暗転の直前の look（FX・明るさ）を履歴へ積む → ⌘Z で直前へ戻せる。stopAllFx は
@@ -3744,7 +3824,8 @@ export class ImageLightEngine {
     this.pushHistory()
     this.panicSeq++
     this.panicGain = 0
-    this.fading = false
+    this.panicActive = false
+    this.sceneFadeActive = false
     this.stopAllFx(false)
     this.activePattern = -1
     this.bump(false)
@@ -3763,17 +3844,17 @@ export class ImageLightEngine {
     const my = ++this.panicSeq
     const t1 = performance.now()
     const from = this.panicGain
-    this.fading = true // 描画ループに「フェード中＝描き続けて」と知らせる
+    this.panicActive = true // 描画ループに「フェード中＝描き続けて」と知らせる
     const step = (now: number): void => {
       if (this.panicSeq !== my) {
-        this.fading = false
+        this.panicActive = false
         return
       }
       const k = Math.min(1, (now - t1) / 1500)
       this.panicGain = from * (1 - k)
       if (k < 1) requestAnimationFrame(step)
       else {
-        this.fading = false
+        this.panicActive = false
         this.stopAllFx(false)
         this.activePattern = -1
         this.bump(false)
@@ -4144,6 +4225,20 @@ export class ImageLightEngine {
   /** 公演を読み込む。show.json の文字列と「media/ファイル名 → dataURL」の対応を渡す。
    *  既存のシーン/明かりを置き換える（写真も動画も復元）。 */
   async restoreShow(showJson: string, mediaByFile: Record<string, string>): Promise<boolean> {
+    // 復元中フラグを立てる（finally で必ず下ろす）。途中の await 中に自動保存タイマーが
+    // 作りかけのショーを書き出して il-autosave を潰すのを防ぐ。
+    this.restoring = true
+    try {
+      return await this.restoreShowInner(showJson, mediaByFile)
+    } finally {
+      this.restoring = false
+    }
+  }
+
+  private async restoreShowInner(
+    showJson: string,
+    mediaByFile: Record<string, string>
+  ): Promise<boolean> {
     let show: ShowFile
     try {
       show = JSON.parse(showJson) as ShowFile

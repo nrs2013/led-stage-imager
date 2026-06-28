@@ -92,8 +92,9 @@ export class SparklerFX {
         tw: Math.random() * 6.28, twf: 18 + Math.random() * 26, hot: 0.7 + Math.random() * 0.3,
         apex: null, child: false, up: Math.sin(ang) < -0.4 // 上向き噴出のときだけ頂点焼き切れ
       })
-      if (this.parts.length > CAP) this.parts.shift()
     }
+    // CAP超過は最後に1回だけまとめて切り落とす（per-push の shift() は O(n²)＝カクつき源）
+    if (this.parts.length > CAP) this.parts.splice(0, this.parts.length - CAP)
   }
 
   tick(now: number): void {
@@ -107,6 +108,7 @@ export class SparklerFX {
       const vigor = 0.85 + 0.3 * this.warmth
       // 試作の単点 26*rate*60/秒 を点の数だけ。立ち上がりで密度も上げる。
       this.rem += this.pts.length * 26 * P.rate * this.warmth * dt * 60
+      if (this.rem > 700) this.rem = 700 // 長い空白後に大量バーストしないよう上限
       const n = Math.floor(this.rem)
       this.rem -= n
       if (n > 0) this.emit(Math.min(n, 700), vigor)
@@ -139,6 +141,8 @@ export class SparklerFX {
         }
       }
     }
+    // pop で増えた子粒も含め CAP を最後に一括で守る（emit の上限を pop が抜けてしまう穴を塞ぐ）
+    if (this.parts.length > CAP) this.parts.splice(0, this.parts.length - CAP)
     this.renderBody(now)
     this.renderGlow()
   }

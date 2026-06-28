@@ -415,7 +415,9 @@ export function decorChannelColor(
   }
   if (effect === 'fill') {
     const thr = h / M
-    const pos = e / Math.max(1, M - 1)
+    // center は e の最大値が (N-1)/2 で M-1 を超えるため、実効最大値で正規化して端まで満ちるようにする。
+    const eMax = direction === 'center' ? (N - 1) / 2 : M - 1
+    const pos = e / Math.max(1, eMax)
     return [c1[0], c1[1], c1[2], pos <= thr ? 1 : 0.06]
   }
   if (effect === 'theater') {

@@ -7,7 +7,7 @@ interface DmxPacket {
   data: Uint8Array | number[]
 }
 interface DecorApi {
-  onDmx?: (cb: (pkt: DmxPacket) => void) => void
+  onDmx?: (cb: (pkt: DmxPacket) => void) => (() => void) | void
 }
 
 /** Subscribes to Art-Net packets forwarded from the main process and feeds the store.
@@ -16,9 +16,10 @@ export function useDmxBridge(): void {
   useEffect(() => {
     const api = (window as unknown as { api?: DecorApi }).api
     if (!api?.onDmx) return
-    api.onDmx((pkt) => {
+    const off = api.onDmx((pkt) => {
       const data = pkt.data instanceof Uint8Array ? pkt.data : Uint8Array.from(pkt.data)
       useStore.getState().setUniverseData(pkt.universe, data)
     })
+    return () => off?.() // StrictMode/HMR で二重登録されないよう購読を解除
   }, [])
 }

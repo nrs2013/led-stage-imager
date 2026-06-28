@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../state/store'
 import { C, F, chrome } from '../ui/tokens'
+import { SIGNAL_TIMEOUT_MS } from '../dmx/resolve'
 
 interface NetApi {
   listInterfaces?: () => Promise<{ name: string; address: string }[]>
@@ -71,11 +72,12 @@ export function StatusBar(): React.JSX.Element {
         <span style={{ ...chip, color: C.faint, borderColor: C.border }}>No Signal</span>
       ) : (
         universes.map((u) => {
-          const live = now - (lastSeen[u] || 0) < 2000
+          const live = now - (lastSeen[u] ?? 0) < SIGNAL_TIMEOUT_MS // 信号断の判定(resolve.ts)と同じ定数で揃える
           const col = live ? C.green : '#e0726a'
           return (
+            // 表示は1始まりに統一（formatDmx/Inspector/FillDialog と同じ）。内部キー u は0始まりのまま。
             <span key={u} style={{ ...chip, color: col, borderColor: col }}>
-              U{u} ●
+              U{u + 1} ●
             </span>
           )
         })

@@ -35,9 +35,19 @@ export function parseChart(json: string): Chart {
   } catch {
     throw new Error('Invalid chart file: not valid JSON')
   }
+  if (obj === null || typeof obj !== 'object') throw new Error('Invalid chart file: not a chart')
   const c = obj as Record<string, unknown>
   if (c.version === 1) return migrateV1(c)
   if (c.version !== 2) throw new Error(`Unsupported chart version: ${c.version}`)
   const chart = c as unknown as Chart
-  return { ...chart, shapes: coerceFamilies(chart.shapes ?? []) }
+  // layers / activeLayerId の不変条件を復元時に保証する（壊れた/旧/手編集 show.json で
+  // activeLayerOf が落ちて白画面になるのを防ぐ）。shapes は従来どおり family 補完。
+  const layers: Layer[] =
+    Array.isArray(chart.layers) && chart.layers.length
+      ? chart.layers
+      : [{ id: 'layer_1', name: 'CHART 1', underlay: null, visible: true }]
+  const activeLayerId = layers.some((l) => l.id === chart.activeLayerId)
+    ? chart.activeLayerId
+    : layers[0].id
+  return { ...chart, layers, activeLayerId, shapes: coerceFamilies(chart.shapes ?? []) }
 }

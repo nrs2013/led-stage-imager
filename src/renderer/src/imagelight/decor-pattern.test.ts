@@ -194,4 +194,10 @@ describe('decorChannelColor', () => {
     const revTail = decorChannelColor(2, 6, 'meteor', 'rev', C1, C2, 1.2, 0)[3]
     expect(revHead).toBeGreaterThan(revTail)
   })
+
+  it('fill / center: 閾値内で外寄りchも満ちる（旧 pos>1 で満ちないバグの回帰）', () => {
+    // N=6,M=3。t*speed=2.1 → thr=0.7。ch1 は e=1.5 → pos=0.6(修正後)で満ちる（旧 0.75 では満ちなかった）。
+    const a = decorChannelColor(1, 6, 'fill', 'center', C1, C2, 1, 2.1)[3]
+    expect(a).toBeCloseTo(1, 6)
+  })
 })

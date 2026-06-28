@@ -82,6 +82,10 @@ export function useAutosave(): void {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         const c = useStore.getState().chart
+        // 空っぽのチャートでクラッシュ復元バックアップを上書きしない（SHOW MODE を空で開いて
+        // 5秒放置→前回の続きが消える事故を防ぐ）。中身ができてからだけ書き込む。
+        const isBlank = c.shapes.length === 0 && c.layers.every((l) => l.underlay == null)
+        if (isBlank) return
         void writeBackup(serializeChart(c)).catch(() => {})
       }, DEBOUNCE_MS)
     })
