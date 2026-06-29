@@ -1828,10 +1828,23 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     max={100}
                     value={Math.round(engine.relief * 100)}
                     onChange={(e) => engine.setRelief(+e.target.value / 100)}
-                    title="もとの写真に描き込まれた陰影を濃くして“立体”を呼び戻す（コントラスト＋彩度）。0=今まで通り。上げ過ぎるとギラつくので控えめに。AIなし・軽い後処理。"
+                    title="もとの写真に描き込まれた陰影を濃くして“立体”を呼び戻す（コントラスト）。0=今まで通り。上げ過ぎるとギラつくので控えめに。AIなし・軽い後処理。"
                     style={{ flex: 1 }}
                   />
                   <span className="il2-pv">{Math.round(engine.relief * 100)}</span>
+                </div>
+                <div className="il2-segrow">
+                  <span className="il2-seglbl">方向の立体</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round(engine.lumReliefStrength * 100)}
+                    onChange={(e) => engine.setLumRelief(+e.target.value / 100)}
+                    title="AIなしの“深度”。写真の明るさを高さに見立て、左上から光を当てた向きの陰影を足す＝彫りが立体的に起きる。写真ごとに自動。上げ過ぎると不自然になるので控えめに。"
+                    style={{ flex: 1 }}
+                  />
+                  <span className="il2-pv">{Math.round(engine.lumReliefStrength * 100)}</span>
                 </div>
               </div>
 

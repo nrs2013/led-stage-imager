@@ -38,6 +38,7 @@ import {
 } from './effects'
 import { composeColorRatio } from '../render/compose'
 import { findWarmBlobs } from './lantern-detect'
+import { embossFromLuminance } from './relief-map'
 import { alignSnap, equalSnapX, type Pt } from './snap'
 import { drawStreetLampLit } from '../render/streetlamp'
 import { drawChandelierLit } from '../render/chandelier'
@@ -210,6 +211,8 @@ export interface Scene {
   /** ピース（写真の一部を切り抜いて 4 隅コーナーピンで貼り付ける）の並び。
    *  シーンに紐づき、後ろにあるピースほど上に描かれる。 */
   pieces?: Piece[]
+  /** AIなし立体: 写真の明るさから作る方向つきエンボス(浮き彫り)マップ。mat と同寸・soft-lightで重ねる。 */
+  lumRelief?: HTMLCanvasElement | null
 }
 
 /** 写真の一部を切り抜いて、ステージ上に 4 隅コーナーピンで貼り付ける単位。 */
@@ -759,6 +762,9 @@ export class ImageLightEngine {
   /** 立体強調 0..1。もとの写真に描き込まれた陰影をコントラストで濃くして“立体”を呼び戻す後処理。
    *  0=今と完全一致（後処理なし）。線も形もAIも足さない・GPU後処理1回。 */
   relief = 0
+  /** 方向の立体 0..1（AIなし深度）。写真の明るさから作ったエンボスを soft-light で重ね、
+   *  光の向きに応じた陰影を足す。0=なし。各写真の lumRelief を読込時に1回だけ作って毎フレームは軽い。 */
+  lumReliefStrength = 0
   selected: number[] = [0] // 選択中の灯体index（複数可）。空=未選択／全部入=ALL
   scenes: Scene[] = []
   activeScene = -1
@@ -1532,6 +1538,16 @@ export class ImageLightEngine {
           wc.drawImage(this.lightCv, 0, 0)
           wc.globalAlpha = 1
         }
+        // 方向の立体(AIなし深度): 写真の明るさエンボスを soft-light で重ねる（写真の形でこの後クリップ）。
+        const lrel = this.activeScene >= 0 ? this.scenes[this.activeScene]?.lumRelief : null
+        if (lrel && this.lumReliefStrength > 0) {
+          wc.setTransform(Q, 0, 0, Q, 0, 0)
+          wc.globalCompositeOperation = 'soft-light'
+          wc.globalAlpha = this.lumReliefStrength
+          wc.drawImage(lrel, b.x, b.y, b.w, b.h)
+          wc.globalAlpha = 1
+          wc.setTransform(1, 0, 0, 1, 0, 0)
+        }
         wc.setTransform(Q, 0, 0, Q, 0, 0)
         wc.globalCompositeOperation = 'destination-in'
         wc.drawImage(this.mat, b.x, b.y, b.w, b.h)
@@ -1740,6 +1756,36 @@ export class ImageLightEngine {
     this.bump()
   }
 
+  /** 方向の立体（AIなし深度）の強さを設定。0=なし。 */
+  setLumRelief(v: number): void {
+    this.lumReliefStrength = Math.max(0, Math.min(1, v))
+    this.bump()
+  }
+
+  /** 写真(mat)の明るさから方向つきエンボス(浮き彫り)マップを1回だけ作る。≤900px の縮小サイズで返す。
+   *  合成側(composeWorkCanvas/composeOutput)の drawImage が描画先サイズへ毎回拡大するので、mat 同寸へ
+   *  引き伸ばして保持する必要はない（見た目同一・保持メモリ約1/18＝OOM対策）。失敗時は null。 */
+  private buildLumRelief(mat: HTMLCanvasElement): HTMLCanvasElement | null {
+    try {
+      if (mat.width <= 0 || mat.height <= 0) return null
+      const dw = Math.min(900, mat.width) // 走査は縮小（速い・ノイズ低減）
+      const dh = Math.max(1, Math.round((dw * mat.height) / mat.width))
+      const sc = mk(dw, dh, true)
+      const sctx = sc.getContext('2d', { willReadFrequently: true })
+      if (!sctx) return null
+      sctx.drawImage(mat, 0, 0, dw, dh)
+      const src = sctx.getImageData(0, 0, dw, dh)
+      const emb = embossFromLuminance(src.data, dw, dh, { dx: 1, dy: 1, gain: 2.4 })
+      const id = new ImageData(dw, dh)
+      id.data.set(emb)
+      const small = mk(dw, dh)
+      small.getContext('2d')!.putImageData(id, 0, 0)
+      return small // 拡大は合成時に任せる（mat 同寸の重複バッファを持たない）
+    } catch {
+      return null
+    }
+  }
+
   /** 出力(outCv)を「写真の部分だけ・写真の解像度・余白なし」で合成する。写真(mat)はフル解像度、
    *  ソフトな光は lightCv の box 領域を引き伸ばす（写真だけシャープに保つ）。編集画面とは別物。 */
   private composeOutput(maxI: number): void {
@@ -1819,6 +1865,14 @@ export class ImageLightEngine {
     if (tone > 0.01) {
       oc.globalAlpha = tone
       oc.drawImage(this.lightCv, bx, by, bw, bh, 0, 0, ow, oh)
+      oc.globalAlpha = 1
+    }
+    // 方向の立体(AIなし深度): 出力(Syphon/NDI)にも mat 同寸でエンボスを soft-light で重ねる。
+    const lrelO = this.activeScene >= 0 ? this.scenes[this.activeScene]?.lumRelief : null
+    if (lrelO && this.lumReliefStrength > 0) {
+      oc.globalCompositeOperation = 'soft-light'
+      oc.globalAlpha = this.lumReliefStrength
+      oc.drawImage(lrelO, 0, 0, ow, oh)
       oc.globalAlpha = 1
     }
     oc.globalCompositeOperation = 'destination-in'
@@ -2745,6 +2799,7 @@ export class ImageLightEngine {
           mat: this.albedoOf(im),
           thumb: this.makeThumbFrom(im, w, h)
         }
+        scene.lumRelief = this.buildLumRelief(scene.mat) // AIなし立体マップを読込時に1回だけ
         this.pushHistory()
         this.scenes.push(scene)
         this.selectScene(this.scenes.length - 1)
