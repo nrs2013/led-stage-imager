@@ -606,3 +606,116 @@ function lanternLit(
   glow(ctx, x, by + lh * 0.22, d * 0.03, mix(hue, W, 0.6), 0.45 * I)
   void warmIron
 }
+
+/* ===== 一灯ヴァージョン（リアル）：2026-06-30 のむさん承認モックを移植 =====
+ * 真鍮の固体物として「不透過」で描き（写真を遮蔽＝本物が立つ）、ランタンの灯りだけ
+ * 既存灯体と同じ作法で加算（縦長の芯・控えめハロー・色は卓RGBの{hue,I}）。
+ * d = ランプ全高(px)相当のスケール。中心(cx,cy)はランタン中心。 */
+export function drawStreetLamp1Lit(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  d: number,
+  rgb: RGB
+): void {
+  const { hue, intensity: I } = bulbHueIntensity(rgb)
+  if (I <= 0.004) return
+  const S = d / 940
+  const yy = (m: number): number => cy + (m - 162) * S
+  const hh = (h: number): number => h * S
+  const lw0 = (k: number): number => Math.max(0.6, k * S)
+  const brass = (half: number): CanvasGradient => {
+    const g = ctx.createLinearGradient(cx - hh(half), 0, cx + hh(half), 0)
+    g.addColorStop(0, '#140e05'); g.addColorStop(0.07, '#473a17'); g.addColorStop(0.19, '#8a712e')
+    g.addColorStop(0.34, '#f3e7ad'); g.addColorStop(0.44, '#d8ba60'); g.addColorStop(0.58, '#ad9039')
+    g.addColorStop(0.79, '#6f5b23'); g.addColorStop(0.92, '#352b14'); g.addColorStop(1, '#0d0904')
+    return g
+  }
+  const seg = (yT: number, yB: number, hT: number, hB: number): void => {
+    ctx.beginPath(); ctx.moveTo(cx - hh(hT), yy(yT)); ctx.lineTo(cx + hh(hT), yy(yT))
+    ctx.lineTo(cx + hh(hB), yy(yB)); ctx.lineTo(cx - hh(hB), yy(yB)); ctx.closePath()
+  }
+  const fseg = (yT: number, yB: number, hT: number, hB: number): void => {
+    seg(yT, yB, hT, hB); ctx.fillStyle = brass(Math.max(hT, hB)); ctx.fill()
+  }
+  const band = (y: number, half: number, h: number): void => {
+    const e = Math.max(0.5, 1.4 * S)
+    ctx.fillStyle = brass(half); ctx.fillRect(cx - hh(half), yy(y), hh(half) * 2, h * S)
+    ctx.fillStyle = 'rgba(255,247,205,0.30)'; ctx.fillRect(cx - hh(half), yy(y), hh(half) * 2, e)
+    ctx.fillStyle = 'rgba(0,0,0,0.30)'; ctx.fillRect(cx - hh(half), yy(y) + h * S - e, hh(half) * 2, e)
+  }
+  const spec = (ox: number, my: number, rx: number, ry: number, a: number): void => {
+    ctx.beginPath(); ctx.ellipse(cx + hh(ox), yy(my), hh(rx), hh(ry), 0, 0, Math.PI * 2)
+    ctx.fillStyle = rgba(W, a); ctx.fill()
+  }
+  const glassPath = (): void => {
+    ctx.beginPath(); ctx.moveTo(cx - hh(34), yy(118)); ctx.lineTo(cx + hh(34), yy(118))
+    ctx.lineTo(cx + hh(27), yy(206)); ctx.lineTo(cx - hh(27), yy(206)); ctx.closePath()
+  }
+
+  ctx.save()
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+  ctx.globalCompositeOperation = 'source-over'
+
+  const sh = ctx.createRadialGradient(cx, yy(983), hh(5), cx, yy(983), hh(110))
+  sh.addColorStop(0, 'rgba(0,0,0,0.45)'); sh.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = sh; ctx.beginPath(); ctx.ellipse(cx, yy(983), hh(106), hh(15), 0, 0, Math.PI * 2); ctx.fill()
+
+  band(958, 64, 22); band(936, 54, 22)
+  seg(857, 936, 42, 42); ctx.fillStyle = brass(42); ctx.fill()
+  ctx.fillStyle = 'rgba(0,0,0,0.30)'; ctx.fillRect(cx + hh(24), yy(857), hh(18), 79 * S)
+  ctx.strokeStyle = 'rgba(28,20,8,0.55)'; ctx.lineWidth = lw0(1)
+  ctx.strokeRect(cx - hh(32), yy(872), hh(64), 52 * S)
+  ctx.strokeStyle = 'rgba(255,247,205,0.14)'; ctx.beginPath(); ctx.moveTo(cx - hh(32), yy(872)); ctx.lineTo(cx + hh(32), yy(872)); ctx.stroke()
+  band(837, 48, 20); band(817, 44, 20)
+  fseg(624, 817, 13, 40)
+  ctx.fillStyle = 'rgba(255,249,210,0.22)'; ctx.beginPath(); ctx.moveTo(cx - hh(3), yy(624)); ctx.lineTo(cx - hh(8), yy(817)); ctx.lineTo(cx + hh(2), yy(817)); ctx.lineTo(cx, yy(624)); ctx.closePath(); ctx.fill()
+  ctx.fillStyle = 'rgba(0,0,0,0.20)'; ctx.beginPath(); ctx.moveTo(cx + hh(9), yy(624)); ctx.lineTo(cx + hh(40), yy(817)); ctx.lineTo(cx + hh(31), yy(817)); ctx.lineTo(cx + hh(6), yy(624)); ctx.closePath(); ctx.fill()
+  band(612, 16, 12)
+  fseg(248, 612, 7, 12)
+  ctx.fillStyle = 'rgba(255,250,215,0.36)'; fseg(248, 612, 1.3, 2)
+  ctx.fillStyle = 'rgba(0,0,0,0.30)'; ctx.fillRect(cx + hh(4.5), yy(248), hh(2), 364 * S)
+  band(450, 12, 8); band(238, 11, 10)
+
+  const cyB = 162
+  glassPath()
+  const dgr = ctx.createLinearGradient(0, yy(116), 0, yy(206))
+  dgr.addColorStop(0, '#26272d'); dgr.addColorStop(0.5, '#191a20'); dgr.addColorStop(1, '#101116')
+  ctx.fillStyle = dgr; ctx.fill()
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'
+  glow(ctx, cx, yy(cyB), hh(34 * 1.5), hue, 0.12 * I)
+  ctx.save(); glassPath(); ctx.clip()
+  const gg = ctx.createRadialGradient(cx, yy(cyB), 0, cx, yy(cyB), hh(88 * 0.9))
+  gg.addColorStop(0, rgba(mix(hue, W, 0.5), 0.72 * I))
+  gg.addColorStop(0.5, rgba(mix(hue, W, 0.18), 0.42 * I))
+  gg.addColorStop(1, rgba(hue, 0.2 * I))
+  ctx.fillStyle = gg; ctx.fillRect(cx - hh(45), yy(108), hh(90), 110 * S); ctx.restore()
+  glow(ctx, cx, yy(cyB), hh(88 * 0.5), mix(hue, W, 0.68), 0.45 * I)
+  ctx.save(); glassPath(); ctx.clip()
+  ctx.translate(cx, yy(cyB)); ctx.scale(0.42, 1); ctx.translate(-cx, -yy(cyB))
+  const co = ctx.createRadialGradient(cx, yy(cyB), 0, cx, yy(cyB), hh(88 * 0.62))
+  co.addColorStop(0, rgba(mix(hue, W, 0.82), 0.7 * I))
+  co.addColorStop(0.45, rgba(mix(hue, W, 0.4), 0.32 * I))
+  co.addColorStop(1, rgba(hue, 0))
+  ctx.fillStyle = co; ctx.beginPath(); ctx.arc(cx, yy(cyB), hh(88 * 0.62), 0, Math.PI * 2); ctx.fill(); ctx.restore()
+  ctx.restore()
+
+  ctx.lineWidth = lw0(3.4); ctx.strokeStyle = '#2a2316'
+  ctx.beginPath(); ctx.moveTo(cx - hh(34), yy(118)); ctx.lineTo(cx - hh(27), yy(206)); ctx.moveTo(cx + hh(34), yy(118)); ctx.lineTo(cx + hh(27), yy(206)); ctx.stroke()
+  ctx.lineWidth = lw0(1.8); ctx.strokeStyle = 'rgba(28,28,34,0.9)'
+  ctx.beginPath(); ctx.moveTo(cx, yy(118)); ctx.lineTo(cx, yy(206)); ctx.moveTo(cx - hh(34), yy(118)); ctx.lineTo(cx + hh(27), yy(206)); ctx.moveTo(cx + hh(34), yy(118)); ctx.lineTo(cx - hh(27), yy(206)); ctx.stroke()
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineWidth = lw0(1.1); ctx.strokeStyle = rgba(mix(hue, W, 0.55), 0.5 * I)
+  ctx.beginPath(); ctx.moveTo(cx - hh(33), yy(118)); ctx.lineTo(cx - hh(26), yy(206)); ctx.moveTo(cx + hh(33), yy(118)); ctx.lineTo(cx + hh(26), yy(206)); ctx.stroke(); ctx.restore()
+
+  ctx.fillStyle = brass(28); ctx.beginPath(); ctx.moveTo(cx - hh(27), yy(206)); ctx.lineTo(cx + hh(27), yy(206)); ctx.lineTo(cx + hh(19), yy(224)); ctx.lineTo(cx - hh(19), yy(224)); ctx.closePath(); ctx.fill()
+  band(208, 22, 7)
+  ctx.beginPath(); ctx.moveTo(cx - hh(42), yy(118)); ctx.bezierCurveTo(cx - hh(25), yy(106), cx - hh(13), yy(90), cx, yy(84)); ctx.bezierCurveTo(cx + hh(13), yy(90), cx + hh(25), yy(106), cx + hh(42), yy(118)); ctx.closePath(); ctx.fillStyle = brass(42); ctx.fill()
+  spec(-10, 102, 5, 11, 0.4)
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; glow(ctx, cx, yy(120), hh(30), mix(hue, W, 0.3), 0.16 * I); ctx.restore()
+  band(116, 44, 6)
+  band(76, 6, 9)
+  ctx.beginPath(); ctx.arc(cx, yy(69), hh(7), 0, Math.PI * 2); ctx.fillStyle = brass(7); ctx.fill(); spec(-2.4, 66.5, 2.4, 2.4, 0.6)
+  ctx.beginPath(); ctx.moveTo(cx, yy(44)); ctx.lineTo(cx - hh(2.6), yy(62)); ctx.lineTo(cx + hh(2.6), yy(62)); ctx.closePath(); ctx.fillStyle = brass(2.6); ctx.fill()
+
+  ctx.restore()
+}

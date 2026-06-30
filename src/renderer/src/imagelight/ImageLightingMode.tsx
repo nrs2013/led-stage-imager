@@ -1444,7 +1444,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 {engine.beams.map((b, i) => {
                   if (!b.motif) return null
                   const label: Record<string, string> = {
-                    streetlamp: 'Street', chandelier: 'Chandelier', marquee: 'Marquee', image: 'Image',
+                    streetlamp: 'Street', streetlamp1: 'Lamp1', chandelier: 'Chandelier', marquee: 'Marquee', image: 'Image',
                     bulb: 'Bulb', parlight: 'PAR', blinder: 'Mini', patt: 'PAT', pixelpatt: 'PixelPAT',
                     stars: 'Star', festoon: 'Banner', flame: 'FLAMER', sparkler: 'SPARKLER'
                   }
@@ -1898,6 +1898,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 <div className="il-partgrid">
                   {([
                     { type: 'streetlamp' as const, label: 'Street' },
+                    { type: 'streetlamp1' as const, label: 'Lamp1' },
                     { type: 'chandelier' as const, label: 'Chandelier' },
                     { type: 'marquee' as const, label: 'Marquee' },
                     { type: 'bulb' as const, label: 'Bulb' },

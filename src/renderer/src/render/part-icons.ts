@@ -27,6 +27,8 @@ export const PART_ICON: Record<string, string> = {
   front: `<circle cx='12' cy='12' r='8.5' fill='none' stroke='currentColor' stroke-width='1.3'/><circle cx='12' cy='12' r='4.2' fill='var(--icon-accent)'/><path d='M5.5 9 Q12 13 18.5 9 Q12 5 5.5 9 Z' fill='none' stroke='currentColor' stroke-width='0.8' opacity='0.6'/>`,
   // 街灯：灯具から下への光のコーン＋地面の光
   streetlamp: `<path d='M9 21V7' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/><path d='M9 7q0-3 4-3 4 0 4 3' fill='none' stroke='currentColor' stroke-width='1.5'/><path d='M15 7h4l-1.3 3.6h-1.4z' fill='var(--icon-accent)' stroke='currentColor' stroke-width='0.9'/><path d='M6 21h6' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/>`,
+  // 街灯(一灯)：中央の柱に一つのランタン
+  streetlamp1: `<circle cx='12' cy='4' r='0.7' fill='var(--icon-accent)'/><path d='M12 4.7V5.6' stroke='currentColor' stroke-width='1'/><path d='M9.5 8 L14.5 8 L13.5 5.6 L10.5 5.6 Z' fill='none' stroke='currentColor' stroke-width='1.1'/><rect x='9.8' y='8' width='4.4' height='4' rx='0.3' fill='var(--icon-accent)' stroke='currentColor' stroke-width='0.9'/><path d='M12 12V18.5' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/><path d='M9.8 18.5h4.4' stroke='currentColor' stroke-width='1'/><path d='M8.5 21h7' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/>`,
   // シャンデリア：暖色のロウソク球
   chandelier: `<path d='M12 3v3M6 8h12M8 8c0 3.5 1.5 4.5 1.5 4.5M16 8c0 3.5-1.5 4.5-1.5 4.5M12 6v6.5' fill='none' stroke='currentColor' stroke-width='1.4'/><g fill='var(--icon-accent)'><circle cx='8' cy='13.5' r='1.5'/><circle cx='16' cy='13.5' r='1.5'/><circle cx='12' cy='14.6' r='1.6'/></g>`,
   // マーキー：太字の「A」（電球文字看板）

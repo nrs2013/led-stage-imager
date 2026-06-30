@@ -41,7 +41,7 @@ import { composeColorRatio } from '../render/compose'
 import { findWarmBlobs } from './lantern-detect'
 import { embossFromLuminance } from './relief-map'
 import { alignSnap, equalSnapX, type Pt } from './snap'
-import { drawStreetLampLit } from '../render/streetlamp'
+import { drawStreetLampLit, drawStreetLamp1Lit } from '../render/streetlamp'
 import { drawChandelierLit } from '../render/chandelier'
 import { drawMarqueeLit, marqueeBulbCount } from '../render/marquee'
 import { drawBulbLit } from '../render/bulb'
@@ -117,6 +117,7 @@ export interface Beam {
   // モチーフ（街灯・シャンデリア・マーキー・電球・PAR・PAT・ミニブル・ピクセルPAT・星・垂れ幕）
   motif?:
     | 'streetlamp'
+    | 'streetlamp1'
     | 'chandelier'
     | 'marquee'
     | 'bulb'
@@ -1318,6 +1319,8 @@ export class ImageLightEngine {
     const d = b.motifDiam ?? 200
     if (b.motif === 'streetlamp') {
       drawStreetLampLit(g, b.x, b.y, d, rgb)
+    } else if (b.motif === 'streetlamp1') {
+      drawStreetLamp1Lit(g, b.x, b.y, d, rgb)
     } else if (b.motif === 'chandelier') {
       drawChandelierLit(g, b.x, b.y, d, rgb)
     } else if (b.motif === 'image') {
@@ -2182,6 +2185,7 @@ export class ImageLightEngine {
   addMotifAuto(
     type:
       | 'streetlamp'
+      | 'streetlamp1'
       | 'chandelier'
       | 'marquee'
       | 'bulb'
@@ -2220,7 +2224,8 @@ export class ImageLightEngine {
       sp: makeSearchParams(this.rnd),
       motif: type,
       motifDiam:
-        type === 'streetlamp' ? 160 :  // 4m
+        type === 'streetlamp' ? 80 :   // 既定を半分に（やたら大きい対策）
+        type === 'streetlamp1' ? 220 :  // 一灯リアル・既定を半分に（全高≈220px）
         type === 'chandelier' ? 48 :   // 1.2m
         type === 'marquee' ? 72 :      // 1.8m
         type === 'blinder' ? 20 :      // 50cm
