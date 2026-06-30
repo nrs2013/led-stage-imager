@@ -1081,7 +1081,7 @@ export class ImageLightEngine {
     this.lowSmoke.active ||
     this.sfxSeqPlaying ||
     this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars') ||
-    this.beams.some((b) => b.front && (b.frontPat ?? '8') !== 'off') || // フロント灯体のサーチ（8の字/丸/横/ランダム）
+    this.beams.some((b) => b.front && (b.frontPat ?? 'off') !== 'off') || // フロント灯体のサーチ（8の字/丸/横/ランダム）
     this.hasDmxPatched()
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
@@ -2239,7 +2239,8 @@ export class ImageLightEngine {
     this.bump()
   }
   /** フロント灯体を追加（前から当たる丸い光）。motif は持たず front=true＝光マップに丸いプールを描く。
-   *  既定は8の字サーチで動く（承認済みモック準拠）。番号列には通常の灯体として一緒に並ぶ。 */
+   *  既定は「止まった丸」(off)＝置いた瞬間は動かず、狙った場所に置きやすい・光とハンドルがズレない。
+   *  動き(8の字/丸/横/ランダム)は位置を決めてから LIGHT タブで ON。番号列には通常の灯体として並ぶ。 */
   addFront(atX?: number, atY?: number): void {
     if (this.beams.length >= MAX_BEAMS) return
     const same = this.beams.filter((b) => b.front)
@@ -2262,7 +2263,7 @@ export class ImageLightEngine {
       color: WHITE.slice() as RGB3,
       sp: makeSearchParams(this.rnd),
       front: true,
-      frontPat: '8',
+      frontPat: 'off',
       frontSpd: 0.35,
       frontAmp: 320,
       frontEdge: 0.5,

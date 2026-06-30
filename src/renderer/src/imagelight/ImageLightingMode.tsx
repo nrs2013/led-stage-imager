@@ -2627,7 +2627,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             )}
             {ref?.front && (
               <>
-                <div className="il-lbl">POOL SIZE</div>
+                <div className="il-lbl">大きさ</div>
                 <div className="il-frow">
                   <input
                     type="range"
@@ -2638,24 +2638,36 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   />
                   <div className="il-val big">{ref.motifDiam ?? 260}px</div>
                 </div>
-                <div className="il-lbl">SEARCH PATTERN</div>
+                <div className="il-lbl">ふち（くっきり↔ふわっ）</div>
+                <div className="il-frow">
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round((ref.frontEdge ?? 0.5) * 100)}
+                    onChange={(e) => engine.setFrontEdge(+e.target.value / 100)}
+                    title="0=くっきり / 100=ふわっ"
+                  />
+                  <div className="il-val big">{Math.round((ref.frontEdge ?? 0.5) * 100)}</div>
+                </div>
+                <div className="il-lbl">動き（置いてから選ぶ）</div>
                 <div className="il-frow" style={{ gap: 6, flexWrap: 'wrap' }}>
-                  {(([['8', '8の字'], ['circle', '丸'], ['sweep', '横'], ['random', 'ランダム'], ['off', '止']]) as [
+                  {(([['off', '止'], ['8', '8の字'], ['circle', '丸'], ['sweep', '横'], ['random', 'ランダム']]) as [
                     '8' | 'circle' | 'sweep' | 'random' | 'off',
                     string
                   ][]).map(([pat, label]) => (
                     <button
                       key={pat}
-                      className={'il-mini' + ((ref.frontPat ?? '8') === pat ? ' learnon' : '')}
+                      className={'il-mini' + ((ref.frontPat ?? 'off') === pat ? ' learnon' : '')}
                       onClick={() => engine.setFrontPat(pat)}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
-                {(ref.frontPat ?? '8') !== 'off' && (
+                {(ref.frontPat ?? 'off') !== 'off' && (
                   <>
-                    <div className="il-lbl">SEARCH SPEED</div>
+                    <div className="il-lbl">速さ</div>
                     <div className="il-frow">
                       <input
                         type="range"
@@ -2666,7 +2678,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       />
                       <div className="il-val big">{(ref.frontSpd ?? 0.35).toFixed(2)}</div>
                     </div>
-                    <div className="il-lbl">SEARCH WIDTH</div>
+                    <div className="il-lbl">振り幅（動く範囲）</div>
                     <div className="il-frow">
                       <input
                         type="range"
@@ -2679,18 +2691,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     </div>
                   </>
                 )}
-                <div className="il-lbl">EDGE</div>
-                <div className="il-frow">
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={Math.round((ref.frontEdge ?? 0.5) * 100)}
-                    onChange={(e) => engine.setFrontEdge(+e.target.value / 100)}
-                    title="0=くっきり / 100=ふわっ"
-                  />
-                  <div className="il-val big">{Math.round((ref.frontEdge ?? 0.5) * 100)}</div>
-                </div>
               </>
             )}
 
