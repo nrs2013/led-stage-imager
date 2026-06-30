@@ -10,6 +10,7 @@ import {
   rainbowColor,
   colorChaseColor,
   searchTilt,
+  frontSearch,
   defaultFxp
 } from './effects'
 import { COLORS } from './colors'
@@ -116,5 +117,48 @@ describe('searchTilt', () => {
     }
     expect(hi).toBeLessThanOrEqual(12 + 1e-6)
     expect(lo).toBeGreaterThanOrEqual(-12 - 1e-6)
+  })
+})
+
+describe('frontSearch（フロント灯体の2Dサーチ）', () => {
+  const sp = { phase: 0, speedK: 1, widthK: 1 }
+
+  it('off は常に [0,0]（静止プール）', () => {
+    for (let ms = 0; ms < 5000; ms += 123) {
+      expect(frontSearch('off', 0.5, 300, sp, ms)).toEqual([0, 0])
+    }
+  })
+
+  it('振り幅 0 はパターンに関わらず [0,0]', () => {
+    for (const pat of ['8', 'circle', 'sweep', 'random'] as const) {
+      expect(frontSearch(pat, 0.5, 0, sp, 1234)).toEqual([0, 0])
+    }
+  })
+
+  it('全パターンが振り幅(amp)の範囲に収まる', () => {
+    const amp = 300
+    for (const pat of ['8', 'circle', 'sweep', 'random'] as const) {
+      for (let ms = 0; ms < 12000; ms += 50) {
+        const [dx, dy] = frontSearch(pat, 0.4, amp, sp, ms)
+        expect(Math.abs(dx)).toBeLessThanOrEqual(amp + 1e-6)
+        expect(Math.abs(dy)).toBeLessThanOrEqual(amp + 1e-6)
+        expect(Number.isFinite(dx)).toBe(true)
+        expect(Number.isFinite(dy)).toBe(true)
+      }
+    }
+  })
+
+  it('横サーチ(sweep) は縦に動かない（dy=0）', () => {
+    for (let ms = 0; ms < 5000; ms += 71) {
+      expect(frontSearch('sweep', 0.5, 300, sp, ms)[1]).toBe(0)
+    }
+  })
+
+  it('丸(circle) は半径ほぼ一定の円を描く', () => {
+    const amp = 300
+    for (let ms = 0; ms < 5000; ms += 91) {
+      const [dx, dy] = frontSearch('circle', 0.5, amp, sp, ms)
+      expect(Math.hypot(dx, dy)).toBeCloseTo(amp, 3)
+    }
   })
 })

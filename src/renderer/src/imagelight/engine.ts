@@ -32,6 +32,7 @@ import {
   rainbowColor,
   colorChaseColor,
   searchTilt,
+  frontSearch,
   defaultFxp,
   type FxParams,
   type SearchParams
@@ -135,6 +136,13 @@ export interface Beam {
   motifSpeed?: number
   motifReverse?: boolean // マーキー逆方向チェイス
   motifSeed?: number // 星の散布レイアウトを固定（移動しても再シャッフルしない）
+  // フロント灯体：前から当たる丸い光（プール）。下からの円錐ビーム(drawWallBeam)の代わりに
+  //  光マップへ丸いプールを描く＝写真が照らされて「通った所だけセットが浮かぶ」。プール半径は motifDiam を流用。
+  front?: boolean
+  frontPat?: '8' | 'circle' | 'sweep' | 'random' | 'off' // サーチのパターン（off=静止）
+  frontSpd?: number // サーチの速さ
+  frontAmp?: number // サーチの振り幅（ステージpx）
+  frontEdge?: number // ふち 0..1（0=くっきり / 1=ふわっ）
   // 特効(炎/火花)の噴き出す向きは照明と同じ TILT（b.tilt 度）から計算する＝専用フィールドは持たない。
   // 特効ステップシーケンサー用の安定ID（炎/火花マークに付与・並び替え/削除に強い）。
   sfxId?: number
@@ -1073,6 +1081,7 @@ export class ImageLightEngine {
     this.lowSmoke.active ||
     this.sfxSeqPlaying ||
     this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars') ||
+    this.beams.some((b) => b.front && (b.frontPat ?? '8') !== 'off') || // フロント灯体のサーチ（8の字/丸/横/ランダム）
     this.hasDmxPatched()
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
@@ -1202,6 +1211,31 @@ export class ImageLightEngine {
         g.restore()
       }
     })
+  }
+  /** フロント灯体：前から当たる丸い光（プール）を光マップに描く。中心はサーチで (dx,dy) ずれる。
+   *  ふち(frontEdge)はグラデの stop で表現（灯体ごとの blur は禁止＝激重。やわらかさは全画面 BEAM_SOFT に集約）。 */
+  private drawFrontPool(g: CanvasRenderingContext2D, b: Beam, I: number, ms: number): void {
+    if (I <= 0.004) return
+    const col = this.beamColOf(b, I) // b._cn を反映した色×明るさ
+    const R = (b.motifDiam ?? 220) / 2
+    if (R <= 0) return
+    const [dx, dy] = frontSearch(b.frontPat ?? 'off', b.frontSpd ?? 0.35, b.frontAmp ?? 0, b.sp, ms)
+    const cx = b.x + dx
+    const cy = b.y + dy
+    const edge = Math.max(0, Math.min(1, b.frontEdge ?? 0.5))
+    const p = 0.85 * (1 - edge) // ふちが効くほど中心の塗りプラトーが小さく＝外へなだらかに
+    g.save()
+    g.globalCompositeOperation = 'screen' // 加算でなく screen＝重なっても白飛びしすぎない（ビームと同じ流儀）
+    const gr = g.createRadialGradient(cx, cy, 1, cx, cy, R)
+    gr.addColorStop(0, rgs(col, 1))
+    if (p > 0.001) gr.addColorStop(p, rgs(col, 1))
+    gr.addColorStop((p + 1) / 2, rgs(col, 0.4))
+    gr.addColorStop(1, rgs(col, 0))
+    g.fillStyle = gr
+    g.beginPath()
+    g.arc(cx, cy, R, 0, Math.PI * 2)
+    g.fill()
+    g.restore()
   }
   /** セット接触面（根元）の焼け＝白飛びホットスポット＋出口の際のにじみ。screen 合成。 */
   private drawContactHot(
@@ -1462,7 +1496,8 @@ export class ImageLightEngine {
       })
       lc.setTransform(Q, 0, 0, Q, 0, 0)
       beams.forEach((b, i) => {
-        if (!b.motif) this.drawWallBeam(lc, b, Is[i], b._tn!)
+        if (b.front) this.drawFrontPool(lc, b, Is[i], ms)
+        else if (!b.motif) this.drawWallBeam(lc, b, Is[i], b._tn!)
       })
       lc.setTransform(1, 0, 0, 1, 0, 0)
       // 縞退治のブラー書き戻し
@@ -1601,7 +1636,7 @@ export class ImageLightEngine {
       ac.globalCompositeOperation = 'source-over'
       ac.setTransform(Q, 0, 0, Q, 0, 0)
       beams.forEach((bm, i) => {
-        if (!bm.motif) this.drawAirBeam(ac, bm, Is[i], bm._tn ?? this.tiltNow(bm, ms))
+        if (!bm.motif && !bm.front) this.drawAirBeam(ac, bm, Is[i], bm._tn ?? this.tiltNow(bm, ms))
       })
       ac.globalCompositeOperation = 'destination-out'
       ac.drawImage(this.mat, b.x, b.y, b.w, b.h)
@@ -2201,6 +2236,58 @@ export class ImageLightEngine {
       ...(type === 'stars' ? { motifSeed: Math.floor(this.rnd() * 1e6) + 1 } : {})
     })
     this.selected = [this.beams.length - 1]
+    this.bump()
+  }
+  /** フロント灯体を追加（前から当たる丸い光）。motif は持たず front=true＝光マップに丸いプールを描く。
+   *  既定は8の字サーチで動く（承認済みモック準拠）。番号列には通常の灯体として一緒に並ぶ。 */
+  addFront(atX?: number, atY?: number): void {
+    if (this.beams.length >= MAX_BEAMS) return
+    const same = this.beams.filter((b) => b.front)
+    const last = same[same.length - 1]
+    let x = atX ?? (last ? last.x + 240 : 800)
+    let y = atY ?? (last ? last.y : 420)
+    if (atX === undefined && x > 1460) { x = 220 + ((same.length * 200) % 1200); y += 160 }
+    this.pushHistory()
+    this.rigCustomized = true
+    this.beams.push({
+      x,
+      y,
+      w0: 0,
+      w1: 0,
+      len: 0,
+      pan: 0,
+      tilt: 0,
+      zoom: 1,
+      gauge: 0.72,
+      color: WHITE.slice() as RGB3,
+      sp: makeSearchParams(this.rnd),
+      front: true,
+      frontPat: '8',
+      frontSpd: 0.35,
+      frontAmp: 320,
+      frontEdge: 0.5,
+      motifDiam: 260 // プール直径（MOTIF SIZE スライダーで調整）
+    })
+    this.selected = [this.beams.length - 1]
+    this.bump()
+  }
+  setFrontPat(p: '8' | 'circle' | 'sweep' | 'random' | 'off'): void {
+    this.targets().forEach((b) => { if (b.front) b.frontPat = p })
+    this.bump()
+  }
+  setFrontSpd(v: number): void {
+    const n = Math.max(0, v)
+    this.targets().forEach((b) => { if (b.front) b.frontSpd = n })
+    this.bump()
+  }
+  setFrontAmp(v: number): void {
+    const n = Math.max(0, Math.round(v))
+    this.targets().forEach((b) => { if (b.front) b.frontAmp = n })
+    this.bump()
+  }
+  setFrontEdge(v: number): void {
+    const n = Math.max(0, Math.min(1, v))
+    this.targets().forEach((b) => { if (b.front) b.frontEdge = n })
     this.bump()
   }
   /** リアルな発光画像を灯体として追加（明るさだけで光る・色は画像のまま）。 */

@@ -755,8 +755,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     // ヒットは「手前に見えている方」から探す（描画は配列の後ろが手前）。
     // モチーフは見た目に合わせてヒット半径を motifDiam/2 に拡大。
     // さらに、いま選択中の灯体を最優先＝コピー直後の群を確実につかめる。
-    const hitR = (b: typeof beams[0]) => b.motif ? Math.max(30, (b.motifDiam ?? 200) / 2) : 30
-    const hitRY = (b: typeof beams[0]) => b.motif ? Math.max(24, (b.motifDiam ?? 200) / 2) : 24
+    const hitR = (b: typeof beams[0]) => (b.motif || b.front) ? Math.max(30, (b.motifDiam ?? 200) / 2) : 30
+    const hitRY = (b: typeof beams[0]) => (b.motif || b.front) ? Math.max(24, (b.motifDiam ?? 200) / 2) : 24
     let hit = -1
     for (let i = beams.length - 1; i >= 0; i--) {
       const b = beams[i]
@@ -1921,6 +1921,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <button
                     className="il-part"
                     disabled={engine.beams.length >= MAX_BEAMS}
+                    onClick={() => engine.addFront()}
+                    title="前から当たる丸い光（フロント）。8の字などでサーチして、通った所だけセットが浮かびます。RELIEF と重ねると立体に見えます"
+                  >
+                    <svg viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: PART_ICON.front }} />
+                    <span>Front</span>
+                  </button>
+                  <button
+                    className="il-part"
+                    disabled={engine.beams.length >= MAX_BEAMS}
                     onClick={() => imageMotifInputRef.current?.click()}
                     title="画像生成などで作ったリアルな発光画像（黒背景）を灯体として読み込む。明るさだけで光ります"
                   >
@@ -2613,6 +2622,74 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     </div>
                   </>
                 )}
+              </>
+            )}
+            {ref?.front && (
+              <>
+                <div className="il-lbl">POOL SIZE</div>
+                <div className="il-frow">
+                  <input
+                    type="range"
+                    min={20}
+                    max={900}
+                    value={ref.motifDiam ?? 260}
+                    onChange={(e) => engine.setMotifDiam(+e.target.value)}
+                  />
+                  <div className="il-val big">{ref.motifDiam ?? 260}px</div>
+                </div>
+                <div className="il-lbl">SEARCH PATTERN</div>
+                <div className="il-frow" style={{ gap: 6, flexWrap: 'wrap' }}>
+                  {(([['8', '8の字'], ['circle', '丸'], ['sweep', '横'], ['random', 'ランダム'], ['off', '止']]) as [
+                    '8' | 'circle' | 'sweep' | 'random' | 'off',
+                    string
+                  ][]).map(([pat, label]) => (
+                    <button
+                      key={pat}
+                      className={'il-mini' + ((ref.frontPat ?? '8') === pat ? ' learnon' : '')}
+                      onClick={() => engine.setFrontPat(pat)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {(ref.frontPat ?? '8') !== 'off' && (
+                  <>
+                    <div className="il-lbl">SEARCH SPEED</div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={0}
+                        max={150}
+                        value={Math.round((ref.frontSpd ?? 0.35) * 100)}
+                        onChange={(e) => engine.setFrontSpd(+e.target.value / 100)}
+                      />
+                      <div className="il-val big">{(ref.frontSpd ?? 0.35).toFixed(2)}</div>
+                    </div>
+                    <div className="il-lbl">SEARCH WIDTH</div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={0}
+                        max={900}
+                        value={Math.round(ref.frontAmp ?? 320)}
+                        onChange={(e) => engine.setFrontAmp(+e.target.value)}
+                      />
+                      <div className="il-val big">{Math.round(ref.frontAmp ?? 320)}px</div>
+                    </div>
+                  </>
+                )}
+                <div className="il-lbl">EDGE</div>
+                <div className="il-frow">
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={Math.round((ref.frontEdge ?? 0.5) * 100)}
+                    onChange={(e) => engine.setFrontEdge(+e.target.value / 100)}
+                    title="0=くっきり / 100=ふわっ"
+                  />
+                  <div className="il-val big">{Math.round((ref.frontEdge ?? 0.5) * 100)}</div>
+                </div>
               </>
             )}
 
@@ -3437,6 +3514,16 @@ function drawMarkers(ctx: CanvasRenderingContext2D, engine: ImageLightEngine, sc
         ctx.lineTo(b.x + Math.cos(a) * R, b.y + Math.sin(a) * R)
       }
       ctx.stroke()
+    } else if (b.front) {
+      // フロント灯体は丸いプール＝円マークで照明(四角)と区別する
+      ctx.strokeStyle = isSel ? 'rgba(120,255,160,0.95)' : 'rgba(255,255,255,0.45)'
+      ctx.beginPath()
+      ctx.arc(b.x, b.y, 13, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(b.x, b.y, 2.5, 0, Math.PI * 2)
+      ctx.fillStyle = isSel ? 'rgba(120,255,160,0.95)' : 'rgba(255,255,255,0.4)'
+      ctx.fill()
     } else {
       ctx.strokeStyle = isSel ? 'rgba(120,255,160,0.95)' : 'rgba(255,255,255,0.35)'
       ctx.strokeRect(b.x - 18, b.y - 10, 36, 20)

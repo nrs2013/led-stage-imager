@@ -157,3 +157,36 @@ export function searchTilt(
   }
   return baseTilt + w * Math.sin(2 * Math.PI * spd * (ms / 1000) + ph)
 }
+
+/** フロント灯体の2Dサーチ。前から当たる丸い光（プール）の中心を、選んだパターンで (dx,dy) ずらす。
+ *  amp=振り幅(ステージpx)、spd=速さ(Hz相当)。sp=灯体ごとの個性（開始位相・ランダム時の周波数ばらし）。
+ *  単位は drawWallBeam と同じステージ座標(LW×LH)＝光マップに直接乗る。 */
+export function frontSearch(
+  pat: '8' | 'circle' | 'sweep' | 'random' | 'off',
+  spd: number,
+  amp: number,
+  sp: SearchParams,
+  ms: number
+): [number, number] {
+  if (pat === 'off' || amp <= 0) return [0, 0]
+  const ph = sp.phase // 灯ごとの開始位相（複数置いても重ならないように散らす）
+  const t = (ms / 1000) * spd * 2 * Math.PI + ph
+  switch (pat) {
+    case '8': // 8の字（ゲロノのレムニスケート）：横に1往復する間に縦は2往復
+      return [amp * Math.cos(t), amp * 0.5 * Math.sin(2 * t)]
+    case 'circle':
+      return [amp * Math.cos(t), amp * Math.sin(t)]
+    case 'sweep': // 横サーチ
+      return [amp * Math.sin(t), 0]
+    case 'random': {
+      // 灯ごとに2軸の周波数を少しずらした正弦合成＝不規則に漂う（リサージュ）
+      const fx = 1 + (sp.speedK - 1) * 0.6
+      const fy = 1 + (sp.widthK - 1) * 0.6
+      const tx = (ms / 1000) * spd * 2 * Math.PI * fx + ph
+      const ty = (ms / 1000) * spd * 2 * Math.PI * fy * 0.73 + ph * 1.7
+      return [amp * Math.sin(tx), amp * 0.7 * Math.sin(ty)]
+    }
+    default:
+      return [0, 0]
+  }
+}

@@ -23,6 +23,8 @@ const pixelPattIcon = ((): string => {
 })()
 
 export const PART_ICON: Record<string, string> = {
+  // フロント：前から当たる丸い光のプール（同心円）＋8の字サーチの軌跡
+  front: `<circle cx='12' cy='12' r='8.5' fill='none' stroke='currentColor' stroke-width='1.3'/><circle cx='12' cy='12' r='4.2' fill='var(--icon-accent)'/><path d='M5.5 9 Q12 13 18.5 9 Q12 5 5.5 9 Z' fill='none' stroke='currentColor' stroke-width='0.8' opacity='0.6'/>`,
   // 街灯：灯具から下への光のコーン＋地面の光
   streetlamp: `<path d='M9 21V7' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/><path d='M9 7q0-3 4-3 4 0 4 3' fill='none' stroke='currentColor' stroke-width='1.5'/><path d='M15 7h4l-1.3 3.6h-1.4z' fill='var(--icon-accent)' stroke='currentColor' stroke-width='0.9'/><path d='M6 21h6' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/>`,
   // シャンデリア：暖色のロウソク球
