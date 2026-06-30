@@ -1921,15 +1921,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <button
                     className="il-part"
                     disabled={engine.beams.length >= MAX_BEAMS}
-                    onClick={() => engine.addFront()}
-                    title="前から当たる丸い光（フロント）。8の字などでサーチして、通った所だけセットが浮かびます。RELIEF と重ねると立体に見えます"
-                  >
-                    <svg viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: PART_ICON.front }} />
-                    <span>Front</span>
-                  </button>
-                  <button
-                    className="il-part"
-                    disabled={engine.beams.length >= MAX_BEAMS}
                     onClick={() => imageMotifInputRef.current?.click()}
                     title="画像生成などで作ったリアルな発光画像（黒背景）を灯体として読み込む。明るさだけで光ります"
                   >
@@ -2505,6 +2496,16 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   </button>
                 )}
               </div>
+              )}
+              {engine.beams.length < MAX_BEAMS && (
+                <button
+                  className="il-psadd"
+                  style={{ marginTop: 8 }}
+                  onClick={() => engine.addFront()}
+                  title="前から当たる丸い光（フロント）。写真の上で8の字などにサーチして、通った所だけセットが浮かびます。RELIEF と重ねると立体に見えます"
+                >
+                  ＋ フロント（前から当たる丸い光）
+                </button>
               )}
               {engine.box && (
                 <button
