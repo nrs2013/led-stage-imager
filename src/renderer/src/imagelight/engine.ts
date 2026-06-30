@@ -1312,15 +1312,35 @@ export class ImageLightEngine {
     }
     return img
   }
+  /** 一灯街灯の本体に当たっているステージ光の量(0..1)。光マップ(lc)を胴に沿って数点サンプルし最大を採る。 */
+  private extLightAt(x: number, y: number, d: number): number {
+    const S = d / 940
+    let mx = 0
+    for (const m of [300, 520, 760, 930]) {
+      const qx = Math.round(x * Q)
+      const qy = Math.round((y + (m - 162) * S) * Q)
+      if (qx < 0 || qx >= IW || qy < 0 || qy >= IH) continue
+      const px = this.lc.getImageData(qx, qy, 1, 1).data
+      const v = (px[0] + px[1] + px[2]) / 3
+      if (v > mx) mx = v
+    }
+    return Math.min(1, mx / 165)
+  }
   private drawMotifLit(g: CanvasRenderingContext2D, b: Beam, I: number, ms: number): void {
-    if (I <= 0.004) return
     const c = b._cn ?? b.color
-    const rgb: RGB3 = [c[0] * I, c[1] * I, c[2] * I]
     const d = b.motifDiam ?? 200
+    // 一灯街灯：外光(LIGHTの灯体)が当たると本体が見える＝光マップ参照。自分のIが0でも外光があれば描く
+    if (b.motif === 'streetlamp1') {
+      const ext = this.extLightAt(b.x, b.y, d)
+      if (I <= 0.004 && ext <= 0.01) return
+      const rgb1: RGB3 = [c[0] * I, c[1] * I, c[2] * I]
+      drawStreetLamp1Lit(g, b.x, b.y, d, rgb1, ext)
+      return
+    }
+    if (I <= 0.004) return
+    const rgb: RGB3 = [c[0] * I, c[1] * I, c[2] * I]
     if (b.motif === 'streetlamp') {
       drawStreetLampLit(g, b.x, b.y, d, rgb)
-    } else if (b.motif === 'streetlamp1') {
-      drawStreetLamp1Lit(g, b.x, b.y, d, rgb)
     } else if (b.motif === 'chandelier') {
       drawChandelierLit(g, b.x, b.y, d, rgb)
     } else if (b.motif === 'image') {
