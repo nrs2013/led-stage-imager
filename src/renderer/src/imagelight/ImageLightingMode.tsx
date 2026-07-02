@@ -1867,6 +1867,39 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 
               <div className="il2-sec">
                 <div className="il2-eb">
+                  <span className="il2-kind">見え方</span>
+                  <b>LOOK</b>
+                </div>
+                <div className="il2-segrow">
+                  <span className="il2-seglbl">色ノリ</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={40}
+                    value={Math.round(engine.colorWash * 100)}
+                    onChange={(e) => engine.setColorWash(+e.target.value / 100)}
+                    title="光の色を写真にそのまま乗せる量。0=従来（掛け算のみ＝青が茶色いセットに乗らない）。おすすめ12〜18"
+                    style={{ flex: 1 }}
+                  />
+                  <span className="il2-pv">{Math.round(engine.colorWash * 100)}</span>
+                </div>
+                <div className="il2-segrow">
+                  <span className="il2-seglbl">ベース明るさ</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={30}
+                    value={Math.round(engine.baseLift * 100)}
+                    onChange={(e) => engine.setBaseLift(+e.target.value / 100)}
+                    title="暗い部分だけ底上げして「暗く締まってるのに全体は見える」に。暗転・パニックではちゃんと真っ黒。おすすめ6〜10"
+                    style={{ flex: 1 }}
+                  />
+                  <span className="il2-pv">{Math.round(engine.baseLift * 100)}</span>
+                </div>
+              </div>
+
+              <div className="il2-sec">
+                <div className="il2-eb">
                   <span className="il2-kind">道具</span>
                   <b>TOOLS</b>
                 </div>
@@ -2707,10 +2740,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                         type="range"
                         min={0}
                         max={150}
-                        value={Math.round((ref.frontSpd ?? 0.35) * 100)}
+                        value={Math.round((ref.frontSpd ?? 0.1) * 100)}
                         onChange={(e) => engine.setFrontSpd(+e.target.value / 100)}
                       />
-                      <div className="il-val big">{(ref.frontSpd ?? 0.35).toFixed(2)}</div>
+                      <div className="il-val big">{(ref.frontSpd ?? 0.1).toFixed(2)}</div>
                     </div>
                     <div className="il-lbl">振り幅（動く範囲）</div>
                     <div className="il-frow">

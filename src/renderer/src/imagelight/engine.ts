@@ -385,6 +385,10 @@ export interface ShowFile {
     flameChase?: { on?: boolean; pattern?: 'random' | 'all' | 'inout' | 'outin'; ms?: number }
     sfxChase?: { mode?: 'random' | 'all' | 'inout' | 'outin'; ms?: number }
   }
+  /** 見え方: 色ノリ（光の色を写真に乗せる量 0..0.4）。無い＝0（従来）。 */
+  colorWash?: number
+  /** 見え方: ベース明るさ（暗部の底上げ 0..0.3）。無い＝0（従来）。 */
+  baseLift?: number
 }
 
 /** blob: URL（動画）→ dataURL（保存でファイルに書き出すため）。 */
@@ -776,6 +780,9 @@ export class ImageLightEngine {
   /** 方向の立体 0..1（AIなし深度）。写真の明るさから作ったエンボスを soft-light で重ね、
    *  光の向きに応じた陰影を足す。0=なし。各写真の lumRelief を読込時に1回だけ作って毎フレームは軽い。 */
   lumReliefStrength = 0
+  // 見え方（写真への光の乗り方）。どちらも 0=従来どおり（保存済みの公演の見た目を変えない）。
+  colorWash = 0 // 色ノリ: 光の色を写真にそのまま少し乗せる(0..0.4)。掛け算だけだと青などが茶色いセットに乗らない対策
+  baseLift = 0 // ベース明るさ: 暗部の底上げ(0..0.3)。明かりが点いている時だけ効く＝暗転は黒のまま
   selected: number[] = [0] // 選択中の灯体index（複数可）。空=未選択／全部入=ALL
   scenes: Scene[] = []
   activeScene = -1
@@ -1222,7 +1229,7 @@ export class ImageLightEngine {
     const col = this.beamColOf(b, I) // b._cn を反映した色×明るさ
     const R = (b.motifDiam ?? 220) / 2
     if (R <= 0) return
-    const [dx, dy] = frontSearch(b.frontPat ?? 'off', b.frontSpd ?? 0.35, b.frontAmp ?? 0, b.sp, ms)
+    const [dx, dy] = frontSearch(b.frontPat ?? 'off', b.frontSpd ?? 0.1, b.frontAmp ?? 0, b.sp, ms)
     const cx = b.x + dx
     const cy = b.y + dy
     const edge = Math.max(0, Math.min(1, b.frontEdge ?? 0.5))
@@ -1587,6 +1594,16 @@ export class ImageLightEngine {
     if ((maxI > 0.004 || flameLit || sparklerLit) && this.mat && this.box) {
       const b = this.box
       const tone = Math.max(0, (0.5 - maxI) / 0.5) * 0.85
+      // ベース明るさ: 光マップ全体を screen で底上げ（暗部だけ持ち上がり、明部はほぼ不変）。
+      // maxI に比例させる＝暗転・パニックでは効かずちゃんと真っ黒になる。
+      const liftEff = this.baseLift * Math.min(1, maxI / 0.2)
+      if (liftEff > 0.002) {
+        const gLift = Math.round(liftEff * 255)
+        lc.globalCompositeOperation = 'screen'
+        lc.fillStyle = `rgb(${gLift},${gLift},${gLift})`
+        lc.fillRect(0, 0, QW, QH)
+        lc.globalCompositeOperation = 'source-over'
+      }
       wc.setTransform(Q, 0, 0, Q, 0, 0)
       wc.globalCompositeOperation = 'source-over'
       wc.drawImage(this.mat, b.x, b.y, b.w, b.h) // アルベド
@@ -1607,6 +1624,14 @@ export class ImageLightEngine {
         wc.drawImage(this.lightCv, 0, 0)
         if (tone > 0.01) {
           wc.globalAlpha = tone
+          wc.drawImage(this.lightCv, 0, 0)
+          wc.globalAlpha = 1
+        }
+        // 色ノリ: 掛け算だけだと「青い光×茶色いセット≒真っ黒」で色が乗らないので、
+        // 光の色そのものを screen で薄く重ねる（0=従来）。この後の destination-in で写真の形にクリップされる。
+        if (this.colorWash > 0.002) {
+          wc.globalCompositeOperation = 'screen'
+          wc.globalAlpha = this.colorWash
           wc.drawImage(this.lightCv, 0, 0)
           wc.globalAlpha = 1
         }
@@ -1831,6 +1856,16 @@ export class ImageLightEngine {
   /** 方向の立体（AIなし深度）の強さを設定。0=なし。 */
   setLumRelief(v: number): void {
     this.lumReliefStrength = Math.max(0, Math.min(1, v))
+    this.bump()
+  }
+  /** 色ノリ（光の色を写真にそのまま乗せる量）を設定。0=従来（掛け算のみ）。 */
+  setColorWash(v: number): void {
+    this.colorWash = Math.max(0, Math.min(0.4, v))
+    this.bump()
+  }
+  /** ベース明るさ（暗部の底上げ）を設定。0=従来。明かりが点いている時だけ効く。 */
+  setBaseLift(v: number): void {
+    this.baseLift = Math.max(0, Math.min(0.3, v))
     this.bump()
   }
 
@@ -2303,7 +2338,8 @@ export class ImageLightEngine {
       sp: makeSearchParams(this.rnd),
       front: true,
       frontPat: 'off',
-      frontSpd: 0.35,
+      frontSpd: 0.1, // 既定はゆったり（約10秒で1周）。0.35だと約3秒で1周＝目が回ると不評だった
+
       frontAmp: 320,
       frontEdge: 0.5,
       motifDiam: 260 // プール直径（MOTIF SIZE スライダーで調整）
@@ -4268,6 +4304,8 @@ export class ImageLightEngine {
       beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined })),
       scenes: scenesMeta,
       mask: maskMeta,
+      colorWash: this.colorWash,
+      baseLift: this.baseLift,
       decor: {
         ...this.decor,
         color1: this.decor.color1.slice() as RGB3,
@@ -4408,6 +4446,9 @@ export class ImageLightEngine {
         if (typeof sfx.flameChase.ms === 'number') this.sfxChaseMs = sfx.flameChase.ms
       }
     }
+    // 見え方（色ノリ・ベース明るさ）を復元。無い古いファイルは 0＝従来の見た目。
+    this.colorWash = typeof show.colorWash === 'number' ? Math.max(0, Math.min(0.4, show.colorWash)) : 0
+    this.baseLift = typeof show.baseLift === 'number' ? Math.max(0, Math.min(0.3, show.baseLift)) : 0
     this.sfxSeqPlaying = false
     this.sfxSeqIndex = 0
     // sfxId カウンタを復元（既存の最大+1）＝復元後に足す炎/火花のID衝突を防ぐ。
