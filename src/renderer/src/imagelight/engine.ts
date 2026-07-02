@@ -347,6 +347,7 @@ export interface RigPayload {
   sceneFadeMs?: number
   strobeMidi?: number | null
   strobeRate?: number
+  motifChaseMidi?: number | null
 }
 /** 公演ファイル（show.json）のシーン1件。メディアは media/ 配下のファイル名で参照。 */
 export interface ShowSceneMeta {
@@ -844,6 +845,10 @@ export class ImageLightEngine {
   strobeMidi: number | null = null
   /** 特別ストロボ LEARN 待機中か。 */
   learnStrobe = false
+  /** モチーフチェイス(Chase motifs)の MIDI ノート割当（保存対象・rigData）。 */
+  motifChaseMidi: number | null = null
+  /** モチーフチェイス LEARN 待機中か。 */
+  learnMotifChase = false
   /** 特別ストロボの速さ 0..1（大きいほど速い・保存対象）。 */
   strobeRate = 0.55
   /** 本番(PLAY)のシーン(明かり)切替方式と時間。cut=即／fade=時間補間。保存対象。 */
@@ -2656,6 +2661,7 @@ export class ImageLightEngine {
   /** 同じ MIDI ノートを持つ他カテゴリ(strobe/FX/color/pattern/scene)から外す＝「1ノート1役」。 */
   private clearMidiNoteEverywhere(note: number): void {
     if (this.strobeMidi === note) this.strobeMidi = null
+    if (this.motifChaseMidi === note) this.motifChaseMidi = null
     for (const k of Object.keys(this.fxMidi) as FxKey[]) if (this.fxMidi[k] === note) delete this.fxMidi[k]
     for (const h of Object.keys(this.colorMidi)) if (this.colorMidi[h] === note) delete this.colorMidi[h]
     this.patterns.forEach((p) => {
@@ -4075,12 +4081,30 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnPattern = null
       this.learnScene = null
+      this.learnMotifChase = false
     }
     this.bump(false)
   }
   /** 特別ストロボの MIDI 割当を解除。 */
   clearStrobeShortcut(): void {
     this.strobeMidi = null
+    this.bump()
+  }
+  /** モチーフチェイスの MIDI Learn 待機を開始/解除。 */
+  setLearnMotifChase(on: boolean): void {
+    this.learnMotifChase = on
+    if (on) {
+      this.learnFx = null
+      this.learnColor = null
+      this.learnPattern = null
+      this.learnScene = null
+      this.learnStrobe = false
+    }
+    this.bump(false)
+  }
+  /** モチーフチェイスの MIDI 割当を解除。 */
+  clearMotifChaseShortcut(): void {
+    this.motifChaseMidi = null
     this.bump()
   }
   /** 特別ストロボの速さ 0..1。 */
@@ -4101,8 +4125,15 @@ export class ImageLightEngine {
         this.strobeMidi = note
         this.learnStrobe = false
         this.bump()
+      } else if (this.learnMotifChase) {
+        this.clearMidiNoteEverywhere(note) // 1ノート1役
+        this.motifChaseMidi = note
+        this.learnMotifChase = false
+        this.bump()
       } else if (this.strobeMidi != null && note === this.strobeMidi) {
         this.toggleStrobeOverride()
+      } else if (this.motifChaseMidi != null && note === this.motifChaseMidi) {
+        this.setMotifChase(!this.motifChase)
       } else {
         const fk = (Object.keys(this.fxMidi) as FxKey[]).find((k) => this.fxMidi[k] === note)
         const ck = Object.keys(this.colorMidi).find((h) => this.colorMidi[h] === note)
@@ -4208,7 +4239,8 @@ export class ImageLightEngine {
       sceneFadeMode: this.sceneFadeMode,
       sceneFadeMs: this.sceneFadeMs,
       strobeMidi: this.strobeMidi,
-      strobeRate: this.strobeRate
+      strobeRate: this.strobeRate,
+      motifChaseMidi: this.motifChaseMidi
     }
   }
   // rigData を取り込む（localStorage / 公演読込 共通）。灯体配置は読み込まない。
@@ -4233,6 +4265,7 @@ export class ImageLightEngine {
     if (d.sceneFadeMode === 'cut' || d.sceneFadeMode === 'fade') this.sceneFadeMode = d.sceneFadeMode
     if (typeof d.sceneFadeMs === 'number') this.sceneFadeMs = d.sceneFadeMs
     if (typeof d.strobeMidi === 'number') this.strobeMidi = d.strobeMidi
+    if (typeof d.motifChaseMidi === 'number') this.motifChaseMidi = d.motifChaseMidi
     if (typeof d.strobeRate === 'number') this.strobeRate = d.strobeRate
   }
   private saveRig(): void {

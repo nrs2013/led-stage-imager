@@ -1457,6 +1457,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   >
                     {engine.motifChase ? 'Running (tap to stop)' : 'Chase motifs'}
                   </button>
+                  <button
+                    className={'il-mini' + (engine.learnMotifChase ? ' learnon' : '')}
+                    style={{ flexShrink: 0, padding: '2px 8px', fontSize: 11 }}
+                    onClick={(e) => e.shiftKey ? engine.clearMotifChaseShortcut() : engine.setLearnMotifChase(!engine.learnMotifChase)}
+                    title="MIDIのパッドでチェイスを入/切。押して待機→パッドを叩くと割当（Shift+クリックで解除）"
+                  >
+                    {engine.learnMotifChase ? '待機…' : engine.motifChaseMidi != null ? 'MIDI ' + engine.motifChaseMidi : 'MIDI'}
+                  </button>
                 </div>
                 {engine.beams.map((b, i) => {
                   if (!b.motif) return null
@@ -1789,6 +1797,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       onClick={() => engine.setMotifChase(!engine.motifChase)}
                     >
                       {engine.motifChase ? 'Running (tap to stop)' : 'Chase motifs'}
+                    </button>
+                    <button
+                      className={'il-mini' + (engine.learnMotifChase ? ' learnon' : '')}
+                      style={{ flexShrink: 0, padding: '2px 8px', fontSize: 11 }}
+                      onClick={(e) => e.shiftKey ? engine.clearMotifChaseShortcut() : engine.setLearnMotifChase(!engine.learnMotifChase)}
+                      title="MIDIのパッドでチェイスを入/切。押して待機→パッドを叩くと割当（Shift+クリックで解除）"
+                    >
+                      {engine.learnMotifChase ? '待機…' : engine.motifChaseMidi != null ? 'MIDI ' + engine.motifChaseMidi : 'MIDI'}
                     </button>
                   </div>
                 )}
