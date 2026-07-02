@@ -114,6 +114,8 @@ export interface Beam {
   _tn?: number
   _cn?: RGB3
   _zp?: number
+  _ext?: number // 一灯街灯: 外光サンプルのキャッシュ（保存しない）
+  _extT?: number // 同・最終サンプル時刻(ms)
   // モチーフ（街灯・シャンデリア・マーキー・電球・PAR・PAT・ミニブル・ピクセルPAT・星・垂れ幕）
   motif?:
     | 'streetlamp'
@@ -1312,26 +1314,38 @@ export class ImageLightEngine {
     }
     return img
   }
-  /** 一灯街灯の本体に当たっているステージ光の量(0..1)。光マップ(lc)を胴に沿って数点サンプルし最大を採る。 */
-  private extLightAt(x: number, y: number, d: number): number {
+  /** 一灯街灯の本体に当たっているステージ光の量(0..1)。光マップ(lc)を胴に沿ってサンプルし最大を採る。
+   *  🔴 getImageData は GPU→CPU 読み戻しで重い（lc は willReadFrequently ではない）。毎フレーム×灯体ごとに
+   *  呼ぶと本番でカクつくので、約150msごとに1回だけ・縦1列の getImageData 1回にまとめ、間はキャッシュを返す。 */
+  private extLightAt(b: Beam, d: number): number {
+    const now = performance.now()
+    if (b._extT !== undefined && now - b._extT < 150) return b._ext ?? 0
     const S = d / 940
+    const qx = Math.round(b.x * Q)
+    const ys = [300, 520, 760, 930].map((m) => Math.round((b.y + (m - 162) * S) * Q))
+    const y0 = Math.max(0, Math.min(...ys))
+    const y1 = Math.min(IH - 1, Math.max(...ys))
     let mx = 0
-    for (const m of [300, 520, 760, 930]) {
-      const qx = Math.round(x * Q)
-      const qy = Math.round((y + (m - 162) * S) * Q)
-      if (qx < 0 || qx >= IW || qy < 0 || qy >= IH) continue
-      const px = this.lc.getImageData(qx, qy, 1, 1).data
-      const v = (px[0] + px[1] + px[2]) / 3
-      if (v > mx) mx = v
+    if (qx >= 0 && qx < IW && y1 >= y0) {
+      const col = this.lc.getImageData(qx, y0, 1, y1 - y0 + 1).data
+      for (const y of ys) {
+        if (y < y0 || y > y1) continue
+        const o = (y - y0) * 4
+        const v = (col[o] + col[o + 1] + col[o + 2]) / 3
+        if (v > mx) mx = v
+      }
     }
-    return Math.min(1, mx / 165)
+    const ext = Math.min(1, mx / 165)
+    b._ext = ext
+    b._extT = now
+    return ext
   }
   private drawMotifLit(g: CanvasRenderingContext2D, b: Beam, I: number, ms: number): void {
     const c = b._cn ?? b.color
     const d = b.motifDiam ?? 200
     // 一灯街灯：外光(LIGHTの灯体)が当たると本体が見える＝光マップ参照。自分のIが0でも外光があれば描く
     if (b.motif === 'streetlamp1') {
-      const ext = this.extLightAt(b.x, b.y, d)
+      const ext = this.extLightAt(b, d)
       if (I <= 0.004 && ext <= 0.01) return
       const rgb1: RGB3 = [c[0] * I, c[1] * I, c[2] * I]
       drawStreetLamp1Lit(g, b.x, b.y, d, rgb1, ext)

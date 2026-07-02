@@ -285,6 +285,11 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // 特効(SFX)タブ。設定値は engine が唯一の正＝スライダーは engine を直接読み書きする
   //（ローカルmirror state を持たない＝保存復元・MIDIでズレない）。UIだけの状態は下記2つ。
   const [sfxType, setSfxType] = useState<'flame' | 'sparkler' | 'rain' | 'smoke'>('flame')
+  // DECORタブで最後に押した飾り＝⌘+クリックで置く種類（SFXタブの sfxType と同じ考え方）。null=まだ未選択
+  const [decorType, setDecorType] = useState<
+    | 'streetlamp' | 'streetlamp1' | 'chandelier' | 'marquee' | 'bulb' | 'parlight'
+    | 'blinder' | 'patt' | 'pixelpatt' | 'stars' | 'festoon' | null
+  >(null)
   const [showAdv, setShowAdv] = useState(false) // 「詳しく」（細かい設定）の開閉
   const [showRigSize, setShowRigSize] = useState(false) // 照明モード: サイズ(出口幅/広がり/伸び)の折りたたみ。普段は隠す
   const hudTabRef = useRef(hudTab)
@@ -757,14 +762,23 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     // さらに、いま選択中の灯体を最優先＝コピー直後の群を確実につかめる。
     const hitR = (b: typeof beams[0]) => (b.motif || b.front) ? Math.max(30, (b.motifDiam ?? 200) / 2) : 30
     const hitRY = (b: typeof beams[0]) => (b.motif || b.front) ? Math.max(24, (b.motifDiam ?? 200) / 2) : 24
+    // 一灯街灯(Lamp1)は縦長（中心=ランタン・下へ柱と台座）。丸判定だと「柱を掴めない／横の空白を誤爆」
+    // になるので、見た目のシルエットに沿った縦長の判定にする。
+    const hitTest = (b: typeof beams[0]): boolean => {
+      if (b.motif === 'streetlamp1') {
+        const dd = b.motifDiam ?? 220
+        return (
+          Math.abs(p.x - b.x) < Math.max(34, dd * 0.15) &&
+          p.y > b.y - Math.max(24, dd * 0.16) &&
+          p.y < b.y + dd * 0.95
+        )
+      }
+      return Math.abs(p.x - b.x) < hitR(b) && Math.abs(p.y - b.y) < hitRY(b)
+    }
     let hit = -1
     for (let i = beams.length - 1; i >= 0; i--) {
       const b = beams[i]
-      if (
-        engine.isSelected(i) &&
-        Math.abs(p.x - b.x) < hitR(b) &&
-        Math.abs(p.y - b.y) < hitRY(b)
-      ) {
+      if (engine.isSelected(i) && hitTest(b)) {
         hit = i
         break
       }
@@ -772,7 +786,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     if (hit < 0)
       for (let i = beams.length - 1; i >= 0; i--) {
         const b = beams[i]
-        if (Math.abs(p.x - b.x) < hitR(b) && Math.abs(p.y - b.y) < hitRY(b)) {
+        if (hitTest(b)) {
           hit = i
           break
         }
@@ -788,10 +802,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         dragStartRef.current = p
       }
     } else if ((e.metaKey || e.ctrlKey) && beams.length < MAX_BEAMS) {
-      // タブ連動: SFXタブなら選んでる特効を、それ以外は照明を ⌘+クリックで追加（誤爆防止）。
-      // 雨/雪・スモークは「受け系」で置く灯体ではない＝⌘+クリックでは何も置かない。
+      // タブ連動: SFXタブなら選んでる特効を、DECORタブなら最後に押した飾りを、
+      // それ以外は照明を ⌘＋クリックで追加（誤爆防止）。
+      // 雨/雪・スモークは「受け系」で置く灯体ではない＝⌘＋クリックでは何も置かない。
       if (hudTab === 'sfx') {
         if (sfxType === 'flame' || sfxType === 'sparkler') engine.addMotifAuto(sfxType, p.x, p.y)
+      } else if (hudTab === 'decor' && decorType) {
+        engine.addMotifAuto(decorType, p.x, p.y)
       } else engine.addFixtureAt(p.x, p.y)
       engine.beginDrag()
       draggingRef.current = true
@@ -860,7 +877,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     }
     if (!draggingRef.current || !dragStartRef.current) return
     // 開始位置からの総移動量を渡す＝engine 側で整列・等間隔へ吸着する。
-    // Shift を押している間は吸着もガイドも一時 OFF（Figma の ⌘ と同じ役回り）。
+    // Shift を押している間は吸着もガイドも一時 OFF（自由に微動かしできる）。
     engine.dragTo(p.x - dragStartRef.current.x, p.y - dragStartRef.current.y, !e.shiftKey)
   }
   const onStageUp = (): void => {
@@ -1006,7 +1023,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 </tr>
                 <tr>
                   <th>灯体を追加</th>
-                  <td>⌘＋クリック</td>
+                  <td>⌘＋クリック（SFXタブ＝選んだ特効／DECORタブ＝最後に選んだ飾り／他タブ＝照明）</td>
                 </tr>
                 <tr>
                   <th>複数選択</th>
@@ -1022,7 +1039,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 </tr>
                 <tr>
                   <th>削除</th>
-                  <td>Delete（選択中）</td>
+                  <td>Delete / Backspace（選択中）</td>
                 </tr>
                 <tr>
                   <th>コピー／貼り付け</th>
@@ -1877,7 +1894,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       <button
                         className="il-mini"
                         onClick={() => engine.removeSelectedPiece()}
-                        title="選択中のピースを削除（Deleteでも）"
+                        title="選択中のピースを削除（Delete / Backspace でも）"
                       >
                         ピース削除
                       </button>
@@ -1894,26 +1911,27 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <span className="il2-kind">電飾</span>
                   <b>DECOR</b>
                 </div>
-                <div className="il-lbl" style={{ marginTop: 4 }}>ADD（灯体・モチーフを置く）</div>
+                <div className="il-lbl" style={{ marginTop: 4 }}>ADD（押して追加。⌘＋クリック＝最後に選んだ飾りを好きな場所に）</div>
                 <div className="il-partgrid">
                   {([
-                    { type: 'streetlamp' as const, label: 'Street' },
-                    { type: 'streetlamp1' as const, label: 'Lamp1' },
-                    { type: 'chandelier' as const, label: 'Chandelier' },
-                    { type: 'marquee' as const, label: 'Marquee' },
-                    { type: 'bulb' as const, label: 'Bulb' },
-                    { type: 'parlight' as const, label: 'PAR' },
-                    { type: 'blinder' as const, label: '8Mini' },
-                    { type: 'patt' as const, label: 'PAT' },
-                    { type: 'pixelpatt' as const, label: 'PixelPAT' },
-                    { type: 'stars' as const, label: 'Star' },
-                    { type: 'festoon' as const, label: 'Banner' }
-                  ]).map(({ type, label }) => (
+                    { type: 'streetlamp' as const, label: 'Street', title: '二灯の街灯（ランタン2つ・装飾の作り込み）' },
+                    { type: 'streetlamp1' as const, label: 'Lamp1', title: '一灯のリアル街灯。照明(LIGHT)が当たると本体が見え、ランタンを点けると周りも柔らかく光ります' },
+                    { type: 'chandelier' as const, label: 'Chandelier', title: 'シャンデリア（ロウソク球）' },
+                    { type: 'marquee' as const, label: 'Marquee', title: '電球文字（マーキー）。TEXT は LIGHT タブで変更' },
+                    { type: 'bulb' as const, label: 'Bulb', title: 'ボール電球1個' },
+                    { type: 'parlight' as const, label: 'PAR', title: 'PARライト（灯体そのものが見える）' },
+                    { type: 'blinder' as const, label: '8Mini', title: 'ミニブラインダー（8灯）' },
+                    { type: 'patt' as const, label: 'PAT', title: 'PATライト' },
+                    { type: 'pixelpatt' as const, label: 'PixelPAT', title: 'ピクセルPAT（粒で光る）' },
+                    { type: 'stars' as const, label: 'Star', title: '星空（ちらつく星）' },
+                    { type: 'festoon' as const, label: 'Banner', title: 'タレ電飾（垂れたワイヤに電球が並ぶ）' }
+                  ]).map(({ type, label, title }) => (
                     <button
                       key={type}
                       className="il-part"
                       disabled={engine.beams.length >= MAX_BEAMS}
-                      onClick={() => engine.addMotifAuto(type)}
+                      onClick={() => { setDecorType(type); engine.addMotifAuto(type) }}
+                      title={title}
                     >
                       <svg viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: PART_ICON[type] }} />
                       <span>{label}</span>
@@ -1929,6 +1947,21 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <span>画像</span>
                   </button>
                 </div>
+                {ref?.motif && (
+                  <>
+                    <div className="il-lbl" style={{ marginTop: 8 }}>大きさ（選んだ灯体：街灯・タレ電飾など）</div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={4}
+                        max={600}
+                        value={ref.motifDiam ?? 200}
+                        onChange={(e) => engine.setMotifDiam(+e.target.value)}
+                      />
+                      <div className="il-val big">{ref.motifDiam ?? 200}px</div>
+                    </div>
+                  </>
+                )}
                 <button
                   className={'il2-switch' + (engine.decor.enabled ? ' on' : '')}
                   onClick={() => engine.setDecor({ enabled: !engine.decor.enabled })}
@@ -2498,7 +2531,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 )}
               </div>
               )}
-              {engine.beams.length < MAX_BEAMS && (
+              {!lightingOnly && engine.beams.length < MAX_BEAMS && (
                 <button
                   className="il-psadd"
                   style={{ marginTop: 8 }}
@@ -2575,7 +2608,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             {ref?.motif && (
               <>
                 <div className="il-lbl">
-                  MOTIF SIZE
+                  大きさ（MOTIF SIZE・DECORタブの「大きさ」と同じ値）
                 </div>
                 <div className="il-frow">
                   <input
