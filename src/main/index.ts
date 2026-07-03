@@ -35,7 +35,10 @@ let previewWindow: BrowserWindow | null = null
 let lastChart: unknown = null
 let midiInputs: string[] = [] // renderer が検出した MIDI 入力ポート名（ステータスバー表示用）
 let currentChartPath: string | null = null // 今開いている .ledimager のパス（⌘Sの上書き先）
+// .ledshow の上書き先は renderer（実際に開けた公演を知っている側）が保存のたびに渡してくる。
+// main が覚える方式は「開くのをキャンセルしたのに保存先だけ切り替わる」事故になるためやめた。
 let pendingOpenPath: string | null = null // 起動直後などで、画面が出来たら開くべきファイル
+let closeConfirmed = false // 「保存しますか？」確認が済んだら true＝そのまま閉じてよい
 
 /**
  * 開発用「のぞき窓」（のむさん 2026-06-20）。127.0.0.1:7331 にローカル限定の小さなHTTPを立て、
@@ -193,11 +196,12 @@ function deliverOpenFile(p: string): void {
   const ready = w && !w.isDestroyed() && !w.webContents.isLoading()
   const isShow = p.toLowerCase().endsWith('.ledshow')
   // .ledshow は画像照明モードの公演。チャートの ⌘S 上書き先(currentChartPath)にはしない。
+  // 上書き先の確定は renderer が「実際に開けた」時に行う（ここでは決めない）。
   if (!isShow) currentChartPath = p
   if (ready) {
     try {
       if (isShow) {
-        w!.webContents.send('imagelight:open-path', readFileSync(p))
+        w!.webContents.send('imagelight:open-path', { bytes: readFileSync(p), path: p })
       } else {
         w!.webContents.send('chart:open-path', readFileSync(p, 'utf8'))
       }
@@ -225,7 +229,79 @@ if (process.platform !== 'darwin') {
   if (arg && existsSync(arg)) pendingOpenPath = arg
 }
 
+/** 閉じる/終了の前に「保存されていない変更」を確認する（画像照明モードのみ対象）。
+ *  renderer の window.__ilDirty / __ilSaveForClose を呼んで判断。1.5秒応答が無い時は
+ *  安全側＝「未保存あり」とみなして確認ダイアログを出す（黙って閉じてデータを落とさない）。 */
+let confirmRunning = false
+let upgradeToQuit = false // 確認ダイアログ中に ⌘Q が来たら「閉じる」を「終了」に格上げする
+async function confirmAndClose(kind: 'quit' | 'window'): Promise<void> {
+  if (confirmRunning) {
+    if (kind === 'quit') upgradeToQuit = true // ダイアログ応答後にちゃんと終了まで進める
+    return
+  }
+  confirmRunning = true
+  try {
+    const w = mainWindow
+    const finish = (): void => {
+      closeConfirmed = true
+      const doQuit = kind === 'quit' || upgradeToQuit
+      upgradeToQuit = false
+      if (doQuit) app.quit()
+      else w?.close()
+    }
+    if (!w || w.isDestroyed()) return finish()
+    // 無応答（固まり・確認中）は安全側＝「未保存あり」として扱う。勝手に閉じてデータを
+    // 落とすより、ダイアログを1枚多く出す方がマシ（のむさんの最優先＝データ消失防止）。
+    const dirty = await Promise.race([
+      w.webContents.executeJavaScript('window.__ilDirty ? !!window.__ilDirty() : false', true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1500))
+    ]).catch(() => true)
+    if (!dirty) return finish()
+    if (w.isMinimized()) w.restore() // 最小化中はシートが見えず「終了できない」ように見えるため
+    w.focus()
+    let response = 1 // ダイアログ自体が出せない異常時は「保存せずに閉じる」（自動バックアップは有る）
+    try {
+      response = (
+        await dialog.showMessageBox(w, {
+          type: 'question',
+          buttons: ['保存して閉じる', '保存せずに閉じる', 'キャンセル'],
+          defaultId: 0,
+          cancelId: 2,
+          message: '保存されていない変更があります',
+          detail:
+            '公演ファイル(.ledshow)に保存してから閉じますか？\n（保存しなくても自動バックアップは残っています）'
+        })
+      ).response
+    } catch {
+      /* ウィンドウ破棄などでダイアログが出せない → 上の既定(保存せず閉じる)で進む */
+    }
+    if (response === 2) {
+      upgradeToQuit = false // やめた＝格上げ予約も破棄
+      return
+    }
+    if (response === 0) {
+      // 保存ダイアログでのむさんが考える時間は待つが、画面が固まったままだと
+      // confirmRunning が永遠に立ちっぱなしで二度と閉じられなくなるので上限10分。
+      const ok = await Promise.race([
+        w.webContents.executeJavaScript(
+          'window.__ilSaveForClose ? window.__ilSaveForClose() : true',
+          true
+        ),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10 * 60 * 1000))
+      ]).catch(() => false)
+      if (!ok) {
+        upgradeToQuit = false // 中止＝⌘Q格上げの予約も破棄（次の「閉じる」で勝手に終了しない）
+        return // 保存ダイアログでキャンセルした＝閉じるのも中止
+      }
+    }
+    finish()
+  } finally {
+    confirmRunning = false
+  }
+}
+
 function createWindow(): void {
+  closeConfirmed = false // ウィンドウを作り直したら確認もやり直し（Dockから再表示など）
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -241,6 +317,13 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+
+  // 赤ボタン等で閉じる前に、未保存の変更があれば「保存しますか？」を確認する。
+  mainWindow.on('close', (e) => {
+    if (closeConfirmed) return
+    e.preventDefault()
+    void confirmAndClose('window')
+  })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -477,21 +560,61 @@ app.whenReady().then(() => {
       return dir
     }
   )
+  // .ledshow を壊さず書く：一時ファイルに書き切ってから置き換え（途中クラッシュでも元が残る）。
+  const writeShowFileSafe = (p: string, bytes: Uint8Array): void => {
+    const tmp = p + '.tmp'
+    writeFileSync(tmp, Buffer.from(bytes))
+    renameSync(tmp, p)
+  }
   // 1ファイル(.ledshow)保存: renderer で ZIP 済みのバイト列を書き出す。
-  ipcMain.handle('imagelight:save-show-file', async (_e, bytes: Uint8Array, name: string) => {
-    const res = await dialog.showSaveDialog({
-      title: '公演を1ファイルで保存',
-      defaultPath: `${name || 'show'}.ledshow`,
-      filters: [{ name: 'LED STAGE IMAGER Show', extensions: ['ledshow'] }],
-      buttonLabel: '保存'
+  // saveAs=false は普通の書類アプリの⌘S＝2回目からは同じファイルへ黙って上書き。
+  // 上書き先(targetPath)は renderer が渡す＝「実際に開けている公演」以外を絶対に上書きしない。
+  ipcMain.handle(
+    'imagelight:save-show-file',
+    async (_e, bytes: Uint8Array, name: string, saveAs?: boolean, targetPath?: string | null) => {
+      if (!saveAs && targetPath) {
+        try {
+          writeShowFileSafe(targetPath, bytes)
+          return targetPath
+        } catch {
+          /* 書けない（削除・権限・ボリューム外れ）→ 下の名前を付けて保存へ落とす */
+        }
+      }
+      const w = mainWindow
+      if (!w || w.isDestroyed()) return null
+      // 親ウィンドウ付き(シート)＝ダイアログ中に裏の画面を触って編集が進む事故を防ぐ
+      const res = await dialog.showSaveDialog(w, {
+        title: saveAs ? '別名で保存' : '公演を1ファイルで保存',
+        defaultPath: targetPath ?? `${name || 'show'}.ledshow`,
+        filters: [{ name: 'LED STAGE IMAGER Show', extensions: ['ledshow'] }],
+        buttonLabel: '保存'
+      })
+      if (res.canceled || !res.filePath) return null
+      writeShowFileSafe(res.filePath, bytes)
+      return res.filePath
+    }
+  )
+  // 「保存されていない変更があります」の三択（保存する/保存しない/キャンセル）。
+  // renderer の window.confirm はJSを止めて他の確認と衝突するため、ネイティブのシートで出す。
+  ipcMain.handle('imagelight:ask-save', async (_e, situation: string) => {
+    const w = mainWindow
+    if (!w || w.isDestroyed()) return 'cancel' // 聞けない時は安全側＝何もしない
+    if (w.isMinimized()) w.restore()
+    const { response } = await dialog.showMessageBox(w, {
+      type: 'question',
+      buttons: ['保存する', '保存しない', 'キャンセル'],
+      defaultId: 0,
+      cancelId: 2,
+      message: '保存されていない変更があります',
+      detail: situation
     })
-    if (res.canceled || !res.filePath) return null
-    writeFileSync(res.filePath, Buffer.from(bytes))
-    return res.filePath
+    return response === 0 ? 'save' : response === 1 ? 'discard' : 'cancel'
   })
   ipcMain.handle('imagelight:open-show', async () => {
+    const w = mainWindow
+    if (!w || w.isDestroyed()) return null
     // 1ファイル(.ledshow)も 旧フォルダ(show.json+media/)も、どちらも選べる。
-    const res = await dialog.showOpenDialog({
+    const res = await dialog.showOpenDialog(w, {
       title: '公演を開く（1ファイル または フォルダ）',
       properties: ['openFile', 'openDirectory'],
       filters: [{ name: 'LED STAGE IMAGER Show', extensions: ['ledshow'] }]
@@ -499,8 +622,9 @@ app.whenReady().then(() => {
     if (res.canceled || res.filePaths.length === 0) return null
     const p = res.filePaths[0]
     // ファイル(.ledshow)なら中身(バイト)を返す→renderer で解凍。フォルダなら従来どおり。
+    // 上書き先の確定は renderer が「実際に開けた」後に行う（開けなかった/やめた時に切り替えない）。
     try {
-      if (statSync(p).isFile()) return { zip: readFileSync(p) }
+      if (statSync(p).isFile()) return { zip: readFileSync(p), path: p }
     } catch {
       return { error: 'ファイルを読めませんでした' }
     }
@@ -699,7 +823,13 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (e) => {
+  // ⌘Q でも未保存の確認を通す。確認済み（またはウィンドウ無し）ならそのまま終了。
+  if (!closeConfirmed && mainWindow && !mainWindow.isDestroyed()) {
+    e.preventDefault()
+    void confirmAndClose('quit')
+    return
+  }
   stopEngine()
 })
 

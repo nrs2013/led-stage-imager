@@ -27,9 +27,13 @@ cd ~/dev/decor-studio
 npm run typecheck                      # 壊れた版を渡さない。先に必ず通す
 npm run build:mac                      # → dist/mac-arm64/"LED STAGE IMAGER.app"
 osascript -e 'quit app id "com.decor.studio"'
-ditto "dist/mac-arm64/LED STAGE IMAGER.app" "$HOME/Desktop/LED STAGE IMAGER.app"
-xattr -cr "$HOME/Desktop/LED STAGE IMAGER.app"
-open "$HOME/Desktop/LED STAGE IMAGER.app"
+# 未保存があると「保存しますか？」で quit が止まる。終了を待ってから差し替える（動作中に上書きしない）
+for i in $(seq 1 30); do pgrep -f "MacOS/LED STAGE IMAGER" >/dev/null || break; sleep 1; done
+pgrep -f "MacOS/LED STAGE IMAGER" >/dev/null && echo "⚠️ まだ起動中（保存確認に答えて）" || {
+  ditto "dist/mac-arm64/LED STAGE IMAGER.app" "$HOME/Desktop/LED STAGE IMAGER.app"
+  xattr -cr "$HOME/Desktop/LED STAGE IMAGER.app"
+  open "$HOME/Desktop/LED STAGE IMAGER.app"
+}
 ```
 - **Windows配布**：`npm run build:win` はホストarch依存でarm64になる。友達用は **x64**：`npx electron-builder --win --x64`（→ `dist/decor-studio-1.0.0-setup.exe`）。WindowsはMIDI不可（CoreMIDIはMac専用）。Mac版はAppleシリコン向け。
 - `dist/.metadata_never_index` を置く＝ビルド成果物をSpotlight索引除外（再ビルド直後にMac全体が重くなるのを防ぐ）。
@@ -45,7 +49,7 @@ open "$HOME/Desktop/LED STAGE IMAGER.app"
 - **ビーム調整つまみ**（`engine.ts` 上部）：`BEAM_SOFT`(全体ぼかし)・`BEAM_ROOT_BOOST`(根元の明るさ)・`CONTACT_HOT`(白焼け強さ)・`CONTACT_HOT_FROM`(これ未満の明るさでは白く焼けない)・`CONTACT_NIJIMI`(色にじみ)。
 - **Windows NDI**：同梱DLL(`resources/ndi/Processing.NDI.Lib.x64.dll`)＋koffi(win32_x64)を最優先で読む設計（NDI Tools不要）。出ない時はDLLでなく**Windowsファイアウォール / NDI探索(mDNS) / 受け手のサブネット**を疑う。Interface(回線)選択は **Art-Net入力専用でNDIに無関係**。
 - **データ保存先**＝`~/Library/Application Support/decor-studio/`（il-autosave/show.json＋media、Local Storage）。アプリ差し替えでは消えない。
-- **画像照明の「保存」＝1ファイル `.ledshow`**（ZIP中身＝show.json＋media/写真動画・アイコン付き・ダブルクリックで開く）。旧フォルダ保存(show.json＋media/)も「開く」で読める（後方互換・壊さない）。media のキーは `media/001.png` 形式で serialize/zip/restore 全て一致必須（`showbundle.ts`＝zip/unzip・往復テスト有り）。チャートは別で `.ledimager`(単一JSON)。
+- **画像照明の「保存」＝1ファイル `.ledshow`**（ZIP中身＝show.json＋media/写真動画・アイコン付き・ダブルクリックで開く）。旧フォルダ保存(show.json＋media/)も「開く」で読める（後方互換・壊さない）。media のキーは `media/001.png` 形式で serialize/zip/restore 全て一致必須（`showbundle.ts`＝zip/unzip・往復テスト有り）。チャートは別で `.ledimager`(単一JSON)。⌘S＝上書き・⇧⌘S＝別名保存。🔴上書き先は renderer の `showPathRef`（実際に開けた/保存できた時だけ更新）を保存のたびに main へ渡す＝main に保存先を覚えさせない（開くキャンセルや読込失敗で別ファイルを上書きする事故防止）。閉じる/⌘Q/モード退出/別公演を開く時は未保存なら三択確認（`window.__ilDirty`/`__ilSaveForClose`/`imagelight:ask-save`・無応答1.5秒は**dirty扱い**が正）。renderer で `window.confirm` は使わない（JSが止まり終了確認が素通りする）。書き込みは tmp→rename の安全方式。
 - **ミュート/ソロは写真(シーン)ごと保存・配置は全シーン共通**（非対称・仕様）。
 
 ## 作業の型

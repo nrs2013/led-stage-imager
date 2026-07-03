@@ -6,6 +6,7 @@ import { DECOR_NONDIR } from './decor-pattern'
 import type { DecorPatternKind, DecorEffect, DecorDirection } from './decor-pattern'
 import { fileToDataUrl } from '../io/image-pick'
 import { zipShow, unzipShow } from '../io/showbundle'
+import { viewFromZoom, zoomToward, clampCenter } from './view-zoom'
 import { useStore } from '../state/store'
 import { PART_ICON } from '../render/part-icons'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
@@ -27,10 +28,16 @@ interface DecorApi {
     media: { file: string; dataUrl: string }[],
     name: string
   ) => Promise<string | null>
-  saveImageLightShowFile?: (bytes: Uint8Array, name: string) => Promise<string | null>
+  saveImageLightShowFile?: (
+    bytes: Uint8Array,
+    name: string,
+    saveAs?: boolean,
+    targetPath?: string | null
+  ) => Promise<string | null>
+  askSaveChoice?: (situation: string) => Promise<'save' | 'discard' | 'cancel'>
   openImageLightShow?: () => Promise<
     | { json: string; media: Record<string, string> }
-    | { zip: Uint8Array }
+    | { zip: Uint8Array; path: string }
     | { error: string }
     | null
   >
@@ -46,6 +53,8 @@ interface DecorApi {
   onMidiMessage?: (cb: (msg: [number, number, number]) => void) => (() => void) | void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
+// パスからファイル名だけ取り出す（Mac は / ・Windows は \ 区切りどちらも）
+const baseName = (p: string): string => p.split(/[\\/]/).pop() ?? p
 
 // Parts(灯体・モチーフ)のアイコンは render/part-icons.ts に共通化（PART_ICON を import）。
 // このモードでは .il-part 側で --icon-accent: var(--il-amber) を指定し、暖色で発光させる。
@@ -128,9 +137,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     }
     window.addEventListener('pointerdown', mark, true)
     window.addEventListener('keydown', mark, true)
+    // 写真をドラッグ&ドロップだけで入れたセッションも「触った」扱いにする
+    //（これが無いと自動保存も閉じる時の確認も効かず、ドロップした公演が黙って消える）。
+    window.addEventListener('drop', mark, true)
     return () => {
       window.removeEventListener('pointerdown', mark, true)
       window.removeEventListener('keydown', mark, true)
+      window.removeEventListener('drop', mark, true)
     }
   }, [])
 
@@ -172,15 +185,27 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const pendingShowFile = useStore((s) => s.pendingShowFile)
   useEffect(() => {
     if (!pendingShowFile) return
-    const bytes = pendingShowFile
+    const { bytes, path } = pendingShowFile
     useStore.getState().setPendingShowFile(null) // 二重復元しないよう即クリア
     ;(async () => {
+      // 未保存の変更があるなら、上書きで消える前に確認（ダブルクリックで開いた場合も同じ）
+      if (!(await ensureSavedOrDiscard('このまま別の公演を開くと、今の変更は失われます。'))) return
       try {
         flash('読込中…')
         const jm = await unzipShow(bytes)
         const ok = await engine.restoreShow(jm.json, jm.media)
+        if (ok) {
+          savedVersionRef.current = engine.getVersion() // 開いた直後は「保存済み」扱い
+          showPathRef.current = path // 実際に開けた時だけ上書き先を確定
+          setShowFileName(baseName(path))
+        } else {
+          showPathRef.current = null // 中途半端な読込で別ファイルを上書きしない
+          setShowFileName(null)
+        }
         flash(ok ? '開きました' : '読込に失敗')
       } catch {
+        showPathRef.current = null
+        setShowFileName(null)
         flash('読込に失敗')
       }
     })()
@@ -228,6 +253,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const colorPickRef = useRef<HTMLInputElement>(null)
   const psheetRef = useRef<HTMLDivElement>(null) // パッチ表（行リスト）— ↑↓キーで選択行を移動
   const savingRef = useRef(false) // ⌘S 保存中フラグ（二重起動防止）
+  // 「未保存の変更があるか」の判定用：最後に保存/読込した時点の engine バージョン。
+  // 閉じる時の確認（保存しますか？）とタイトル横のファイル名表示に使う。
+  const savedVersionRef = useRef(0)
+  // 今開いている .ledshow のフルパス＝⌘S の上書き先。「実際に開けた/保存できた」時だけ更新する
+  //（開くのをキャンセルした・読込に失敗した時に、別のファイルを上書きする事故を防ぐ）。
+  const showPathRef = useRef<string | null>(null)
+  const [showFileName, setShowFileName] = useState<string | null>(null) // 今開いている .ledshow の名前
   // 写真の 4 辺スケールワープ — どの辺をつかんでいるか + 開始位置 + ドラッグ開始時の box
   const warpDragRef = useRef<{
     edge: 'top' | 'bottom' | 'left' | 'right'
@@ -265,7 +297,36 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // 静止画は描き直さない（カクつき防止）ためのフラグ: 最後に描いたversion＋強制描画フラグ
   const lastVRef = useRef(-1)
   const forceRenderRef = useRef(true)
+  // 表示ズーム/パン専用の「貼り直しだけ」フラグ。forceRender と違いエンジン再計算も
+  // 出力(Syphon/NDI)送信も走らせない＝ピンチ中に本番出力へ負荷をかけない。
+  const displayDirtyRef = useRef(false)
   const [renaming, setRenaming] = useState<{ i: number; value: string } | null>(null)
+
+  // ---- 表示ズーム（画面の見た目だけ拡大・縮小。Syphon/NDI出力には一切影響しない）
+  // f=fit(全体表示)比の倍率、cx/cy=画面中央に見せる舞台(LW×LH)座標。
+  // viewRef はここから毎回導出する＝リサイズしてもズーム状態が保たれる。
+  const zoomRef = useRef({ f: 1, cx: LW / 2, cy: LH / 2 })
+  // ボタン表示は「拡大中か」だけ持つ（%を state にするとピンチ中に巨大UIが再レンダーされ続けて重い）
+  const [zoomed, setZoomed] = useState(false)
+  const applyView = (): void => {
+    const cv = displayRef.current
+    if (!cv) return
+    // dpr は「実際のキャンバス解像度 ÷ 見た目の幅」から出す。window.devicePixelRatio を
+    // 直接使うと、別モニターへ動かした直後（キャンバスが古い解像度のまま）にクリック位置が
+    // ズレる。実測比なら常に描画とクリック変換が一致する。
+    const rect = cv.getBoundingClientRect()
+    const dpr = rect.width > 0 ? cv.width / rect.width : window.devicePixelRatio || 1
+    // 中心の制限（迷子防止）を反映してから view を導出（計算は view-zoom.ts＝テスト済みの純関数）
+    zoomRef.current = clampCenter(zoomRef.current, cv.width, cv.height, LW, LH)
+    const v = viewFromZoom(zoomRef.current, cv.width, cv.height, LW, LH)
+    viewRef.current = { scale: v.scale, dpr, ox: v.ox, oy: v.oy }
+    displayDirtyRef.current = true // 貼り直しだけ（エンジン再計算・出力送信はしない）
+    setZoomed(zoomRef.current.f > 1.0001) // 同値なら React が再レンダーを省くので毎回呼んでよい
+  }
+  const resetZoom = (): void => {
+    zoomRef.current = { f: 1, cx: LW / 2, cy: LH / 2 }
+    applyView()
+  }
 
   // ---- 表示キャンバスのサイズ追従
   useEffect(() => {
@@ -276,19 +337,46 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const dpr = window.devicePixelRatio || 1
       cv.width = Math.max(1, Math.round(r.width * dpr))
       cv.height = Math.max(1, Math.round(r.height * dpr))
-      const scale = Math.min(cv.width / LW, cv.height / LH)
-      viewRef.current = {
-        scale,
-        dpr,
-        ox: (cv.width - LW * scale) / 2,
-        oy: (cv.height - LH * scale) / 2
-      }
-      forceRenderRef.current = true // サイズが変わったら1回描き直す
+      applyView() // ズーム状態(zoomRef)を保ったまま viewRef を作り直す
     }
     fit()
     const ro = new ResizeObserver(fit)
     ro.observe(cv.parentElement!)
     return () => ro.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ---- ピンチ / ⌘＋スクロールで拡大縮小、2本指スクロールで表示移動（電飾モードと同じ操作感）
+  useEffect(() => {
+    const cv = displayRef.current
+    if (!cv) return
+    const onWheel = (e: WheelEvent): void => {
+      e.preventDefault()
+      const v = viewRef.current
+      const z = zoomRef.current
+      // マウスホイールの1ノッチ（整数・縦のみ・大きい値）もズーム扱い＝電飾モードと同じ判定
+      const notch = Math.abs(e.deltaY) >= 80 && e.deltaX === 0 && Number.isInteger(e.deltaY)
+      if (e.ctrlKey || e.metaKey || notch) {
+        // カーソルの下の場所を動かさずに拡大縮小（トラックパッドのピンチは ctrlKey で届く）
+        const r = cv.getBoundingClientRect()
+        const k = e.ctrlKey && !e.metaKey ? 0.012 : 0.0015
+        const nf = Math.min(8, Math.max(1, z.f * Math.exp(-e.deltaY * k)))
+        const mx = (e.clientX - r.left) * v.dpr
+        const my = (e.clientY - r.top) * v.dpr
+        zoomRef.current = zoomToward(v, cv.width, cv.height, LW, LH, mx, my, nf)
+      } else {
+        // 2本指スクロール＝表示移動（拡大中のみ意味がある。全体表示では applyView が中央に戻す）
+        zoomRef.current = {
+          f: z.f,
+          cx: z.cx + (e.deltaX * v.dpr) / v.scale,
+          cy: z.cy + (e.deltaY * v.dpr) / v.scale
+        }
+      }
+      applyView()
+    }
+    cv.addEventListener('wheel', onWheel, { passive: false })
+    return () => cv.removeEventListener('wheel', onWheel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ---- Syphon クライアント有無を1秒ごとに確認。フェイルオープン＝迷ったら「送る」。
@@ -360,38 +448,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     // 描画(renderFrame)もアニメ中は上限fpsに間引く。灯体ごとの重い処理を半分にしてカクつき防止。
     // 出力は元々30fpsなので体感は変わらず、操作プレビューだけ60→30になるが十分滑らか。
     const RENDER_MIN_MS = 1000 / 30
-    const tick = (now: number): void => {
-      raf = requestAnimationFrame(tick)
-      // 静止画は描き直さない＝無駄処理を省く。FX/動画/フェード中、ラバーバンド中、状態変化、
-      // または強制フラグ（初回・リサイズ・モード切替）の時だけ描く。
-      const v = engine.getVersion()
-      const animating =
-        engine.isAnimating() ||
-        rubberRef.current != null ||
-        pieceCreateRef.current != null
-      if (!animating && v === lastVRef.current && !forceRenderRef.current) return
-      // 連続アニメ中は描画を上限fpsに間引く（単発変更・強制描画は即・出力は元々30fps）。
-      if (animating && !forceRenderRef.current && now - lastRender < RENDER_MIN_MS) return
-      lastRender = now
-      forceRenderRef.current = false
-      lastVRef.current = v
-      // DMX駆動：パッチ灯体があれば、卓のフレーム(signal-loss/Hold処理済)をエンジンへ。
-      // 受信は App.tsx の useDmxBridge が照明モード中も store に流し込んでいる（受信は作らない）。
-      // 比較時刻は Date.now()（lastSeenByUniverse が Date.now() 基準のため）。
-      if (engine.hasDmxPatched()) {
-        const st = useStore.getState()
-        engine.setDmxFrame(
-          effectiveDmxByUniverse(
-            st.dmxByUniverse,
-            st.lastSeenByUniverse,
-            st.chart.settings.holdOnTimeout ?? true,
-            Date.now()
-          ),
-          st.chart.settings.gamma ?? false
-        )
-      }
-      engine.renderFrame(now)
-      // まず画面へ（軽い・毎フレーム）。重い出力読み出しは後で間引いて行う。
+    // 画面キャンバスへの貼り直し（描画済みの engine.frame を今の view で貼るだけ＝軽い）。
+    const blit = (): void => {
       const { scale, ox, oy } = viewRef.current
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.fillStyle = '#000'
@@ -433,6 +491,49 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         }
         drawSnapGuides(ctx, engine, scale)
       }
+    }
+    const tick = (now: number): void => {
+      raf = requestAnimationFrame(tick)
+      // 静止画は描き直さない＝無駄処理を省く。FX/動画/フェード中、ラバーバンド中、状態変化、
+      // または強制フラグ（初回・リサイズ・モード切替）の時だけ描く。
+      const v = engine.getVersion()
+      const animating =
+        engine.isAnimating() ||
+        rubberRef.current != null ||
+        pieceCreateRef.current != null
+      if (!animating && v === lastVRef.current && !forceRenderRef.current) {
+        // 表示ズーム/パンだけの変化＝前回の絵を今の view で貼り直すだけ。
+        // エンジン再計算も出力(Syphon/NDI)送信もしない＝本番出力へ負荷ゼロ。
+        if (displayDirtyRef.current) {
+          displayDirtyRef.current = false
+          blit()
+        }
+        return
+      }
+      // 連続アニメ中は描画を上限fpsに間引く（単発変更・強制描画は即・出力は元々30fps）。
+      if (animating && !forceRenderRef.current && now - lastRender < RENDER_MIN_MS) return
+      lastRender = now
+      forceRenderRef.current = false
+      displayDirtyRef.current = false // 本描画に含まれるので消しておく
+      lastVRef.current = v
+      // DMX駆動：パッチ灯体があれば、卓のフレーム(signal-loss/Hold処理済)をエンジンへ。
+      // 受信は App.tsx の useDmxBridge が照明モード中も store に流し込んでいる（受信は作らない）。
+      // 比較時刻は Date.now()（lastSeenByUniverse が Date.now() 基準のため）。
+      if (engine.hasDmxPatched()) {
+        const st = useStore.getState()
+        engine.setDmxFrame(
+          effectiveDmxByUniverse(
+            st.dmxByUniverse,
+            st.lastSeenByUniverse,
+            st.chart.settings.holdOnTimeout ?? true,
+            Date.now()
+          ),
+          st.chart.settings.gamma ?? false
+        )
+      }
+      engine.renderFrame(now)
+      // まず画面へ（軽い・毎フレーム）。重い出力読み出しは後で間引いて行う。
+      blit()
       // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更は即送る）。
       // フェイルオープン：未接続が確証できる時だけ省く。
       if (syphonReadyRef.current && api?.publishFrame) {
@@ -505,10 +606,11 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       if (e.defaultPrevented) return // 先に処理済み（psheet/入力欄など）のキーを二重処理しない
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
-      // ⌘+S（Ctrl+S）＝公演まるごと保存。どのモードでも効く（ブラウザ既定の保存は止める）。
+      // ⌘+S（Ctrl+S）＝上書き保存／⇧⌘S＝別名保存。どのモードでも効く（ブラウザ既定の保存は止める）。
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
-        void saveShow()
+        if (e.shiftKey) saveShowAs()
+        else saveShow()
         return
       }
       // 操作キー一覧を開いている間は本番操作にキーを流さない（Esc/?で閉じるだけ）。
@@ -717,12 +819,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       // 写真外をクリック → 作成モードを解除して通常処理へ落とす
       engine.setPieceCreating(false)
     }
+    // 表示ズーム中は「画面で見える大きさ」に当たり判定を合わせる（ハンドル類は画面基準の
+    // 大きさで描いているため、舞台座標の定数のままだと拡大時に見えない巨大判定になる）。
+    const zf = zoomRef.current.f
     // 0b. 既存ピース：選択中のピースなら 4 隅ハンドルチェック → 隅ドラッグ
     const sel = engine.selectedPieceId
     const scene = engine.activeScene >= 0 ? engine.scenes[engine.activeScene] : null
     const selPiece = sel && scene?.pieces ? scene.pieces.find((pp) => pp.id === sel) : null
     if (selPiece) {
-      const HH = 14 // 隅ハンドルヒット半径（LW 単位）
+      const HH = 14 / zf // 隅ハンドルヒット半径（LW 単位・ズームで見た目に追従）
       for (let i = 0; i < 4; i++) {
         const c = selPiece.corners[i]
         if (Math.abs(p.x - c.x) < HH && Math.abs(p.y - c.y) < HH) {
@@ -761,7 +866,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     // 写真の 4 辺ワープハンドル — 灯体より先に判定（ハンドル優先）
     const wb = engine.box
     if (wb) {
-      const HIT = 16 // LW 座標系で ±16px
+      const HIT = 16 / zf // LW 座標系で ±16px（ズームで見た目に追従）
       const handles: {
         edge: 'top' | 'bottom' | 'left' | 'right'
         x: number
@@ -784,13 +889,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     // 番号下のM/S（クリックでトグル）
     for (let i = beams.length - 1; i >= 0; i--) {
       const b = beams[i]
-      if (Math.abs(p.y - (b.y + 17)) < 11) {
-        if (Math.abs(p.x - (b.x - 11)) < 10) {
+      if (Math.abs(p.y - (b.y + 17)) < 11 / zf) {
+        if (Math.abs(p.x - (b.x - 11)) < 10 / zf) {
           engine.selectBeam(i)
           engine.toggleMute(i)
           return
         }
-        if (Math.abs(p.x - (b.x + 11)) < 10) {
+        if (Math.abs(p.x - (b.x + 11)) < 10 / zf) {
           engine.selectBeam(i)
           engine.toggleSolo(i)
           return
@@ -997,32 +1102,68 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     setShowMsg(m)
     window.setTimeout(() => setShowMsg((cur) => (cur === m ? null : cur)), 2600)
   }
-  const saveShow = async (): Promise<void> => {
+  // 未保存の変更があるか（触った＋中身がある＋最後の保存/読込から変わった）
+  const isDirty = (): boolean =>
+    userTouchedRef.current &&
+    engine.hasSaveableContent() &&
+    engine.getVersion() !== savedVersionRef.current
+  // 保存の本体。saveAs=false は上書き（初回だけ名前を聞く）、true は別名保存。成功で true。
+  const saveShowCore = async (saveAs: boolean): Promise<boolean> => {
     const a = getApi()
     // 既定は「1ファイル(.ledshow)」保存。写真/動画も中に包む。旧フォルダ保存は開く側で対応。
-    if (!a?.saveImageLightShowFile && !a?.saveImageLightShow) return
-    if (savingRef.current) return // 保存中の二重起動を防ぐ（⌘S 連打で保存ダイアログが重なるのを止める）
+    if (!a?.saveImageLightShowFile && !a?.saveImageLightShow) return false
+    if (savingRef.current) return false // 保存中の二重起動を防ぐ（⌘S 連打でダイアログが重なるのを止める）
     savingRef.current = true
     flash('保存中…')
     try {
+      // 🔴「どこまでがファイルに入ったか」は書き出した瞬間のバージョンで覚える。
+      // 保存完了後の値にすると、保存中（ZIP作成・ダイアログ中）にした編集まで
+      // 「保存済み」扱いになり、閉じる時の確認が黙って素通りする。
+      const versionAtSerialize = engine.getVersion()
       const { json, media } = await engine.serializeShow()
       let path: string | null = null
       if (a.saveImageLightShowFile) {
         const bytes = await zipShow(json, media)
-        path = await a.saveImageLightShowFile(bytes, 'show')
+        path = await a.saveImageLightShowFile(bytes, 'show', saveAs, showPathRef.current)
       } else if (a.saveImageLightShow) {
         path = await a.saveImageLightShow(json, media, 'show')
       }
+      if (path) {
+        savedVersionRef.current = versionAtSerialize
+        showPathRef.current = path
+        setShowFileName(baseName(path))
+      }
       flash(path ? '保存しました' : 'キャンセル')
+      return !!path
     } catch {
       flash('保存に失敗')
+      return false
     } finally {
       savingRef.current = false
     }
   }
+  const saveShow = (): void => {
+    void saveShowCore(false)
+  }
+  const saveShowAs = (): void => {
+    void saveShowCore(true)
+  }
+  // 未保存の変更があれば「保存する/保存しない/キャンセル」を聞く。true=続行してよい。
+  // window.confirm は使わない（画面のJSが止まり、終了確認と衝突して黙って閉じる穴になる）。
+  const ensureSavedOrDiscard = async (situation: string): Promise<boolean> => {
+    if (!isDirty()) return true
+    const a = getApi()
+    if (!a?.askSaveChoice) return window.confirm(`保存していない変更があります。${situation}`)
+    const c = await a.askSaveChoice(situation)
+    if (c === 'cancel') return false
+    if (c === 'save') return await saveShowCore(false)
+    return true // 保存しない＝そのまま続行（自動バックアップは別途残っている）
+  }
   const openShow = async (): Promise<void> => {
     const a = getApi()
     if (!a?.openImageLightShow) return
+    // 未保存の変更があるなら、上書きで消える前に確認（普通の書類アプリと同じ）
+    if (!(await ensureSavedOrDiscard('このまま別の公演を開くと、今の変更は失われます。'))) return
     flash('読込中…')
     try {
       const res = await a.openImageLightShow()
@@ -1031,11 +1172,37 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       // .ledshow(1ファイル)なら中身を解凍、旧フォルダなら {json,media} がそのまま来る
       const jm = 'zip' in res ? await unzipShow(res.zip) : res
       const ok = await engine.restoreShow(jm.json, jm.media)
+      if (ok) {
+        savedVersionRef.current = engine.getVersion() // 開いた直後は「保存済み」扱い
+        showPathRef.current = 'zip' in res && res.path ? res.path : null // フォルダ(旧形式)は上書き先にしない
+        setShowFileName(showPathRef.current ? baseName(showPathRef.current) : null)
+      } else {
+        // 途中まで読んで失敗＝中身が中途半端な可能性。上書き先を外して事故を防ぐ
+        //（次の⌘Sは名前を聞く）。dirty のままなので閉じる時の確認も効く。
+        showPathRef.current = null
+        setShowFileName(null)
+      }
       flash(ok ? '開きました' : '読込に失敗')
     } catch {
+      showPathRef.current = null
+      setShowFileName(null)
       flash('読込に失敗')
     }
   }
+  // 閉じる時の確認用に main から呼ばれる窓口（未保存か？／保存して閉じる）。
+  useEffect(() => {
+    const w = window as unknown as {
+      __ilDirty?: () => boolean
+      __ilSaveForClose?: () => Promise<boolean>
+    }
+    w.__ilDirty = () => isDirty()
+    w.__ilSaveForClose = () => saveShowCore(false)
+    return () => {
+      delete w.__ilDirty
+      delete w.__ilSaveForClose
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine])
   // 自動バックアップ（世代）の一覧と巻き戻し
   const refreshBackups = async (): Promise<void> => {
     const list = (await getApi()?.imageLightHistoryList?.()) ?? []
@@ -1049,6 +1216,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const res = await a.imageLightHistoryRead(file)
       if (!res) return flash('その世代が読めませんでした')
       const ok = await engine.restoreShow(res.json, res.media)
+      if (ok) {
+        // 巻き戻した中身は「今開いているファイル」と別物の可能性がある（履歴はアプリ共通）。
+        // 上書き先を外して、次の⌘Sでは名前を聞く＝開いていた公演ファイルを別内容で潰さない。
+        showPathRef.current = null
+        setShowFileName(null)
+      }
       flash(ok ? 'この時点に戻しました' : '巻き戻しに失敗')
     } catch {
       flash('巻き戻しに失敗')
@@ -1129,6 +1302,18 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <td>↑ ↓</td>
                 </tr>
                 <tr>
+                  <th>保存／別名保存</th>
+                  <td>⌘S（同じファイルに上書き）／ ⇧⌘S（新しい名前で）</td>
+                </tr>
+                <tr>
+                  <th>画面を拡大・縮小</th>
+                  <td>ピンチ／⌘＋スクロール（出力映像は変わりません）</td>
+                </tr>
+                <tr>
+                  <th>拡大中の表示移動</th>
+                  <td>2本指スクロール／左下の「全体表示に戻す」で解除</td>
+                </tr>
+                <tr>
                   <th>この一覧</th>
                   <td>?（背景クリックでも閉じる）</td>
                 </tr>
@@ -1144,6 +1329,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         <h1>
           {lightingOnly ? 'LIGHTING' : 'LIGHT SKETCH'}
         </h1>
+        {showFileName && (
+          <span
+            className="il-showfile"
+            title="今開いている公演ファイル。「保存」はこのファイルに上書きします（新しいファイルにしたい時は「別名保存」）"
+          >
+            {showFileName}
+          </span>
+        )}
         <div style={{ flex: 1 }} />
         <span
           className="il-lamp"
@@ -1173,13 +1366,24 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         >
           SHORTCUT
         </button>
-        <button className="il-mini" onClick={saveShow} title="公演を1ファイル(.ledshow)に保存（写真/動画も中に一緒・ダブルクリックで開ける）／ ⌘S でも保存">
+        <button className="il-mini" onClick={saveShow} title="公演を1ファイル(.ledshow)に保存。2回目からは同じファイルに上書き（写真/動画も中に一緒）／ ⌘S">
           保存
+        </button>
+        <button className="il-mini" onClick={saveShowAs} title="新しい名前を付けて別ファイル(.ledshow)に保存／ ⇧⌘S">
+          別名保存
         </button>
         <button className="il-mini" onClick={openShow} title="保存した公演を開く（.ledshow の1ファイル・以前のフォルダ保存どちらも可）">
           開く
         </button>
-        <button className="il-mini" onClick={onExit}>
+        <button
+          className="il-mini"
+          onClick={() => {
+            // 未保存のまま1クリックで作業が消えるのを防ぐ（保存する/しない/キャンセル）
+            void (async () => {
+              if (await ensureSavedOrDiscard('SHOW MODE へ戻ると、今の変更は失われます。')) onExit()
+            })()
+          }}
+        >
           ← SHOW MODEへ
         </button>
       </header>
@@ -1194,6 +1398,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             onPointerMove={onStageMove}
             onPointerUp={onStageUp}
           />
+          {zoomed && (
+            <button
+              className="il-mini il-zoom-reset"
+              onClick={resetZoom}
+              title="拡大表示をやめて全体を表示する（出力映像は変わりません）"
+            >
+              全体表示に戻す
+            </button>
+          )}
           {engine.scenes.length === 0 && (
             <div className="il-empty">
               <div className="il-empty-big" onClick={() => fileInputRef.current?.click()}>
@@ -3949,6 +4162,11 @@ const IL_CSS = `
 .il-main{flex:1;min-height:0;display:flex;}
 .il-stage{flex:1;min-width:0;position:relative;background:#000;border-top:0.5px solid var(--il-line);}
 .il-cv{width:100%;height:100%;display:block;}
+/* 拡大中だけ左下に出す「全体表示に戻す」。半透明黒地＝写真の上でも読める。
+   bottom はシーン棚(il-scenes・約91px)の上＝サムネイルや名前クリックを塞がない。 */
+.il-zoom-reset{position:absolute;left:10px;bottom:104px;background:rgba(10,10,10,0.72);color:var(--il-txt);z-index:5;}
+/* ヘッダのタイトル横に出す「今開いている公演ファイル名」。長い名前は省略。 */
+.il-showfile{font-size:10px;color:var(--il-dim);margin-left:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .il-empty{position:absolute;top:0;left:0;right:0;bottom:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;pointer-events:auto;}
 .il-empty-big{font-family:'Bebas Neue',sans-serif;font-size:15px;color:var(--il-dim);font-weight:400;letter-spacing:0.16em;border:0.5px dashed var(--il-line);border-radius:10px;padding:22px 34px;}
 .il-empty-sub{font-size:12px;color:var(--il-faint);letter-spacing:0.02em;}

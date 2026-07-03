@@ -33,7 +33,7 @@ interface DecorApi {
   nativeCopy?: () => void
   nativePaste?: () => void
   onOpenChartPath?: (cb: (json: string) => void) => (() => void) | void
-  onOpenShowPath?: (cb: (bytes: Uint8Array) => void) => (() => void) | void
+  onOpenShowPath?: (cb: (p: { bytes: Uint8Array; path: string }) => void) => (() => void) | void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -177,9 +177,12 @@ function useOpenFile(): void {
  *  画像照明モードへ入って復元する。取り込みは ImageLightingMode 側（pendingShowFile）。 */
 function useOpenShowFile(): void {
   useEffect(() => {
-    const off = getApi()?.onOpenShowPath?.((bytes) => {
+    const off = getApi()?.onOpenShowPath?.(({ bytes, path }) => {
       const st = useStore.getState()
-      st.setPendingShowFile(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes))
+      st.setPendingShowFile({
+        bytes: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes),
+        path
+      })
       st.setImageLight(true)
     })
     return () => off?.()

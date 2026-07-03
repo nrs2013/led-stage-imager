@@ -76,10 +76,10 @@ interface AppState {
   /** 画像照明モード（のむさんが本番で回す・卓なし）。true の間はエディタ/Liveに代えて
    *  ImageLightingMode を全画面表示し、自前で Syphon へ publish する。 */
   imageLight: boolean
-  /** ダブルクリックで開かれた .ledshow（ZIPバイト列）の受け渡し用。ImageLightingMode が
-   *  マウント時に取り込んで復元し、null に戻す。通常は null。 */
-  pendingShowFile: Uint8Array | null
-  setPendingShowFile: (bytes: Uint8Array | null) => void
+  /** ダブルクリックで開かれた .ledshow（ZIPバイト列＋フルパス）の受け渡し用。
+   *  ImageLightingMode が取り込んで復元し、null に戻す。通常は null。 */
+  pendingShowFile: { bytes: Uint8Array; path: string } | null
+  setPendingShowFile: (p: { bytes: Uint8Array; path: string } | null) => void
   /** 照明モード(LIGHTING)=true は LIGHT SKETCH から電飾(DECOR)タブを隠した照明特化版。
    *  簡単モード(EASY)=false は全部入り。imageLight が true の時だけ意味を持つ。 */
   lightingOnly: boolean

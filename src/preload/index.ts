@@ -77,9 +77,9 @@ const api = {
     ipcRenderer.on('chart:open-path', h)
     return () => ipcRenderer.removeListener('chart:open-path', h)
   },
-  // ダブルクリックで開かれた .ledshow（画像照明の公演・ZIPのバイト列）がメインから届く
-  onOpenShowPath: (cb: (bytes: Uint8Array) => void): (() => void) => {
-    const h = (_e: IpcRendererEvent, bytes: Uint8Array): void => cb(bytes)
+  // ダブルクリックで開かれた .ledshow（画像照明の公演・ZIPのバイト列＋パス）がメインから届く
+  onOpenShowPath: (cb: (p: { bytes: Uint8Array; path: string }) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, p: { bytes: Uint8Array; path: string }): void => cb(p)
     ipcRenderer.on('imagelight:open-path', h)
     return () => ipcRenderer.removeListener('imagelight:open-path', h)
   },
@@ -95,12 +95,22 @@ const api = {
     media: { file: string; dataUrl: string }[],
     name: string
   ): Promise<string | null> => ipcRenderer.invoke('imagelight:save-show', json, media, name),
-  // 1ファイル(.ledshow)で保存（写真/動画ごとZIP済みのバイト列を渡す）
-  saveImageLightShowFile: (bytes: Uint8Array, name: string): Promise<string | null> =>
-    ipcRenderer.invoke('imagelight:save-show-file', bytes, name),
+  // 1ファイル(.ledshow)で保存（写真/動画ごとZIP済みのバイト列を渡す）。
+  // saveAs=false は上書き（初回だけ名前を聞く）、true は別名保存（毎回名前を聞く）。
+  // targetPath＝上書き先（renderer が「実際に開けている公演」だけを渡す）。
+  saveImageLightShowFile: (
+    bytes: Uint8Array,
+    name: string,
+    saveAs = false,
+    targetPath: string | null = null
+  ): Promise<string | null> =>
+    ipcRenderer.invoke('imagelight:save-show-file', bytes, name, saveAs, targetPath),
+  // 「保存されていない変更があります」の三択（ネイティブのシートで出す）
+  askSaveChoice: (situation: string): Promise<'save' | 'discard' | 'cancel'> =>
+    ipcRenderer.invoke('imagelight:ask-save', situation),
   openImageLightShow: (): Promise<
     | { json: string; media: Record<string, string> }
-    | { zip: Uint8Array }
+    | { zip: Uint8Array; path: string }
     | { error: string }
     | null
   > => ipcRenderer.invoke('imagelight:open-show'),
