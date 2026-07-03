@@ -93,9 +93,14 @@ export class ArtNetReceiver extends EventEmitter {
     buf.write('LED STAGE IMAGER', 26, 'latin1') // ShortName(18バイト枠)
     buf.write('LED STAGE IMAGER (Art-Net in)', 44, 'latin1') // LongName(64バイト枠)
     buf.write('#0001 [0000] OK', 108, 'latin1') // NodeReport(64バイト枠)
-    buf.writeUInt16BE(1, 172) // NumPorts=1
-    buf.writeUInt8(0x80, 174) // PortTypes[0]: output (Art-Net → この機器)
-    buf.writeUInt8(0x80, 182) // GoodOutput[0]: data transmitted
+    // 「ユニバース0〜3(アプリ表示U1〜U4)を受け取れる出力ポート4つ」を名乗る。
+    // grandMA の Auto(自動ユニキャスト)やノード一覧は、この欄を見て送り先を決める。
+    buf.writeUInt16BE(4, 172) // NumPorts=4
+    for (let i = 0; i < 4; i++) {
+      buf.writeUInt8(0x80, 174 + i) // PortTypes[i]: output (Art-Net → この機器)
+      buf.writeUInt8(0x80, 182 + i) // GoodOutput[i]: data transmitted
+      buf.writeUInt8(i, 190 + i) // SwOut[i]: このポートが受け持つ Universe(下位4bit) = 0..3
+    }
     this.replyCache = buf
     return buf
   }

@@ -65,6 +65,12 @@ describe('ArtNetReceiver（卓との接続の作法）', () => {
     expect(buf.readUInt16LE(8)).toBe(0x2100) // OpPollReply
     expect(buf.length).toBe(239)
     expect(buf.toString('latin1', 26, 44).replace(/\0+$/, '')).toBe('LED STAGE IMAGER')
+    // 「U1〜U4(線上0〜3)を受け取れる」記載＝grandMAのAuto配信/ノード一覧が正しく働く鍵
+    expect(buf.readUInt16BE(172)).toBe(4) // NumPorts
+    for (let i = 0; i < 4; i++) {
+      expect(buf.readUInt8(174 + i)).toBe(0x80) // PortTypes: output
+      expect(buf.readUInt8(190 + i)).toBe(i) // SwOut: universe 0..3
+    }
   })
 
   it('ArtDMX は dmx イベントとして届く（ArtPoll は dmx にならない）', async () => {
