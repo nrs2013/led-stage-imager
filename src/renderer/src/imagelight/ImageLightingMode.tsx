@@ -386,6 +386,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const syphonReadyRef = useRef(true)
   // ヘッダの生存ランプ用：MIDI入力が来ているか・出力(Resolume等)が受け取っているか。
   const [live, setLive] = useState<{ midiIn: boolean; out: boolean }>({ midiIn: false, out: false })
+  // DMX(Art-Net)受信ランプ：本番モードでも「卓の信号が届いているか・ユニバースが合っているか」を
+  // ひと目で分かるように（今までは電飾モードに戻らないと確認できず、接続当日に詰む）。
+  const [dmxLamp, setDmxLamp] = useState<{ on: boolean; note: string }>({ on: false, note: 'DMX受信なし' })
   const [showKeys, setShowKeys] = useState(false) // 操作キー一覧オーバーレイ
   const [presetOpen, setPresetOpen] = useState(false) // 設定コンソールの「設定（解像度/落ち込み）」を開くか
   const showKeysRef = useRef(showKeys)
@@ -427,6 +430,38 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         setLive({ midiIn: (s.midiIn ?? 0) > 0, out: !!s.syphonAvailable && !!s.hasClients })
       } catch {
         syphonReadyRef.current = true // 取得失敗 → 送る側に倒す
+      }
+      // DMXランプ：受信ユニバースと灯体のパッチを突き合わせて短い診断文を作る
+      try {
+        const st = useStore.getState()
+        const nowMs = Date.now()
+        const recv = Object.keys(st.lastSeenByUniverse)
+          .map(Number)
+          .filter((u) => nowMs - (st.lastSeenByUniverse[u] ?? 0) < 5500)
+          .sort((a, b) => a - b)
+        const pat = Array.from(
+          new Set(engine.beams.filter((b) => b.dmx).map((b) => b.dmx!.universe))
+        ).sort((a, b) => a - b)
+        const fmt = (a: number[]): string => a.map((u) => `U${u + 1}`).join(',')
+        if (st.artnetError) {
+          setDmxLamp({ on: false, note: `受信エラー（${st.artnetError}）— 他のArt-Netアプリを閉じて再起動` })
+        } else if (recv.length === 0) {
+          setDmxLamp({
+            on: false,
+            note: pat.length ? `DMX受信なし（灯体は ${fmt(pat)} で待機中）` : 'DMX受信なし'
+          })
+        } else if (pat.length === 0) {
+          setDmxLamp({ on: true, note: `${fmt(recv)} を受信中（灯体は未パッチ）` })
+        } else if (recv.some((u) => pat.includes(u))) {
+          setDmxLamp({ on: true, note: `${fmt(recv)} を受信中 → 灯体 ${fmt(pat)} に接続OK` })
+        } else {
+          setDmxLamp({
+            on: true,
+            note: `${fmt(recv)} を受信中ですが灯体は ${fmt(pat)}＝ユニバースが合っていません（0始まり表示の卓では「アプリの番号−1」）`
+          })
+        }
+      } catch {
+        /* 診断は保険。失敗しても本番動作に影響させない */
       }
     }
     poll()
@@ -1229,6 +1264,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   }
   const ref = engine.ref()
   const dmxClash = engine.dmxOverlaps() // 卓アドレスが衝突している灯体番号（空＝なし）
+  // DMXパッチ済みの公演は、EASYモードで開いてもパッチ表を出す（会場でユニバース/アドレスを
+  // 直す手段が消えるのを防ぐ。未パッチの公演では今まで通り隠れたまま＝簡単さは保つ）。
+  const dmxPatched = engine.beams.some((b) => !!b.dmx)
   const colorLocked = engine.colorOwnedByFx()
   const activeFx = FX_BUTTONS.filter((b) => engine.fxState(b.key))
   const masterPct = Math.round(engine.st.master * 100)
@@ -1338,6 +1376,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           </span>
         )}
         <div style={{ flex: 1 }} />
+        <span className="il-lamp" title={dmxLamp.note}>
+          <i className={dmxLamp.on ? 'on' : ''} />
+          DMX
+        </span>
         <span
           className="il-lamp"
           title={live.midiIn ? 'MIDI入力：受信中' : 'MIDI入力：なし（卓/ケーブルを確認）'}
@@ -2708,7 +2750,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               <div className="il-cardhd">
                 <span className="il-stepn">1</span>Select
               </div>
-              {lightingOnly ? (
+              {lightingOnly || dmxPatched ? (
                 <div
                   className="il-psheet"
                   ref={psheetRef}
@@ -2807,6 +2849,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                               min={1}
                               max={32768}
                               value={b.dmx.universe + 1}
+                              title="1始まりで表示（卓側が0始まり表示の機種では「ここの数字−1」を卓に設定）"
                               onChange={(e) =>
                                 engine.setBeamDmx({
                                   universe: Math.max(0, Math.min(32767, (Math.floor(+e.target.value) || 1) - 1))
@@ -2818,10 +2861,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                               className="il2-dmxnum"
                               type="number"
                               min={1}
-                              max={512}
+                              max={513 - channelCount(b.dmx.mode)}
                               value={b.dmx.start}
+                              title="この灯体が使うチャンネル数ぶん、512に収まる位置まで"
                               onChange={(e) =>
                                 engine.setBeamDmx({
+                                  // 値はそのまま渡す＝はみ出しの最終クランプは engine.setBeamDmx が
+                                  // モード込みで行う（モード変更時も同じ場所で守られる）
                                   start: Math.max(1, Math.min(512, Math.floor(+e.target.value) || 1))
                                 })
                               }
@@ -2958,7 +3004,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               >
                 番号を振り直す（中央下 → 左右の外へ）
               </button>
-              {lightingOnly && (
+              {(lightingOnly || dmxPatched) && (
                 <>
                   <div className="il-lbl" style={{ marginTop: 8 }}>DMX（卓で動かすアドレス）</div>
                   <button

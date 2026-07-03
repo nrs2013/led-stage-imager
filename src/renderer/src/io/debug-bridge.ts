@@ -60,6 +60,16 @@ const w = window as unknown as DebugWin
 
 w.__debugState = (): string => {
   const s = useStore.getState()
+  // DMX受信の生情報（接続当日の遠隔診断用）：ユニバース別の最終受信からの経過msと先頭8chの値
+  const now = Date.now()
+  const dmxIn: Record<string, { agoMs: number; ch1to8: number[] }> = {}
+  for (const [u, t] of Object.entries(s.lastSeenByUniverse)) {
+    const data = s.dmxByUniverse[Number(u)]
+    dmxIn[`U${Number(u) + 1}`] = {
+      agoMs: now - t,
+      ch1to8: data ? Array.from(data.subarray(0, 8)) : []
+    }
+  }
   return JSON.stringify(
     strip({
       mode: s.mode,
@@ -70,6 +80,8 @@ w.__debugState = (): string => {
       selectedIds: s.selectedIds,
       paletteFilter: s.paletteFilter,
       manualMode: s.manualMode,
+      artnetError: s.artnetError,
+      dmxIn,
       chart: s.chart
     }),
     null,

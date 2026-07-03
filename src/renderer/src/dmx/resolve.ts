@@ -16,8 +16,10 @@ export function resolveColor(
   return fixtureColor(fx, dmxByUniverse[fx.universe] ?? ZEROS, gamma)
 }
 
-/** 信号断の既定タイムアウト（ms）。最後にArt-Netを受けてからこれを超えたら「信号が切れた」とみなす。 */
-export const SIGNAL_TIMEOUT_MS = 2000
+/** 信号断の既定タイムアウト（ms）。最後にArt-Netを受けてからこれを超えたら「信号が切れた」とみなす。
+ *  Art-Net の決まりでは「変化が無いユニバースは約4秒に1回の再送でよい」ため、2秒だと
+ *  静止シーンで受信ランプが点滅したり（Zero設定なら）本番出力が明滅する卓が実在する。余裕を見て5.5秒。 */
+export const SIGNAL_TIMEOUT_MS = 5500
 
 /** On Signal Loss の実装。holdOnTimeout=false のとき、最後の受信から timeoutMs を超えた
  *  ユニバースを ZEROS（黒）に落とした「実効DMX」を返す。true(=Hold Last)なら最後の値を保持。

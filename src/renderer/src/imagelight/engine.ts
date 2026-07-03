@@ -2763,7 +2763,11 @@ export class ImageLightEngine {
         continue
       }
       const cur = b.dmx ?? { universe: 0, start: 1, mode: 'beam8' as ChannelMode }
-      b.dmx = { ...cur, ...patch }
+      const next = { ...cur, ...patch }
+      // 使用ch数が512をはみ出す位置は詰める（例: beam8 を 509 に置くと ch513-516 が
+      // 存在せず、卓で触っても一部だけ動かない“半分死んだ灯体”になる）。モード変更でも効かせる。
+      next.start = Math.max(1, Math.min(513 - channelCount(next.mode), next.start))
+      b.dmx = next
     }
     this.bump()
   }

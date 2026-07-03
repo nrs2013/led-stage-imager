@@ -27,6 +27,12 @@ const api = {
     ipcRenderer.on('chart:update', h)
     return () => ipcRenderer.removeListener('chart:update', h)
   },
+  // Art-Net 受信機の生死通知（bind失敗＝ポート使用中など。今まで無言で死んでいた）
+  onArtnetStatus: (cb: (st: { ok: boolean; detail: string }) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, st: { ok: boolean; detail: string }): void => cb(st)
+    ipcRenderer.on('artnet:status', h)
+    return () => ipcRenderer.removeListener('artnet:status', h)
+  },
   // Status / network
   listInterfaces: (): Promise<{ name: string; address: string }[]> =>
     ipcRenderer.invoke('net:interfaces'),

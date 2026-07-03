@@ -19,6 +19,8 @@ const netApi = (): NetApi | undefined => (window as unknown as { api?: NetApi })
 
 export function StatusBar(): React.JSX.Element {
   const lastSeen = useStore((s) => s.lastSeenByUniverse)
+  const artnetError = useStore((s) => s.artnetError)
+  const fixtures = useStore((s) => s.chart.fixtures)
   const [now, setNow] = useState(() => Date.now())
   const [nics, setNics] = useState<{ name: string; address: string }[]>([])
   const [nic, setNic] = useState('0.0.0.0')
@@ -27,13 +29,13 @@ export function StatusBar(): React.JSX.Element {
   const [ndiRx, setNdiRx] = useState(0)
   const [midiIn, setMidiIn] = useState(0)
 
-  useEffect(() => {
+  const refreshNics = (): void => {
     netApi()
       ?.listInterfaces?.()
       .then((list) => {
         setNics(list)
         // 表示同期: 現在選択中の nic が一覧に無ければ、表示だけを実態に寄せる。
-        // bind の実呼び出し(setBind)はユーザー操作時のみのままにし、通信ロジックは変えない。
+        // 絞り込みの実呼び出し(setBind)はユーザー操作時のみのままにし、通信ロジックは変えない。
         setNic((prev) => {
           if (list.length === 0) return prev
           if (list.some((n) => n.address === prev)) return prev
@@ -42,6 +44,9 @@ export function StatusBar(): React.JSX.Element {
         })
       })
       .catch(() => {})
+  }
+  useEffect(() => {
+    refreshNics()
     const tick = setInterval(() => setNow(Date.now()), 500)
     const poll = setInterval(() => {
       netApi()
@@ -64,23 +69,53 @@ export function StatusBar(): React.JSX.Element {
     .map(Number)
     .sort((a, b) => a - b)
   const hasNet = !!netApi()?.listInterfaces
+  // パッチ済みユニバース＝灯体が待っている回線番号。受信と突き合わせて「違う番号が来ている」を見せる
+  const patched = Array.from(new Set(fixtures.map((f) => f.universe))).sort((a, b) => a - b)
+  const liveSet = new Set(universes.filter((u) => now - (lastSeen[u] ?? 0) < SIGNAL_TIMEOUT_MS))
+  const waiting = patched.filter((u) => !liveSet.has(u)) // パッチ済みなのに受信が無いユニバース
 
   return (
     <div style={bar}>
       <span style={lbl}>Art-Net In</span>
+      {artnetError && (
+        <span
+          style={{ ...chip, color: '#e0726a', borderColor: '#e0726a' }}
+          title={`Art-Net の受信口が開けませんでした（${artnetError}）。他の Art-Net アプリが同じポート6454を使っていないか確認して、アプリを再起動してください。`}
+        >
+          受信エラー {artnetError}
+        </span>
+      )}
       {universes.length === 0 ? (
         <span style={{ ...chip, color: C.faint, borderColor: C.border }}>No Signal</span>
       ) : (
         universes.map((u) => {
-          const live = now - (lastSeen[u] ?? 0) < SIGNAL_TIMEOUT_MS // 信号断の判定(resolve.ts)と同じ定数で揃える
-          const col = live ? C.green : '#e0726a'
+          const live = liveSet.has(u)
+          // 受信していてもパッチ側と番号が合っていなければ琥珀色＝「届いてるけど宛先違い」
+          const mismatch = live && patched.length > 0 && !patched.includes(u)
+          const col = live ? (mismatch ? '#fbbf24' : C.green) : '#e0726a'
           return (
             // 表示は1始まりに統一（formatDmx/Inspector/FillDialog と同じ）。内部キー u は0始まりのまま。
-            <span key={u} style={{ ...chip, color: col, borderColor: col }}>
+            <span
+              key={u}
+              style={{ ...chip, color: col, borderColor: col }}
+              title={
+                mismatch
+                  ? `U${u + 1} を受信していますが、この番号にパッチされた灯体がありません（灯体側は ${patched.map((p) => `U${p + 1}`).join(',')}）。卓のユニバース設定を確認してください（0始まり表示の卓では「アプリの番号−1」）`
+                  : `U${u + 1} 受信中`
+              }
+            >
               U{u + 1} ●
             </span>
           )
         })
+      )}
+      {waiting.length > 0 && (
+        <span
+          style={{ ...chip, color: C.faint, borderColor: C.border }}
+          title="灯体がパッチされているのに、このユニバースの信号がまだ届いていません（卓の出力設定・回線を確認）"
+        >
+          待ち: {waiting.map((u) => `U${u + 1}`).join(' ')}
+        </span>
       )}
 
       <div style={sep} />
@@ -124,11 +159,13 @@ export function StatusBar(): React.JSX.Element {
           <span style={lbl}>Interface</span>
           <select
             value={nic}
+            onFocus={refreshNics} // 起動後に挿したLANケーブルも、開いた時に一覧へ出す
             onChange={(e) => {
               setNic(e.target.value)
               netApi()?.setBind?.(e.target.value)
             }}
             style={sel}
+            title="Art-Net をどの回線の送り主から受けるかの絞り込み。迷ったら「すべて (0.0.0.0)」のまま（どれを選んでも受信が止まることはありません）"
           >
             {nics.map((n) => (
               <option key={n.address} value={n.address}>

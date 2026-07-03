@@ -124,8 +124,18 @@ function startEngine(): void {
   startMidiInput((s, d1, d2) => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('midi:message', [s, d1, d2])
   })
-  receiver.on('error', (err) => console.error('[artnet] receiver error:', err))
-  receiver.start('0.0.0.0')
+  // 受信機の生死を画面へ通知（bind失敗＝ポート使用中などは今まで無言で死んでいた）。
+  receiver.on('error', (err) => {
+    console.error('[artnet] receiver error:', err)
+    const msg = String((err as NodeJS.ErrnoException)?.code ?? err)
+    for (const w of BrowserWindow.getAllWindows())
+      w.webContents.send('artnet:status', { ok: false, detail: msg })
+  })
+  receiver.on('listening', () => {
+    for (const w of BrowserWindow.getAllWindows())
+      w.webContents.send('artnet:status', { ok: true, detail: '' })
+  })
+  receiver.start()
   console.log('[engine] Art-Net receiver (UDP 6454) + Syphon/NDI "LED STAGE IMAGER" started')
 }
 
@@ -466,8 +476,9 @@ app.whenReady().then(() => {
     return out
   })
   ipcMain.handle('net:bind', (_e, ip: string) => {
-    receiver.start(ip || '0.0.0.0')
-    return true
+    // 🔴 bind し直さない（NIC の IP に bind すると macOS ではブロードキャスト＝卓の既定の
+    // 送り方が全滅する）。選択は「その回線の送り主だけ受ける絞り込み」として効かせる。
+    return receiver.setSourceFilter(ip || '0.0.0.0')
   })
   ipcMain.handle('engine:status', () => {
     // Mac は Syphon→ブリッジ経路、Windows 等は直送(ndi-direct)から状態を取る。

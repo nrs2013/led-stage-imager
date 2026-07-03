@@ -148,6 +148,12 @@ interface AppState {
    *  duplicate → drag into place → ⌘D ⌘D ⌘D lays out an even run (PowerPoint style). */
   lastDup: { srcId: string; newId: string } | null
   setUniverseData: (universe: number, data: Uint8Array) => void
+  /** 複数ユニバースまとめて反映（1描画フレームぶん）。卓は無変化でも44回/秒流し続けるので、
+   *  パケット毎に反映すると画面全体が毎パケット再描画されて固まる。 */
+  setUniverseDataBatch: (entries: [number, Uint8Array][]) => void
+  /** Art-Net 受信機の生死（bind失敗など）。null=正常。 */
+  artnetError: string | null
+  setArtnetError: (e: string | null) => void
 
   setUnderlay: (u: Underlay | null) => void
   setUnderlayOpacity: (opacity: number) => void
@@ -624,6 +630,19 @@ export const useStore = create<AppState>()((set, get) => ({
       dmxByUniverse: { ...s.dmxByUniverse, [universe]: data },
       lastSeenByUniverse: { ...s.lastSeenByUniverse, [universe]: Date.now() }
     })),
+  setUniverseDataBatch: (entries) =>
+    set((s) => {
+      const now = Date.now()
+      const dmx = { ...s.dmxByUniverse }
+      const seen = { ...s.lastSeenByUniverse }
+      for (const [u, data] of entries) {
+        dmx[u] = data
+        seen[u] = now
+      }
+      return { dmxByUniverse: dmx, lastSeenByUniverse: seen }
+    }),
+  artnetError: null,
+  setArtnetError: (artnetError) => set({ artnetError }),
 
   setUnderlay: (underlay) => {
     get().beginHistory()

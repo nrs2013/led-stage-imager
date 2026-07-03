@@ -61,6 +61,15 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // 🔴 パネルを閉じたら手動モードも解除＝卓(Art-Net)の操作に戻す。
+  // これが無いと「事前にQuick Lightで点灯確認→閉じる→卓を接続」の自然な流れで、
+  // 画面のどこにも表示が無いまま卓のフェーダーが一切効かない状態になる。
+  useEffect(() => {
+    return () => {
+      useStore.getState().setManualMode(false)
+    }
+  }, [])
+
   // Quick Light targets: every patched fixture / this song's page / canvas selection
   const homeLayer = chart.layers[0]?.id
   const layerShapeIds = new Set(

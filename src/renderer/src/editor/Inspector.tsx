@@ -862,8 +862,13 @@ export function Inspector(): React.JSX.Element {
               <NumberField
                 value={fixture.start}
                 min={1}
-                max={512}
-                onChange={(v) => upsertFixture(shape.id, { start: v })}
+                max={Math.max(1, 513 - channelCount(fixture.mode))}
+                onChange={(v) =>
+                  // 使用ch数ぶん512に収まる位置まで＝はみ出したchが黙って0扱いになるのを防ぐ
+                  upsertFixture(shape.id, {
+                    start: Math.min(v, Math.max(1, 513 - channelCount(fixture.mode)))
+                  })
+                }
               />
             </Field>
           </div>
