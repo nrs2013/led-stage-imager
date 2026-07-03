@@ -45,6 +45,7 @@ open "$HOME/Desktop/LED STAGE IMAGER.app"
 - **ビーム調整つまみ**（`engine.ts` 上部）：`BEAM_SOFT`(全体ぼかし)・`BEAM_ROOT_BOOST`(根元の明るさ)・`CONTACT_HOT`(白焼け強さ)・`CONTACT_HOT_FROM`(これ未満の明るさでは白く焼けない)・`CONTACT_NIJIMI`(色にじみ)。
 - **Windows NDI**：同梱DLL(`resources/ndi/Processing.NDI.Lib.x64.dll`)＋koffi(win32_x64)を最優先で読む設計（NDI Tools不要）。出ない時はDLLでなく**Windowsファイアウォール / NDI探索(mDNS) / 受け手のサブネット**を疑う。Interface(回線)選択は **Art-Net入力専用でNDIに無関係**。
 - **データ保存先**＝`~/Library/Application Support/decor-studio/`（il-autosave/show.json＋media、Local Storage）。アプリ差し替えでは消えない。
+- **画像照明の「保存」＝1ファイル `.ledshow`**（ZIP中身＝show.json＋media/写真動画・アイコン付き・ダブルクリックで開く）。旧フォルダ保存(show.json＋media/)も「開く」で読める（後方互換・壊さない）。media のキーは `media/001.png` 形式で serialize/zip/restore 全て一致必須（`showbundle.ts`＝zip/unzip・往復テスト有り）。チャートは別で `.ledimager`(単一JSON)。
 - **ミュート/ソロは写真(シーン)ごと保存・配置は全シーン共通**（非対称・仕様）。
 
 ## 作業の型

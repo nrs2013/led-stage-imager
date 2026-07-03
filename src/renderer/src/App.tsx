@@ -33,6 +33,7 @@ interface DecorApi {
   nativeCopy?: () => void
   nativePaste?: () => void
   onOpenChartPath?: (cb: (json: string) => void) => (() => void) | void
+  onOpenShowPath?: (cb: (bytes: Uint8Array) => void) => (() => void) | void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -172,6 +173,19 @@ function useOpenFile(): void {
   }, [])
 }
 
+/** ダブルクリックで開かれた .ledshow（画像照明の公演・ZIPバイト列）を受け取り、
+ *  画像照明モードへ入って復元する。取り込みは ImageLightingMode 側（pendingShowFile）。 */
+function useOpenShowFile(): void {
+  useEffect(() => {
+    const off = getApi()?.onOpenShowPath?.((bytes) => {
+      const st = useStore.getState()
+      st.setPendingShowFile(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes))
+      st.setImageLight(true)
+    })
+    return () => off?.()
+  }, [])
+}
+
 /** Dropping a file outside a drop zone must not navigate the window away. */
 function useDropGuard(): void {
   useEffect(() => {
@@ -199,6 +213,7 @@ function EditorApp(): React.JSX.Element {
   useMenuUndo()
   useAutosave()
   useOpenFile()
+  useOpenShowFile()
   // 画像照明モード: エディタ/Liveに代えて全画面表示（自前でSyphonへpublish）。
   // hooks は全てこの分岐より前で呼ぶこと（条件付きreturnの後にhookは置けない）。
   if (imageLight) return <ImageLightingMode onExit={() => setImageLight(false)} />

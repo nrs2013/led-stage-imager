@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, screen, Menu, session } from 'electron'
 import { join, extname } from 'path'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, renameSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, renameSync, statSync } from 'fs'
 import {
   writeFile as writeFileAsync,
   rename as renameAsync,
@@ -184,16 +184,25 @@ function closePreview(): void {
   previewWindow = null
 }
 
-/** ダブルクリックで開かれた .ledimager を読み込み、画面へ渡す（⌘S の上書き先にも設定）。
+/** ダブルクリックで開かれたファイルを読み込み、画面へ渡す。
+ *  .ledimager（チャート・JSON）→ chart:open-path（⌘S の上書き先にも設定）。
+ *  .ledshow（画像照明の公演・ZIP）→ imagelight:open-path（バイト列を渡す）。
  *  画面がまだ無い起動直後は pendingOpenPath に積み、did-finish-load で流す。 */
 function deliverOpenFile(p: string): void {
-  currentChartPath = p
   const w = mainWindow
-  if (w && !w.isDestroyed() && !w.webContents.isLoading()) {
+  const ready = w && !w.isDestroyed() && !w.webContents.isLoading()
+  const isShow = p.toLowerCase().endsWith('.ledshow')
+  // .ledshow は画像照明モードの公演。チャートの ⌘S 上書き先(currentChartPath)にはしない。
+  if (!isShow) currentChartPath = p
+  if (ready) {
     try {
-      w.webContents.send('chart:open-path', readFileSync(p, 'utf8'))
-      if (w.isMinimized()) w.restore()
-      w.focus()
+      if (isShow) {
+        w!.webContents.send('imagelight:open-path', readFileSync(p))
+      } else {
+        w!.webContents.send('chart:open-path', readFileSync(p, 'utf8'))
+      }
+      if (w!.isMinimized()) w!.restore()
+      w!.focus()
     } catch (err) {
       console.error('[open-file] 読み込み失敗:', err)
     }
@@ -210,7 +219,9 @@ app.on('open-file', (e, p) => {
 })
 // Windows/Linux: ダブルクリック起動時はファイルパスが引数で来る（macOS は open-file 経由）。
 if (process.platform !== 'darwin') {
-  const arg = process.argv.find((a) => a.toLowerCase().endsWith('.ledimager'))
+  const arg = process.argv.find(
+    (a) => a.toLowerCase().endsWith('.ledimager') || a.toLowerCase().endsWith('.ledshow')
+  )
   if (arg && existsSync(arg)) pendingOpenPath = arg
 }
 
@@ -466,13 +477,34 @@ app.whenReady().then(() => {
       return dir
     }
   )
+  // 1ファイル(.ledshow)保存: renderer で ZIP 済みのバイト列を書き出す。
+  ipcMain.handle('imagelight:save-show-file', async (_e, bytes: Uint8Array, name: string) => {
+    const res = await dialog.showSaveDialog({
+      title: '公演を1ファイルで保存',
+      defaultPath: `${name || 'show'}.ledshow`,
+      filters: [{ name: 'LED STAGE IMAGER Show', extensions: ['ledshow'] }],
+      buttonLabel: '保存'
+    })
+    if (res.canceled || !res.filePath) return null
+    writeFileSync(res.filePath, Buffer.from(bytes))
+    return res.filePath
+  })
   ipcMain.handle('imagelight:open-show', async () => {
+    // 1ファイル(.ledshow)も 旧フォルダ(show.json+media/)も、どちらも選べる。
     const res = await dialog.showOpenDialog({
-      title: '公演フォルダを開く',
-      properties: ['openDirectory']
+      title: '公演を開く（1ファイル または フォルダ）',
+      properties: ['openFile', 'openDirectory'],
+      filters: [{ name: 'LED STAGE IMAGER Show', extensions: ['ledshow'] }]
     })
     if (res.canceled || res.filePaths.length === 0) return null
-    const dir = res.filePaths[0]
+    const p = res.filePaths[0]
+    // ファイル(.ledshow)なら中身(バイト)を返す→renderer で解凍。フォルダなら従来どおり。
+    try {
+      if (statSync(p).isFile()) return { zip: readFileSync(p) }
+    } catch {
+      return { error: 'ファイルを読めませんでした' }
+    }
+    const dir = p
     let json: string
     try {
       json = readFileSync(join(dir, 'show.json'), 'utf8')
@@ -544,6 +576,30 @@ app.whenReady().then(() => {
         const tmp = join(dir, 'show.json.tmp')
         await writeFileAsync(tmp, json, 'utf8')
         await renameAsync(tmp, join(dir, 'show.json'))
+        // ②' 世代バックアップ（データ保険）: show.json だけを history/ に最大20世代・5分に1つまで。
+        //     写真/動画は容量が大きいので複製せず media/ を共有する。既存の保存パスは触らない＝安全。
+        try {
+          const histDir = join(dir, 'history')
+          await mkdirAsync(histDir, { recursive: true })
+          const list = (await readdirAsync(histDir)).filter((f) => f.endsWith('.json')).sort()
+          const last = list[list.length - 1]
+          let makeNew = true
+          if (last) {
+            const st = await statAsync(join(histDir, last))
+            if (Date.now() - st.mtimeMs < 5 * 60 * 1000) makeNew = false // 5分に1世代まで＝編集中に溜まりすぎない
+          }
+          if (makeNew) {
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+            await writeFileAsync(join(histDir, `show-${stamp}.json`), json, 'utf8')
+            const all = (await readdirAsync(histDir)).filter((f) => f.endsWith('.json')).sort()
+            while (all.length > 20) {
+              const drop = all.shift()
+              if (drop) await unlinkAsync(join(histDir, drop))
+            }
+          }
+        } catch {
+          /* 世代保存の失敗は本体保存に影響させない（保険なので無音） */
+        }
         // ③ 使われなくなった素材を掃除（確定後に行うので欠落リスク無し）
         const keep = new Set((media ?? []).map((m) => m.file.replace(/^media\//, '')))
         try {
@@ -571,6 +627,47 @@ app.whenReady().then(() => {
         }
       } catch {
         /* media が無くても json だけ返す */
+      }
+      return { json, media }
+    } catch {
+      return null
+    }
+  })
+  // 世代バックアップの一覧（新しい順・ファイル名と時刻ラベル）。
+  ipcMain.handle('imagelight:history-list', async () => {
+    try {
+      const histDir = join(ilAutoDir(), 'history')
+      const files = (await readdirAsync(histDir)).filter((f) => f.endsWith('.json'))
+      const out: { file: string; mtimeMs: number }[] = []
+      for (const f of files) {
+        try {
+          const st = await statAsync(join(histDir, f))
+          out.push({ file: f, mtimeMs: st.mtimeMs })
+        } catch {
+          /* skip */
+        }
+      }
+      out.sort((a, b) => b.mtimeMs - a.mtimeMs) // 新しい順
+      return out
+    } catch {
+      return []
+    }
+  })
+  // 指定の世代を読む（show.json はその世代・media は現在の il-autosave/media を共有）。
+  ipcMain.handle('imagelight:history-read', (_e, file: string) => {
+    try {
+      // パス・トラバーサル防止: 単純なファイル名だけ許可
+      if (!/^show-[\w.-]+\.json$/.test(file)) return null
+      const dir = ilAutoDir()
+      const json = readFileSync(join(dir, 'history', file), 'utf8')
+      const media: Record<string, string> = {}
+      try {
+        for (const f of readdirSync(join(dir, 'media'))) {
+          const buf = readFileSync(join(dir, 'media', f))
+          media['media/' + f] = `data:${mimeFromExt(f)};base64,${buf.toString('base64')}`
+        }
+      } catch {
+        /* media 無しでも json は返す */
       }
       return { json, media }
     } catch {

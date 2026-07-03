@@ -77,6 +77,12 @@ const api = {
     ipcRenderer.on('chart:open-path', h)
     return () => ipcRenderer.removeListener('chart:open-path', h)
   },
+  // ダブルクリックで開かれた .ledshow（画像照明の公演・ZIPのバイト列）がメインから届く
+  onOpenShowPath: (cb: (bytes: Uint8Array) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, bytes: Uint8Array): void => cb(bytes)
+    ipcRenderer.on('imagelight:open-path', h)
+    return () => ipcRenderer.removeListener('imagelight:open-path', h)
+  },
   autosaveWrite: (json: string): Promise<boolean> =>
     ipcRenderer.invoke('chart:autosave-write', json),
   autosaveRead: (): Promise<string | null> => ipcRenderer.invoke('chart:autosave-read'),
@@ -89,8 +95,14 @@ const api = {
     media: { file: string; dataUrl: string }[],
     name: string
   ): Promise<string | null> => ipcRenderer.invoke('imagelight:save-show', json, media, name),
+  // 1ファイル(.ledshow)で保存（写真/動画ごとZIP済みのバイト列を渡す）
+  saveImageLightShowFile: (bytes: Uint8Array, name: string): Promise<string | null> =>
+    ipcRenderer.invoke('imagelight:save-show-file', bytes, name),
   openImageLightShow: (): Promise<
-    { json: string; media: Record<string, string> } | { error: string } | null
+    | { json: string; media: Record<string, string> }
+    | { zip: Uint8Array }
+    | { error: string }
+    | null
   > => ipcRenderer.invoke('imagelight:open-show'),
   // 全自動保存（シーン・配置・明かり・設定を丸ごと userData に常時保存／起動時に復元）
   autosaveImageLightWrite: (
@@ -98,7 +110,13 @@ const api = {
     media: { file: string; dataUrl: string }[]
   ): Promise<boolean> => ipcRenderer.invoke('imagelight:autosave-write', json, media),
   autosaveImageLightRead: (): Promise<{ json: string; media: Record<string, string> } | null> =>
-    ipcRenderer.invoke('imagelight:autosave-read')
+    ipcRenderer.invoke('imagelight:autosave-read'),
+  imageLightHistoryList: (): Promise<{ file: string; mtimeMs: number }[]> =>
+    ipcRenderer.invoke('imagelight:history-list'),
+  imageLightHistoryRead: (
+    file: string
+  ): Promise<{ json: string; media: Record<string, string> } | null> =>
+    ipcRenderer.invoke('imagelight:history-read', file)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

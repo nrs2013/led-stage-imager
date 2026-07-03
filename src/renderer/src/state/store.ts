@@ -76,6 +76,10 @@ interface AppState {
   /** 画像照明モード（のむさんが本番で回す・卓なし）。true の間はエディタ/Liveに代えて
    *  ImageLightingMode を全画面表示し、自前で Syphon へ publish する。 */
   imageLight: boolean
+  /** ダブルクリックで開かれた .ledshow（ZIPバイト列）の受け渡し用。ImageLightingMode が
+   *  マウント時に取り込んで復元し、null に戻す。通常は null。 */
+  pendingShowFile: Uint8Array | null
+  setPendingShowFile: (bytes: Uint8Array | null) => void
   /** 照明モード(LIGHTING)=true は LIGHT SKETCH から電飾(DECOR)タブを隠した照明特化版。
    *  簡単モード(EASY)=false は全部入り。imageLight が true の時だけ意味を持つ。 */
   lightingOnly: boolean
@@ -138,7 +142,7 @@ interface AppState {
   nudgeShape: (id: string, dx: number, dy: number) => void
   /** Arrow-key nudge for a multi selection — all shapes move as one undo step. */
   nudgeShapes: (ids: string[], dx: number, dy: number) => void
-  setShapePoints: (id: string, points: Point[]) => void
+  setShapePoints: (id: string, points: Point[], verts?: number[]) => void
   duplicateShape: (id: string) => void
   /** The last ⌘D pair — duplicating the copy again repeats THEIR offset, so
    *  duplicate → drag into place → ⌘D ⌘D ⌘D lays out an even run (PowerPoint style). */
@@ -290,6 +294,7 @@ export const useStore = create<AppState>()((set, get) => ({
   lastDup: null,
   started: initialStarted(),
   imageLight: false,
+  pendingShowFile: null,
   lightingOnly: false,
   imageLightUndo: null,
   imageLightRedo: null,
@@ -339,6 +344,7 @@ export const useStore = create<AppState>()((set, get) => ({
     }),
   setStarted: (started) => set({ started }),
   setImageLight: (imageLight) => set({ imageLight }),
+  setPendingShowFile: (pendingShowFile) => set({ pendingShowFile }),
   setLightingOnly: (lightingOnly) => set({ lightingOnly }),
   setImageLightHandlers: (h) =>
     set(
@@ -585,7 +591,10 @@ export const useStore = create<AppState>()((set, get) => ({
         universe: addr.universe,
         start: addr.start,
         mode: prev?.mode ?? 'rgb',
-        ...(prev?.mode === 'dim' && prev.fixedColor ? { fixedColor: prev.fixedColor } : {})
+        ...(prev?.mode === 'dim' && prev.fixedColor ? { fixedColor: prev.fixedColor } : {}),
+        // 連番スタンプは mode と同じく addressStep(文字/球ごとのch刻み)も引き継ぐ
+        // （引き継がないと2個目以降だけ刻みが既定に戻り、アドレス表がズレる）
+        ...(prev?.addressStep != null ? { addressStep: prev.addressStep } : {})
       }
       c2 = {
         ...c2,
@@ -944,11 +953,13 @@ export const useStore = create<AppState>()((set, get) => ({
       }
     }))
   },
-  setShapePoints: (id, points) =>
+  setShapePoints: (id, points, verts) =>
     set((s) => ({
       chart: {
         ...s.chart,
-        shapes: s.chart.shapes.map((sh) => (sh.id === id ? { ...sh, points } : sh))
+        shapes: s.chart.shapes.map((sh) =>
+          sh.id === id ? { ...sh, points, ...(verts !== undefined ? { verts } : {}) } : sh
+        )
       }
     })),
   duplicateShape: (id) => {

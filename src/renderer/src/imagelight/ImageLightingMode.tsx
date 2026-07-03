@@ -5,6 +5,7 @@ import { FX_BUTTONS, FX_LABEL, FX_PARAMS } from './fxdefs'
 import { DECOR_NONDIR } from './decor-pattern'
 import type { DecorPatternKind, DecorEffect, DecorDirection } from './decor-pattern'
 import { fileToDataUrl } from '../io/image-pick'
+import { zipShow, unzipShow } from '../io/showbundle'
 import { useStore } from '../state/store'
 import { PART_ICON } from '../render/part-icons'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
@@ -26,14 +27,22 @@ interface DecorApi {
     media: { file: string; dataUrl: string }[],
     name: string
   ) => Promise<string | null>
+  saveImageLightShowFile?: (bytes: Uint8Array, name: string) => Promise<string | null>
   openImageLightShow?: () => Promise<
-    { json: string; media: Record<string, string> } | { error: string } | null
+    | { json: string; media: Record<string, string> }
+    | { zip: Uint8Array }
+    | { error: string }
+    | null
   >
   autosaveImageLightWrite?: (
     json: string,
     media: { file: string; dataUrl: string }[]
   ) => Promise<boolean>
   autosaveImageLightRead?: () => Promise<{ json: string; media: Record<string, string> } | null>
+  imageLightHistoryList?: () => Promise<{ file: string; mtimeMs: number }[]>
+  imageLightHistoryRead?: (
+    file: string
+  ) => Promise<{ json: string; media: Record<string, string> } | null>
   onMidiMessage?: (cb: (msg: [number, number, number]) => void) => (() => void) | void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
@@ -157,6 +166,26 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   useEffect(() => {
     autoRestoredRef.current = true
   }, [])
+
+  // ダブルクリックで開かれた .ledshow を取り込んで復元（App が pendingShowFile に積む）。
+  // 既に照明モードに居る時に別ファイルを開いても効くよう、pendingShowFile を購読する。
+  const pendingShowFile = useStore((s) => s.pendingShowFile)
+  useEffect(() => {
+    if (!pendingShowFile) return
+    const bytes = pendingShowFile
+    useStore.getState().setPendingShowFile(null) // 二重復元しないよう即クリア
+    ;(async () => {
+      try {
+        flash('読込中…')
+        const jm = await unzipShow(bytes)
+        const ok = await engine.restoreShow(jm.json, jm.media)
+        flash(ok ? '開きました' : '読込に失敗')
+      } catch {
+        flash('読込に失敗')
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingShowFile, engine])
 
   // 変更があるたびに全状態を userData へ自動保存（復元完了後・1.2秒デバウンス）。
   // これで再起動・クラッシュしても、シーン/配置/明かり/設定が丸ごと残る。
@@ -291,6 +320,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     | 'blinder' | 'patt' | 'pixelpatt' | 'stars' | 'festoon' | null
   >(null)
   const [showAdv, setShowAdv] = useState(false) // 「詳しく」（細かい設定）の開閉
+  const [backups, setBackups] = useState<{ file: string; mtimeMs: number }[]>([]) // 自動バックアップ世代
+  const [backupOpen, setBackupOpen] = useState(false) // バックアップ一覧の開閉
   const [showRigSize, setShowRigSize] = useState(false) // 照明モード: サイズ(出口幅/広がり/伸び)の折りたたみ。普段は隠す
   const hudTabRef = useRef(hudTab)
   useEffect(() => {
@@ -471,8 +502,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // ---- キーボード（本番キー＋シーンのショートカット）
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (e.defaultPrevented) return // 先に処理済み（psheet/入力欄など）のキーを二重処理しない
       const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
       // ⌘+S（Ctrl+S）＝公演まるごと保存。どのモードでも効く（ブラウザ既定の保存は止める）。
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
@@ -511,6 +543,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       if (engine.learnStrobe) {
         if (e.key === 'Escape') {
           engine.setLearnStrobe(false)
+          e.preventDefault()
+        }
+        return
+      }
+      // モチーフチェイス LEARN 待機中：Esc で中止（割当は MIDI ノートのみ）。
+      if (engine.learnMotifChase) {
+        if (e.key === 'Escape') {
+          engine.setLearnMotifChase(false)
           e.preventDefault()
         }
         return
@@ -959,13 +999,20 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   }
   const saveShow = async (): Promise<void> => {
     const a = getApi()
-    if (!a?.saveImageLightShow) return
+    // 既定は「1ファイル(.ledshow)」保存。写真/動画も中に包む。旧フォルダ保存は開く側で対応。
+    if (!a?.saveImageLightShowFile && !a?.saveImageLightShow) return
     if (savingRef.current) return // 保存中の二重起動を防ぐ（⌘S 連打で保存ダイアログが重なるのを止める）
     savingRef.current = true
     flash('保存中…')
     try {
       const { json, media } = await engine.serializeShow()
-      const path = await a.saveImageLightShow(json, media, 'show')
+      let path: string | null = null
+      if (a.saveImageLightShowFile) {
+        const bytes = await zipShow(json, media)
+        path = await a.saveImageLightShowFile(bytes, 'show')
+      } else if (a.saveImageLightShow) {
+        path = await a.saveImageLightShow(json, media, 'show')
+      }
       flash(path ? '保存しました' : 'キャンセル')
     } catch {
       flash('保存に失敗')
@@ -981,10 +1028,30 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const res = await a.openImageLightShow()
       if (!res) return flash('キャンセル')
       if ('error' in res) return flash(res.error)
-      const ok = await engine.restoreShow(res.json, res.media)
+      // .ledshow(1ファイル)なら中身を解凍、旧フォルダなら {json,media} がそのまま来る
+      const jm = 'zip' in res ? await unzipShow(res.zip) : res
+      const ok = await engine.restoreShow(jm.json, jm.media)
       flash(ok ? '開きました' : '読込に失敗')
     } catch {
       flash('読込に失敗')
+    }
+  }
+  // 自動バックアップ（世代）の一覧と巻き戻し
+  const refreshBackups = async (): Promise<void> => {
+    const list = (await getApi()?.imageLightHistoryList?.()) ?? []
+    setBackups(list)
+  }
+  const restoreBackup = async (file: string): Promise<void> => {
+    const a = getApi()
+    if (!a?.imageLightHistoryRead) return
+    flash('巻き戻し中…')
+    try {
+      const res = await a.imageLightHistoryRead(file)
+      if (!res) return flash('その世代が読めませんでした')
+      const ok = await engine.restoreShow(res.json, res.media)
+      flash(ok ? 'この時点に戻しました' : '巻き戻しに失敗')
+    } catch {
+      flash('巻き戻しに失敗')
     }
   }
   const ref = engine.ref()
@@ -1106,10 +1173,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         >
           SHORTCUT
         </button>
-        <button className="il-mini" onClick={saveShow} title="公演まるごとフォルダに保存（写真/動画も一緒）／ ⌘S でも保存">
+        <button className="il-mini" onClick={saveShow} title="公演を1ファイル(.ledshow)に保存（写真/動画も中に一緒・ダブルクリックで開ける）／ ⌘S でも保存">
           保存
         </button>
-        <button className="il-mini" onClick={openShow} title="保存した公演フォルダを開く（写真も明かりも復元）">
+        <button className="il-mini" onClick={openShow} title="保存した公演を開く（.ledshow の1ファイル・以前のフォルダ保存どちらも可）">
           開く
         </button>
         <button className="il-mini" onClick={onExit}>
@@ -1883,6 +1950,57 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 
               <div className="il2-sec">
                 <div className="il2-eb">
+                  <span className="il2-kind">保険</span>
+                  <b>BACKUP</b>
+                </div>
+                <button
+                  className="il2-preset"
+                  onClick={() => {
+                    const open = !backupOpen
+                    setBackupOpen(open)
+                    if (open) void refreshBackups()
+                  }}
+                  title="自動保存の履歴（最大20世代・約5分ごと）。選ぶとその時点の配置・明かり・シーンに戻せます。写真そのものは現在のものを使います。"
+                >
+                  <span className="il2-pi">
+                    <span className="il2-pk">自動バックアップ</span>
+                    <span className="il2-pv">{backupOpen ? '閉じる' : '巻き戻す'}</span>
+                  </span>
+                  <span className="il2-chev">{backupOpen ? '▾' : '▸'}</span>
+                </button>
+                {backupOpen && (
+                  <div className="il2-presetbody">
+                    {backups.length === 0 ? (
+                      <div className="il-lbl" style={{ opacity: 0.7 }}>
+                        まだ履歴がありません（編集を続けると約5分ごとに増えます）
+                      </div>
+                    ) : (
+                      backups.map((b) => {
+                        const d = new Date(b.mtimeMs)
+                        const p = (n: number): string => (n < 10 ? '0' + n : '' + n)
+                        const label = `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`
+                        return (
+                          <button
+                            key={b.file}
+                            className="il-mini"
+                            style={{ width: '100%', textAlign: 'left', marginBottom: 3 }}
+                            onClick={() => {
+                              if (window.confirm(`${label} の時点に戻します。今の状態は自動保存に残っているので、また戻せます。よろしいですか？`))
+                                void restoreBackup(b.file)
+                            }}
+                            title="この時点の配置・明かり・シーンに戻す"
+                          >
+                            {label} に戻す
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="il2-sec">
+                <div className="il2-eb">
                   <span className="il2-kind">見え方</span>
                   <b>LOOK</b>
                 </div>
@@ -1894,7 +2012,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     max={40}
                     value={Math.round(engine.colorWash * 100)}
                     onChange={(e) => engine.setColorWash(+e.target.value / 100)}
-                    title="光の色を写真にそのまま乗せる量。0=従来（掛け算のみ＝青が茶色いセットに乗らない）。おすすめ12〜18"
+                    title="光の色を写真にそのまま乗せる量。0=従来（掛け算のみ＝青が茶色いセットに乗らない）。おすすめ12〜18。※LIGHT ONLY(光だけ出力)では効きません（乗算はArena側のため）"
                     style={{ flex: 1 }}
                   />
                   <span className="il2-pv">{Math.round(engine.colorWash * 100)}</span>

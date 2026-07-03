@@ -608,30 +608,52 @@ function lanternLit(
 }
 
 /* ===== 一灯ヴァージョン（リアル）：2026-06-30 のむさん承認モックを移植 =====
- * 真鍮の固体物として「不透過」で描き（写真を遮蔽＝本物が立つ）、ランタンの灯りだけ
- * 既存灯体と同じ作法で加算（縦長の芯・控えめハロー・色は卓RGBの{hue,I}）。
+ * 2026-07-02 改良: 本体は「フル明るさで描いて光マップと掛け算」する方式に変更（engine側）。
+ * これで“当たっている部分だけ”が浮かび、光の方向・ムラもそのまま出る（一様に光る嘘をやめる）。
+ * ここでは部品を3つに分けて公開する:
+ *   drawStreetLamp1Shadow = 接地影（照らされた床にだけ見える・黒地では自然に消える）
+ *   drawStreetLamp1Body   = 真鍮の固体物をフル明るさで（engineが光マップでマスク乗算）
+ *   drawStreetLamp1Glow   = ランタンの灯り（自分の1ch・加算・柔らかく周りも照らす）
  * d = ランプ全高(px)相当のスケール。中心(cx,cy)はランタン中心。 */
-export function drawStreetLamp1Lit(
+
+/** 一灯街灯の接地影。フレームに直接描く（黒地では見えず、照らされた床でだけ落ち影に見える）。 */
+export function drawStreetLamp1Shadow(
   ctx: CanvasRenderingContext2D,
   cx: number,
   cy: number,
-  d: number,
-  rgb: RGB,
-  ext: number
+  d: number
 ): void {
-  const { hue, intensity: I } = bulbHueIntensity(rgb)
-  if (I <= 0.004 && ext <= 0.01) return
-  const K = 0.05 + 0.95 * Math.max(0, Math.min(1, ext)) // 本体の明るさ＝当たってるステージ光
+  const S = d / 940
+  const y = cy + (983 - 162) * S
+  const sh = ctx.createRadialGradient(cx, y, 5 * S, cx, y, 110 * S)
+  sh.addColorStop(0, 'rgba(0,0,0,0.4)')
+  sh.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.save()
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.fillStyle = sh
+  ctx.beginPath()
+  ctx.ellipse(cx, y, 106 * S, 15 * S, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+/** 一灯街灯の本体（真鍮の固体物）をフル明るさで描く。engine 側がこれを光マップで
+ *  乗算マスクする＝当たっている所だけ・当たった方向から浮かぶ。 */
+export function drawStreetLamp1Body(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  d: number
+): void {
   const S = d / 940
   const yy = (m: number): number => cy + (m - 162) * S
   const hh = (h: number): number => h * S
   const lw0 = (k: number): number => Math.max(0.6, k * S)
-  const sc = (r: number, g: number, b: number): string => `rgb(${(r * K) | 0},${(g * K) | 0},${(b * K) | 0})`
   const brass = (half: number): CanvasGradient => {
     const g = ctx.createLinearGradient(cx - hh(half), 0, cx + hh(half), 0)
-    g.addColorStop(0, sc(20, 14, 5)); g.addColorStop(0.07, sc(71, 58, 23)); g.addColorStop(0.19, sc(138, 113, 46))
-    g.addColorStop(0.34, sc(243, 231, 173)); g.addColorStop(0.44, sc(216, 186, 96)); g.addColorStop(0.58, sc(173, 144, 57))
-    g.addColorStop(0.79, sc(111, 91, 37)); g.addColorStop(0.92, sc(53, 43, 20)); g.addColorStop(1, sc(13, 9, 4))
+    g.addColorStop(0, 'rgb(20,14,5)'); g.addColorStop(0.07, 'rgb(71,58,23)'); g.addColorStop(0.19, 'rgb(138,113,46)')
+    g.addColorStop(0.34, 'rgb(243,231,173)'); g.addColorStop(0.44, 'rgb(216,186,96)'); g.addColorStop(0.58, 'rgb(173,144,57)')
+    g.addColorStop(0.79, 'rgb(111,91,37)'); g.addColorStop(0.92, 'rgb(53,43,20)'); g.addColorStop(1, 'rgb(13,9,4)')
     return g
   }
   const seg = (yT: number, yB: number, hT: number, hB: number): void => {
@@ -644,55 +666,46 @@ export function drawStreetLamp1Lit(
   const band = (y: number, half: number, h: number): void => {
     const e = Math.max(0.5, 1.4 * S)
     ctx.fillStyle = brass(half); ctx.fillRect(cx - hh(half), yy(y), hh(half) * 2, h * S)
-    ctx.fillStyle = `rgba(255,247,205,${0.30 * K})`; ctx.fillRect(cx - hh(half), yy(y), hh(half) * 2, e)
+    ctx.fillStyle = 'rgba(255,247,205,0.30)'; ctx.fillRect(cx - hh(half), yy(y), hh(half) * 2, e)
     ctx.fillStyle = 'rgba(0,0,0,0.30)'; ctx.fillRect(cx - hh(half), yy(y) + h * S - e, hh(half) * 2, e)
   }
   const spec = (ox: number, my: number, rx: number, ry: number, a: number): void => {
     ctx.beginPath(); ctx.ellipse(cx + hh(ox), yy(my), hh(rx), hh(ry), 0, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(255,252,235,${a * K})`; ctx.fill()
+    ctx.fillStyle = rgba(W, a); ctx.fill()
   }
   const glassPath = (): void => {
     ctx.beginPath(); ctx.moveTo(cx - hh(34), yy(118)); ctx.lineTo(cx + hh(34), yy(118))
     ctx.lineTo(cx + hh(27), yy(206)); ctx.lineTo(cx - hh(27), yy(206)); ctx.closePath()
   }
-  const cyB = 162
 
   ctx.save()
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'
   ctx.globalCompositeOperation = 'source-over'
 
-  // 接地影（本体が見えてる時だけ）
-  if (K > 0.12) {
-    const sh = ctx.createRadialGradient(cx, yy(983), hh(5), cx, yy(983), hh(110))
-    sh.addColorStop(0, `rgba(0,0,0,${0.45 * K})`); sh.addColorStop(1, 'rgba(0,0,0,0)')
-    ctx.fillStyle = sh; ctx.beginPath(); ctx.ellipse(cx, yy(983), hh(106), hh(15), 0, 0, Math.PI * 2); ctx.fill()
-  }
-
-  // ---- 本体（真鍮の固体物・明るさ K = 当たってる光）----
   band(958, 64, 22); band(936, 54, 22)
   seg(857, 936, 42, 42); ctx.fillStyle = brass(42); ctx.fill()
   ctx.fillStyle = 'rgba(0,0,0,0.30)'; ctx.fillRect(cx + hh(24), yy(857), hh(18), 79 * S)
   ctx.strokeStyle = 'rgba(28,20,8,0.55)'; ctx.lineWidth = lw0(1)
   ctx.strokeRect(cx - hh(32), yy(872), hh(64), 52 * S)
-  ctx.strokeStyle = `rgba(255,247,205,${0.14 * K})`; ctx.beginPath(); ctx.moveTo(cx - hh(32), yy(872)); ctx.lineTo(cx + hh(32), yy(872)); ctx.stroke()
+  ctx.strokeStyle = 'rgba(255,247,205,0.14)'; ctx.beginPath(); ctx.moveTo(cx - hh(32), yy(872)); ctx.lineTo(cx + hh(32), yy(872)); ctx.stroke()
   band(837, 48, 20); band(817, 44, 20)
   fseg(624, 817, 13, 40)
-  ctx.fillStyle = `rgba(255,249,210,${0.22 * K})`; ctx.beginPath(); ctx.moveTo(cx - hh(3), yy(624)); ctx.lineTo(cx - hh(8), yy(817)); ctx.lineTo(cx + hh(2), yy(817)); ctx.lineTo(cx, yy(624)); ctx.closePath(); ctx.fill()
+  ctx.fillStyle = 'rgba(255,249,210,0.22)'; ctx.beginPath(); ctx.moveTo(cx - hh(3), yy(624)); ctx.lineTo(cx - hh(8), yy(817)); ctx.lineTo(cx + hh(2), yy(817)); ctx.lineTo(cx, yy(624)); ctx.closePath(); ctx.fill()
   ctx.fillStyle = 'rgba(0,0,0,0.20)'; ctx.beginPath(); ctx.moveTo(cx + hh(9), yy(624)); ctx.lineTo(cx + hh(40), yy(817)); ctx.lineTo(cx + hh(31), yy(817)); ctx.lineTo(cx + hh(6), yy(624)); ctx.closePath(); ctx.fill()
   band(612, 16, 12)
   fseg(248, 612, 7, 12)
-  ctx.fillStyle = `rgba(255,250,215,${0.36 * K})`; fseg(248, 612, 1.3, 2)
+  ctx.fillStyle = 'rgba(255,250,215,0.36)'; fseg(248, 612, 1.3, 2)
   ctx.fillStyle = 'rgba(0,0,0,0.30)'; ctx.fillRect(cx + hh(4.5), yy(248), hh(2), 364 * S)
   band(450, 12, 8); band(238, 11, 10)
-  // ガラス（暗・本体と一緒に明るさK）
+  // ガラス（消灯時は暗いガラス。点灯の輝きは Glow 側が加算で乗せる）
   glassPath()
   const dgr = ctx.createLinearGradient(0, yy(116), 0, yy(206))
-  dgr.addColorStop(0, sc(38, 39, 45)); dgr.addColorStop(0.5, sc(25, 26, 32)); dgr.addColorStop(1, sc(16, 17, 22))
+  dgr.addColorStop(0, 'rgb(38,39,45)'); dgr.addColorStop(0.5, 'rgb(25,26,32)'); dgr.addColorStop(1, 'rgb(16,17,22)')
   ctx.fillStyle = dgr; ctx.fill()
   // 鉄枠
-  ctx.lineWidth = lw0(3.4); ctx.strokeStyle = sc(42, 35, 22)
+  ctx.lineWidth = lw0(3.4); ctx.strokeStyle = 'rgb(42,35,22)'
   ctx.beginPath(); ctx.moveTo(cx - hh(34), yy(118)); ctx.lineTo(cx - hh(27), yy(206)); ctx.moveTo(cx + hh(34), yy(118)); ctx.lineTo(cx + hh(27), yy(206)); ctx.stroke()
-  ctx.lineWidth = lw0(1.8); ctx.strokeStyle = sc(40, 40, 48)
+  ctx.lineWidth = lw0(1.8); ctx.strokeStyle = 'rgb(40,40,48)'
   ctx.beginPath(); ctx.moveTo(cx, yy(118)); ctx.lineTo(cx, yy(206)); ctx.moveTo(cx - hh(34), yy(118)); ctx.lineTo(cx + hh(27), yy(206)); ctx.moveTo(cx + hh(34), yy(118)); ctx.lineTo(cx - hh(27), yy(206)); ctx.stroke()
   // 受け皿・襟・屋根・頂飾り
   ctx.fillStyle = brass(28); ctx.beginPath(); ctx.moveTo(cx - hh(27), yy(206)); ctx.lineTo(cx + hh(27), yy(206)); ctx.lineTo(cx + hh(19), yy(224)); ctx.lineTo(cx - hh(19), yy(224)); ctx.closePath(); ctx.fill()
@@ -703,33 +716,52 @@ export function drawStreetLamp1Lit(
   ctx.beginPath(); ctx.arc(cx, yy(69), hh(7), 0, Math.PI * 2); ctx.fillStyle = brass(7); ctx.fill(); spec(-2.4, 66.5, 2.4, 2.4, 0.6)
   ctx.beginPath(); ctx.moveTo(cx, yy(44)); ctx.lineTo(cx - hh(2.6), yy(62)); ctx.lineTo(cx + hh(2.6), yy(62)); ctx.closePath(); ctx.fillStyle = brass(2.6); ctx.fill()
 
-  // ---- ランタンの灯り（自分の1ch I）＝柔らかく周りも光る（縁を出さない soft gradient）----
-  if (I > 0.004) {
-    const sglow = (x: number, y: number, r: number, col: RGB, a: number): void => {
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r)
-      g.addColorStop(0, rgba(col, a)); g.addColorStop(0.3, rgba(col, a * 0.5))
-      g.addColorStop(0.62, rgba(col, a * 0.16)); g.addColorStop(1, rgba(col, 0))
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill()
-    }
-    ctx.save(); ctx.globalCompositeOperation = 'lighter'
-    sglow(cx, yy(cyB), hh(185), mix(hue, W, 0.12), 0.11 * I)
-    sglow(cx, yy(cyB) + hh(70), hh(155), mix(hue, W, 0.08), 0.07 * I)
-    sglow(cx, yy(cyB) + hh(260), hh(135), mix(hue, W, 0.05), 0.045 * I)
-    sglow(cx, yy(983), hh(175), mix(hue, W, 0.05), 0.04 * I)
-    sglow(cx, yy(cyB), hh(96), mix(hue, W, 0.3), 0.15 * I)
-    sglow(cx, yy(120), hh(48), mix(hue, W, 0.32), 0.13 * I)
-    ctx.save(); glassPath(); ctx.clip()
-    const gg = ctx.createRadialGradient(cx, yy(cyB), 0, cx, yy(cyB), hh(88 * 0.95))
-    gg.addColorStop(0, rgba(mix(hue, W, 0.5), 0.7 * I)); gg.addColorStop(0.5, rgba(mix(hue, W, 0.18), 0.4 * I)); gg.addColorStop(1, rgba(hue, 0.16 * I))
-    ctx.fillStyle = gg; ctx.fillRect(cx - hh(46), yy(106), hh(92), 114 * S)
-    ctx.translate(cx, yy(cyB)); ctx.scale(0.42, 1); ctx.translate(-cx, -yy(cyB))
-    const co = ctx.createRadialGradient(cx, yy(cyB), 0, cx, yy(cyB), hh(88 * 0.66))
-    co.addColorStop(0, rgba(mix(hue, W, 0.82), 0.66 * I)); co.addColorStop(0.5, rgba(mix(hue, W, 0.38), 0.28 * I)); co.addColorStop(1, rgba(hue, 0))
-    ctx.fillStyle = co; ctx.beginPath(); ctx.arc(cx, yy(cyB), hh(88 * 0.66), 0, Math.PI * 2); ctx.fill(); ctx.restore()
-    ctx.lineWidth = lw0(1.6); ctx.strokeStyle = rgba(mix(hue, W, 0.5), 0.4 * I)
-    ctx.beginPath(); ctx.moveTo(cx - hh(33), yy(118)); ctx.lineTo(cx - hh(26), yy(206)); ctx.moveTo(cx + hh(33), yy(118)); ctx.lineTo(cx + hh(26), yy(206)); ctx.stroke()
-    ctx.restore()
-  }
+  ctx.restore()
+}
 
+/** 一灯街灯のランタンの灯り（自分の1ch）。加算合成で、周り・屋根・柱上部も柔らかく照らす。 */
+export function drawStreetLamp1Glow(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  d: number,
+  rgb: RGB
+): void {
+  const { hue, intensity: I } = bulbHueIntensity(rgb)
+  if (I <= 0.004) return
+  const S = d / 940
+  const yy = (m: number): number => cy + (m - 162) * S
+  const hh = (h: number): number => h * S
+  const lw0 = (k: number): number => Math.max(0.6, k * S)
+  const glassPath = (): void => {
+    ctx.beginPath(); ctx.moveTo(cx - hh(34), yy(118)); ctx.lineTo(cx + hh(34), yy(118))
+    ctx.lineTo(cx + hh(27), yy(206)); ctx.lineTo(cx - hh(27), yy(206)); ctx.closePath()
+  }
+  const cyB = 162
+  const sglow = (x: number, y: number, r: number, col: RGB, a: number): void => {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r)
+    g.addColorStop(0, rgba(col, a)); g.addColorStop(0.3, rgba(col, a * 0.5))
+    g.addColorStop(0.62, rgba(col, a * 0.16)); g.addColorStop(1, rgba(col, 0))
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill()
+  }
+  ctx.save()
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+  ctx.globalCompositeOperation = 'lighter'
+  sglow(cx, yy(cyB), hh(185), mix(hue, W, 0.12), 0.11 * I)
+  sglow(cx, yy(cyB) + hh(70), hh(155), mix(hue, W, 0.08), 0.07 * I)
+  sglow(cx, yy(cyB) + hh(260), hh(135), mix(hue, W, 0.05), 0.045 * I)
+  sglow(cx, yy(983), hh(175), mix(hue, W, 0.05), 0.04 * I)
+  sglow(cx, yy(cyB), hh(96), mix(hue, W, 0.3), 0.15 * I)
+  sglow(cx, yy(120), hh(48), mix(hue, W, 0.32), 0.13 * I)
+  ctx.save(); glassPath(); ctx.clip()
+  const gg = ctx.createRadialGradient(cx, yy(cyB), 0, cx, yy(cyB), hh(88 * 0.95))
+  gg.addColorStop(0, rgba(mix(hue, W, 0.5), 0.7 * I)); gg.addColorStop(0.5, rgba(mix(hue, W, 0.18), 0.4 * I)); gg.addColorStop(1, rgba(hue, 0.16 * I))
+  ctx.fillStyle = gg; ctx.fillRect(cx - hh(46), yy(106), hh(92), 114 * S)
+  ctx.translate(cx, yy(cyB)); ctx.scale(0.42, 1); ctx.translate(-cx, -yy(cyB))
+  const co = ctx.createRadialGradient(cx, yy(cyB), 0, cx, yy(cyB), hh(88 * 0.66))
+  co.addColorStop(0, rgba(mix(hue, W, 0.82), 0.66 * I)); co.addColorStop(0.5, rgba(mix(hue, W, 0.38), 0.28 * I)); co.addColorStop(1, rgba(hue, 0))
+  ctx.fillStyle = co; ctx.beginPath(); ctx.arc(cx, yy(cyB), hh(88 * 0.66), 0, Math.PI * 2); ctx.fill(); ctx.restore()
+  ctx.lineWidth = lw0(1.6); ctx.strokeStyle = rgba(mix(hue, W, 0.5), 0.4 * I)
+  ctx.beginPath(); ctx.moveTo(cx - hh(33), yy(118)); ctx.lineTo(cx - hh(26), yy(206)); ctx.moveTo(cx + hh(33), yy(118)); ctx.lineTo(cx + hh(26), yy(206)); ctx.stroke()
   ctx.restore()
 }

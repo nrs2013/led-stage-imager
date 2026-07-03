@@ -6,6 +6,10 @@ fileAssociations:
   - ext: ledimager
     name: LED STAGE IMAGER Project
     role: Editor
+  # 画像照明モードの公演を写真ごと1ファイルに包む保存形式（ZIP中身・アイコン付き）。
+  - ext: ledshow
+    name: LED STAGE IMAGER Show
+    role: Editor
 directories:
   buildResources: build
 files:
@@ -69,6 +73,15 @@ mac:
           UTTypeTagSpecification:
             public.filename-extension:
               - ledimager
+        - UTTypeIdentifier: com.decor.studio.ledshow
+          UTTypeDescription: LED STAGE IMAGER Show
+          UTTypeConformsTo:
+            - public.data
+            - public.zip-archive
+          UTTypeIconFile: ledshow.icns
+          UTTypeTagSpecification:
+            public.filename-extension:
+              - ledshow
   notarize: false
 dmg:
   artifactName: ${name}-${version}.${ext}

@@ -811,11 +811,11 @@ export function Inspector(): React.JSX.Element {
             </div>
             <div style={{ flex: 1 }}>
               <label style={fieldLabel}>Pitch X</label>
-              <NumberField value={shape.repeat?.dx ?? 10} onChange={(v) => setRepeat({ dx: v })} />
+              <NumberField value={shape.repeat?.dx ?? 10} min={-2000} max={2000} onChange={(v) => setRepeat({ dx: v })} />
             </div>
             <div style={{ flex: 1 }}>
               <label style={fieldLabel}>Pitch Y</label>
-              <NumberField value={shape.repeat?.dy ?? 0} onChange={(v) => setRepeat({ dy: v })} />
+              <NumberField value={shape.repeat?.dy ?? 0} min={-2000} max={2000} onChange={(v) => setRepeat({ dy: v })} />
             </div>
           </div>
         </div>

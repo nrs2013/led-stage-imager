@@ -1345,8 +1345,10 @@ export function EditorCanvas(): React.JSX.Element {
       if (sel) {
         const hd = findHandle(sel, raw)
         if (hd) {
-          // chainvert drags record history via updateShape (coalesced); others here
-          if (hd.kind !== 'chainvert') useStore.getState().beginHistory()
+          // 全ハンドル共通: ドラッグ開始時に1回だけ履歴を積む＝「1ドラッグ=1アンドゥ」。
+          // (以前は chainvert だけ updateShape の600msまとめ書きに任せていて、ゆっくり
+          //  ドラッグすると1操作が複数のアンドゥ手に割れる非対称があった)
+          useStore.getState().beginHistory()
           const cand = withCenters(buildCandidates(chart.shapes, sel.id))
           if (hd.kind === 'chainvert') {
             interaction.current = { kind: 'chainvert', id: sel.id, idx: hd.idx, cand }
@@ -1573,7 +1575,8 @@ export function EditorCanvas(): React.JSX.Element {
         vcells[it.idx] = cell
         const { points, verts } = regenChain(vcells)
         if (!mask || points.every((c) => isDrawable(c))) {
-          st.updateShape(it.id, { points, verts })
+          // 履歴なしの直接更新（履歴はドラッグ開始時に1回積んである＝他のハンドルと同じ）
+          st.setShapePoints(it.id, points, verts)
           showMeasure(e, `${points.length} dots`)
         }
         return

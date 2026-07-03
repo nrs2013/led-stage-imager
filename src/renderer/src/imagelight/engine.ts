@@ -41,7 +41,12 @@ import { composeColorRatio } from '../render/compose'
 import { findWarmBlobs } from './lantern-detect'
 import { embossFromLuminance } from './relief-map'
 import { alignSnap, equalSnapX, type Pt } from './snap'
-import { drawStreetLampLit, drawStreetLamp1Lit } from '../render/streetlamp'
+import {
+  drawStreetLampLit,
+  drawStreetLamp1Shadow,
+  drawStreetLamp1Body,
+  drawStreetLamp1Glow
+} from '../render/streetlamp'
 import { drawChandelierLit } from '../render/chandelier'
 import { drawMarqueeLit, marqueeBulbCount } from '../render/marquee'
 import { drawBulbLit } from '../render/bulb'
@@ -114,8 +119,6 @@ export interface Beam {
   _tn?: number
   _cn?: RGB3
   _zp?: number
-  _ext?: number // 一灯街灯: 外光サンプルのキャッシュ（保存しない）
-  _extT?: number // 同・最終サンプル時刻(ms)
   // モチーフ（街灯・シャンデリア・マーキー・電球・PAR・PAT・ミニブル・ピクセルPAT・星・垂れ幕）
   motif?:
     | 'streetlamp'
@@ -485,6 +488,7 @@ export class ImageLightEngine {
   private reliefCv = mk(IW, IH) // 立体強調の後処理用スクラッチ（編集フレーム）
   private reliefOutCv = mk(16, 9) // 立体強調の後処理用スクラッチ（出力・サイズ可変）
   private noiseCv = mk(IW, IH)
+  private lamp1Cv = mk(IW, IH) // 一灯街灯: 本体×光マップの乗算マスク用スクラッチ（bbox内だけ触る）
   private noiseTile: HTMLCanvasElement
   private noisePattern: CanvasPattern | null = null // 静的タイル→毎フレーム createPattern しないよう一度だけ生成して使い回す
   private motifRankCache: number[] = [] // モチーフチェイスの順位を毎フレーム1回 O(n) で先計算（effI の O(n^2) 回避）
@@ -942,6 +946,11 @@ export class ImageLightEngine {
     }
   }
   private restore(s: Snap): void {
+    // 進行中のシーンフェードは「破棄」（snapしない＝復元した値が正。フェードRAFが古い補間で
+    // 復元後の明かりを上書きし続ける事故を止める）。パニック(暗転)は本番の意思なので維持。
+    this.sceneFadeSeq++
+    this.sceneFadeActive = false
+    this.sceneFadeTo = null
     this.beams = s.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined }))
     this.st = { ...s.st }
     this.fxp = JSON.parse(JSON.stringify(s.fxp))
@@ -1074,6 +1083,7 @@ export class ImageLightEngine {
   /** シーン明かりフェード／パニックフェードを別々に持つ。共有1個だと、片方の完了が
    *  もう片方の「描き続けて」信号を消し、暗転(panic)中に画面が固まる事故になる。 */
   private sceneFadeActive = false
+  private sceneFadeTo: Look | null = null // 進行中フェードの目標（割込み時に即ジャンプで完了させるため）
   private panicActive = false
   /** どちらかのフェードが進行中か（描画ループの継続判定 isAnimating に使う）。 */
   get fading(): boolean {
@@ -1326,41 +1336,50 @@ export class ImageLightEngine {
     }
     return img
   }
-  /** 一灯街灯の本体に当たっているステージ光の量(0..1)。光マップ(lc)を胴に沿ってサンプルし最大を採る。
-   *  🔴 getImageData は GPU→CPU 読み戻しで重い（lc は willReadFrequently ではない）。毎フレーム×灯体ごとに
-   *  呼ぶと本番でカクつくので、約150msごとに1回だけ・縦1列の getImageData 1回にまとめ、間はキャッシュを返す。 */
-  private extLightAt(b: Beam, d: number): number {
-    const now = performance.now()
-    if (b._extT !== undefined && now - b._extT < 150) return b._ext ?? 0
-    const S = d / 940
-    const qx = Math.round(b.x * Q)
-    const ys = [300, 520, 760, 930].map((m) => Math.round((b.y + (m - 162) * S) * Q))
-    const y0 = Math.max(0, Math.min(...ys))
-    const y1 = Math.min(IH - 1, Math.max(...ys))
-    let mx = 0
-    if (qx >= 0 && qx < IW && y1 >= y0) {
-      const col = this.lc.getImageData(qx, y0, 1, y1 - y0 + 1).data
-      for (const y of ys) {
-        if (y < y0 || y > y1) continue
-        const o = (y - y0) * 4
-        const v = (col[o] + col[o + 1] + col[o + 2]) / 3
-        if (v > mx) mx = v
-      }
-    }
-    const ext = Math.min(1, mx / 165)
-    b._ext = ext
-    b._extT = now
-    return ext
-  }
   private drawMotifLit(g: CanvasRenderingContext2D, b: Beam, I: number, ms: number): void {
     const c = b._cn ?? b.color
     const d = b.motifDiam ?? 200
-    // 一灯街灯：外光(LIGHTの灯体)が当たると本体が見える＝光マップ参照。自分のIが0でも外光があれば描く
+    // 一灯街灯：本体は「フル明るさで描いて光マップと掛け算」＝当たっている部分だけが・当たった
+    // 方向から浮かぶ（一様に全身が光る嘘をやめる 2026-07-02）。読み戻し(getImageData)不要で軽い。
     if (b.motif === 'streetlamp1') {
-      const ext = this.extLightAt(b, d)
-      if (I <= 0.004 && ext <= 0.01) return
       const rgb1: RGB3 = [c[0] * I, c[1] * I, c[2] * I]
-      drawStreetLamp1Lit(g, b.x, b.y, d, rgb1, ext)
+      // 接地影（照らされた床でだけ見える・黒地では消える）
+      drawStreetLamp1Shadow(g, b.x, b.y, d)
+      // 本体：スクラッチに フル明るさで描く → 光マップを乗算 → 本体の形で切り抜き → フレームへ
+      const x0 = Math.floor(Math.max(0, (b.x - d * 0.15) * Q))
+      const x1 = Math.ceil(Math.min(IW, (b.x + d * 0.15) * Q))
+      const y0 = Math.floor(Math.max(0, (b.y - d * 0.16) * Q))
+      const y1 = Math.ceil(Math.min(IH, (b.y + d * 0.92) * Q))
+      if (x1 > x0 && y1 > y0) {
+        const g2 = this.lamp1Cv.getContext('2d')!
+        g2.save()
+        g2.setTransform(1, 0, 0, 1, 0, 0)
+        g2.clearRect(x0, y0, x1 - x0, y1 - y0)
+        g2.beginPath()
+        g2.rect(x0, y0, x1 - x0, y1 - y0)
+        g2.clip() // 以降の乗算をこの灯体の範囲だけに限定
+        g2.setTransform(Q, 0, 0, Q, 0, 0)
+        g2.globalCompositeOperation = 'source-over'
+        drawStreetLamp1Body(g2, b.x, b.y, d)
+        g2.setTransform(1, 0, 0, 1, 0, 0)
+        g2.globalCompositeOperation = 'multiply' // 本体 × 当たっている光（方向・ムラがそのまま出る）
+        g2.drawImage(this.lightCv, 0, 0)
+        g2.globalCompositeOperation = 'destination-in' // 本体の形だけ残す（乗算で不透明化した余白を消す）
+        g2.setTransform(Q, 0, 0, Q, 0, 0)
+        drawStreetLamp1Body(g2, b.x, b.y, d)
+        g2.restore()
+        // フレームへ（g の transform はステージ座標系＝編集/出力どちらでも正しく写る）
+        const sx = x0 / Q, sy = y0 / Q, sw = (x1 - x0) / Q, sh = (y1 - y0) / Q
+        g.drawImage(this.lamp1Cv, x0, y0, x1 - x0, y1 - y0, sx, sy, sw, sh)
+        // 明るさ補正: 乗算そのままだと旧仕様(光65%で全開)より暗いので、少しだけ足して合わせる
+        g.save()
+        g.globalCompositeOperation = 'lighter'
+        g.globalAlpha = 0.55
+        g.drawImage(this.lamp1Cv, x0, y0, x1 - x0, y1 - y0, sx, sy, sw, sh)
+        g.restore()
+      }
+      // ランタンの灯り（自分の1ch・加算）
+      drawStreetLamp1Glow(g, b.x, b.y, d, rgb1)
       return
     }
     if (I <= 0.004) return
@@ -1979,6 +1998,14 @@ export class ImageLightEngine {
       oc.drawImage(this.lightCv, bx, by, bw, bh, 0, 0, ow, oh)
       oc.globalAlpha = 1
     }
+    // 色ノリ: 編集側(composeWorkCanvas)と同じ順序で出力にも適用。
+    // これが無いと「編集では青が乗るのに本番出力(Syphon/NDI)では乗らない」＝会場で見た目が食い違う。
+    if (this.colorWash > 0.002) {
+      oc.globalCompositeOperation = 'screen'
+      oc.globalAlpha = this.colorWash
+      oc.drawImage(this.lightCv, bx, by, bw, bh, 0, 0, ow, oh)
+      oc.globalAlpha = 1
+    }
     // 方向の立体(AIなし深度): 出力(Syphon/NDI)にも mat 同寸でエンボスを soft-light で重ねる。
     const lrelO = this.activeScene >= 0 ? this.scenes[this.activeScene]?.lumRelief : null
     if (lrelO && this.lumReliefStrength > 0) {
@@ -1990,6 +2017,25 @@ export class ImageLightEngine {
     oc.globalCompositeOperation = 'destination-in'
     oc.drawImage(this.mat, 0, 0, ow, oh) // 写真の形に切り抜き
     oc.globalCompositeOperation = 'source-over'
+    // ピース（切り抜き）を出力にも重ねる（編集画面 1688行付近と同じ手順・照明も同じく掛ける）。
+    // これが無いと「編集では見えるのに本番出力(Syphon/NDI)に出ない」＝会場で見た目が食い違う。
+    const scP = this.activeScene >= 0 ? this.scenes[this.activeScene] : null
+    if (scP?.pieces?.length && scP.mat) {
+      const pc = this.lamp1Cv.getContext('2d')! // 一時スクラッチとして再利用（使用前に全消去）
+      pc.setTransform(1, 0, 0, 1, 0, 0)
+      pc.globalCompositeOperation = 'source-over'
+      pc.globalAlpha = 1
+      pc.clearRect(0, 0, IW, IH)
+      this.drawPiecesOnFrame(pc)
+      if (maxI > 0.004) {
+        pc.setTransform(1, 0, 0, 1, 0, 0)
+        pc.globalCompositeOperation = 'multiply'
+        pc.drawImage(this.lightCv, 0, 0)
+        pc.globalCompositeOperation = 'source-over'
+      }
+      oc.globalCompositeOperation = 'source-over'
+      oc.drawImage(this.lamp1Cv, bx, by, bw, bh, 0, 0, ow, oh)
+    }
     if (this.st.smoke > 0) {
       const bw2 = Math.max(1, ow >> 1)
       const bh2 = Math.max(1, oh >> 1)
@@ -2530,11 +2576,17 @@ export class ImageLightEngine {
     this.selected = this.beams.length ? [Math.min(this.selected[0], this.beams.length - 1)] : []
     this.bump()
   }
-  /** ⌘C: 選択中の灯体ぜんぶを内部クリップボードへ（仕込み・向き・色を丸ごと）。 */
+  /** ⌘C: 選択中の灯体ぜんぶを内部クリップボードへ（仕込み・向き・色を丸ごと）。
+   *  dmx は深いコピー＝元とペースト先が同じオブジェクトを共有して片方のパッチ変更が両方に効く事故を防ぐ。 */
   copyBeam(): void {
     const t = this.targets()
     if (!t.length) return
-    this.beamClip = t.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp } }))
+    this.beamClip = t.map((b) => ({
+      ...b,
+      color: b.color.slice() as RGB3,
+      sp: { ...b.sp },
+      dmx: b.dmx ? { ...b.dmx } : undefined
+    }))
   }
   /** ⌘V: コピーした灯体を少し横へずらして複製（伸び・広がり・向き・色すべて同じ）。複数可。 */
   pasteBeam(): void {
@@ -2552,7 +2604,9 @@ export class ImageLightEngine {
         x,
         y: y > LH - 20 ? src.y : y, // 下端を越えるなら縦はそのまま
         color: src.color.slice() as RGB3,
-        sp: makeSearchParams(this.rnd)
+        sp: makeSearchParams(this.rnd),
+        dmx: src.dmx ? { ...src.dmx } : undefined, // 深いコピー＝パッチ変更が元と連動する事故防止
+        sfxId: undefined // 特効IDは複製しない＝新しいIDが振られる（同じIDが2灯に付くとシーケンサーが誤爆）
       })
       newIdx.push(this.beams.length - 1)
     }
@@ -2569,7 +2623,13 @@ export class ImageLightEngine {
     const newIdx: number[] = []
     for (const src of t) {
       if (this.beams.length >= MAX_BEAMS) break
-      this.beams.push({ ...src, color: src.color.slice() as RGB3, sp: makeSearchParams(this.rnd) })
+      this.beams.push({
+        ...src,
+        color: src.color.slice() as RGB3,
+        sp: makeSearchParams(this.rnd),
+        dmx: src.dmx ? { ...src.dmx } : undefined,
+        sfxId: undefined // 複製に同じ特効IDを持たせない（シーケンサー誤爆防止）
+      })
       newIdx.push(this.beams.length - 1)
     }
     if (newIdx.length) this.selected = newIdx
@@ -3486,6 +3546,7 @@ export class ImageLightEngine {
    *  現在値→目標値へ補間。FX(真偽)は即適用（補間不可）。panicFade と同じ rAF 方式。 */
   private startSceneFade(L: Look): void {
     if (!L) return
+    this.sceneFadeTo = L // 割込み(暗転/全点灯)時に目標へ即ジャンプで完了させるため覚える
     // 復元データが壊れていても落ちないよう lights を検証して使う。
     const lights = Array.isArray(L.lights) ? L.lights : []
     const from = this.beams.map((b) => ({
@@ -3548,10 +3609,31 @@ export class ImageLightEngine {
           b.zoom = t.zoom
         })
         this.sceneFadeActive = false
+        this.sceneFadeTo = null
         this.bump(false)
       }
     }
     requestAnimationFrame(step)
+  }
+  /** 進行中のシーンフェードを「目標の明かりへ即ジャンプ」で完了させる（暗転/全点灯の割込み用）。
+   *  ただ止めるだけだと gauge/色が中途半端なブレンドで取り残され、戻した時に
+   *  「どのシーンでもない明かり」になる（照明卓はフェード割込み＝目標へスナップが常識）。 */
+  private snapSceneFade(): void {
+    const L = this.sceneFadeTo
+    if (this.sceneFadeActive && L) {
+      const lights = Array.isArray(L.lights) ? L.lights : []
+      lights.forEach((f, i) => {
+        const b = this.beams[i]
+        if (!b || !f || !Array.isArray(f.color)) return
+        b.gauge = f.gauge
+        b.color = f.color.slice() as RGB3
+        b.pan = f.pan
+        b.tilt = f.tilt
+        b.zoom = f.zoom
+      })
+    }
+    this.sceneFadeActive = false
+    this.sceneFadeTo = null
   }
   renamePattern(i: number, name: string): void {
     const p = this.patterns[i]
@@ -3574,6 +3656,8 @@ export class ImageLightEngine {
       this.learnScene = null // 排他：シーン Learn を消す
       this.learnFx = null
       this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
     }
     this.bump(false)
   }
@@ -3607,6 +3691,8 @@ export class ImageLightEngine {
       this.learnParam = null
       this.learnFx = null
       this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
     }
     this.bump(false)
   }
@@ -3923,7 +4009,7 @@ export class ImageLightEngine {
     this.panicSeq++
     this.panicGain = 1
     this.panicActive = false
-    this.sceneFadeActive = false
+    this.snapSceneFade() // フェード中の割込み＝目標へ即ジャンプで完了（中途半端な明かりで残さない）
   }
   blackout(): void {
     // 暗転の直前の look（FX・明るさ）を履歴へ積む → ⌘Z で直前へ戻せる。stopAllFx は
@@ -3932,7 +4018,7 @@ export class ImageLightEngine {
     this.panicSeq++
     this.panicGain = 0
     this.panicActive = false
-    this.sceneFadeActive = false
+    this.snapSceneFade() // フェード中の暗転＝目標へ即ジャンプしてから真っ黒（戻した時に正しいシーンの明かり）
     this.stopAllFx(false)
     this.activePattern = -1
     this.bump(false)
@@ -4015,6 +4101,8 @@ export class ImageLightEngine {
       this.learnParam = null // 同時に2つ待たない
       this.learnFx = null
       this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
       this.initMidi()
     }
     this.bump(false)
@@ -4026,6 +4114,8 @@ export class ImageLightEngine {
       this.masterLearn = false
       this.learnFx = null
       this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
       this.initMidi()
     }
     this.bump(false)
@@ -4039,6 +4129,8 @@ export class ImageLightEngine {
       this.masterLearn = false
       this.learnParam = null
       this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
       this.initMidi()
     }
     this.bump(false)
@@ -4443,8 +4535,19 @@ export class ImageLightEngine {
     this.beams = (show.beams ?? []).map((b) => ({
       ...b,
       color: b.color.slice() as RGB3,
-      sp: { ...b.sp }
+      sp: { ...b.sp },
+      dmx: b.dmx ? { ...b.dmx } : undefined // 深いコピー＝複数灯が同じdmxオブジェクトを共有する事故防止
     }))
+    // 特効ID(sfxId)の重複除去: 壊れた/手編集の show.json や旧バグ由来の重複があると
+    // ステップシーケンサーが2灯同時に誤爆する。最初の1灯だけ残し、残りは振り直し(ensureSfxIds)に任せる。
+    {
+      const seenSfx = new Set<number>()
+      for (const b of this.beams) {
+        if (typeof b.sfxId !== 'number') continue
+        if (seenSfx.has(b.sfxId)) b.sfxId = undefined
+        else seenSfx.add(b.sfxId)
+      }
+    }
     // 特効(SFX)の設定一式を復元（無い古いファイルは既定のまま）。
     const sfx = show.sfx
     if (sfx) {
