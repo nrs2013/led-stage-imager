@@ -18,7 +18,6 @@ export class ArtNetReceiver extends EventEmitter {
   // 送り主の絞り込み（null=すべて受ける）。選んだ NIC のサブネットからのパケットだけ通す。
   private filterBase: number | null = null
   private filterMask: number | null = null
-  private replyCache: Buffer | null = null
 
   /** @param port テスト用に変更可（本番は既定の 6454 のまま） */
   start(port = ARTNET_PORT): void {
@@ -32,7 +31,7 @@ export class ArtNetReceiver extends EventEmitter {
         msg.toString('latin1', 0, 8) === 'Art-Net\0' &&
         msg.readUInt16LE(8) === OP_POLL
       ) {
-        const reply = this.buildPollReply()
+        const reply = this.buildPollReply(rinfo.address)
         if (reply) this.socket?.send(reply, this.port, rinfo.address)
         return
       }
@@ -76,10 +75,11 @@ export class ArtNetReceiver extends EventEmitter {
     return (ipToInt(addr) & this.filterMask) === this.filterBase
   }
 
-  /** ArtPollReply（Art-Net 4・239バイト）。卓のノード一覧に出るための最小限の名刺。 */
-  private buildPollReply(): Buffer | null {
-    if (this.replyCache) return this.replyCache
-    const myIp = primaryIPv4()
+  /** ArtPollReply（Art-Net 4・239バイト）。卓のノード一覧に出るための最小限の名刺。
+   *  🔴 毎回作り直す（キャッシュしない）：ArtPoll は数秒に1回なので負荷ゼロ。キャッシュすると
+   *  会場でIPが変わった後も古い住所を名乗り続け、MAの自動配信が死に地に送られる。 */
+  private buildPollReply(pollerAddr: string): Buffer | null {
+    const myIp = this.replyIPv4(pollerAddr)
     if (!myIp) return null
     const buf = Buffer.alloc(239)
     buf.write('Art-Net\0', 0, 'latin1')
@@ -101,26 +101,41 @@ export class ArtNetReceiver extends EventEmitter {
       buf.writeUInt8(0x80, 182 + i) // GoodOutput[i]: data transmitted
       buf.writeUInt8(i, 190 + i) // SwOut[i]: このポートが受け持つ Universe(下位4bit) = 0..3
     }
-    this.replyCache = buf
     return buf
+  }
+
+  /** 名刺に書く自分の住所（IPv4）。Wi-Fi と有線の両方が生きている Mac では「先に見つかった
+   *  方」ではなく、①ポーリングしてきた卓と同じサブネットのNIC → ②Interface選択のNIC →
+   *  ③最初のIPv4、の順で選ぶ。間違った住所を名乗ると MA の自動配信が届かない側へ飛ぶ。 */
+  private replyIPv4(pollerAddr: string): string | null {
+    const poller = ipToInt(pollerAddr)
+    let filterMatch: string | null = null
+    let first: string | null = null
+    for (const addrs of Object.values(networkInterfaces())) {
+      for (const a of addrs ?? []) {
+        if (a.family !== 'IPv4' || a.internal) continue
+        if (!first) first = a.address
+        if (a.netmask) {
+          const mask = ipToInt(a.netmask)
+          if ((ipToInt(a.address) & mask) === (poller & mask)) return a.address // 卓と同じ回線
+          if (
+            this.filterBase != null &&
+            this.filterMask != null &&
+            (ipToInt(a.address) & this.filterMask) === this.filterBase
+          ) {
+            filterMatch = a.address
+          }
+        }
+      }
+    }
+    return filterMatch ?? first
   }
 
   stop(): void {
     this.socket?.close()
     this.socket = null
-    this.replyCache = null
   }
 }
 
 const ipToInt = (ip: string): number =>
   ip.split('.').reduce((acc, o) => ((acc << 8) | (Number(o) & 0xff)) >>> 0, 0)
-
-/** 自分の代表 IPv4（ArtPollReply の名刺に書く住所）。内蔵ループバック以外の最初の IPv4。 */
-function primaryIPv4(): string | null {
-  for (const addrs of Object.values(networkInterfaces())) {
-    for (const a of addrs ?? []) {
-      if (a.family === 'IPv4' && !a.internal) return a.address
-    }
-  }
-  return null
-}

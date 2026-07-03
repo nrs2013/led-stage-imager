@@ -9,7 +9,7 @@ import { zipShow, unzipShow } from '../io/showbundle'
 import { viewFromZoom, zoomToward, clampCenter } from './view-zoom'
 import { useStore } from '../state/store'
 import { PART_ICON } from '../render/part-icons'
-import { effectiveDmxByUniverse } from '../dmx/resolve'
+import { effectiveDmxByUniverse, SIGNAL_TIMEOUT_MS } from '../dmx/resolve'
 import { formatDmx } from '../dmx/address'
 import { channelCount } from '../dmx/channel-math'
 import type { ChannelMode } from '../model/types'
@@ -437,7 +437,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         const nowMs = Date.now()
         const recv = Object.keys(st.lastSeenByUniverse)
           .map(Number)
-          .filter((u) => nowMs - (st.lastSeenByUniverse[u] ?? 0) < 5500)
+          .filter((u) => nowMs - (st.lastSeenByUniverse[u] ?? 0) < SIGNAL_TIMEOUT_MS)
           .sort((a, b) => a - b)
         const pat = Array.from(
           new Set(engine.beams.filter((b) => b.dmx).map((b) => b.dmx!.universe))
@@ -452,13 +452,23 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           })
         } else if (pat.length === 0) {
           setDmxLamp({ on: true, note: `${fmt(recv)} を受信中（灯体は未パッチ）` })
-        } else if (recv.some((u) => pat.includes(u))) {
-          setDmxLamp({ on: true, note: `${fmt(recv)} を受信中 → 灯体 ${fmt(pat)} に接続OK` })
         } else {
-          setDmxLamp({
-            on: true,
-            note: `${fmt(recv)} を受信中ですが灯体は ${fmt(pat)}＝ユニバースが合っていません（0始まり表示の卓では「アプリの番号−1」）`
-          })
+          const hit = recv.filter((u) => pat.includes(u))
+          const missing = pat.filter((u) => !recv.includes(u))
+          if (hit.length === 0) {
+            setDmxLamp({
+              on: true,
+              note: `${fmt(recv)} を受信中ですが灯体は ${fmt(pat)}＝ユニバースが合っていません（0始まり表示の卓では「アプリの番号−1」）`
+            })
+          } else if (missing.length === 0) {
+            setDmxLamp({ on: true, note: `${fmt(recv)} を受信中 → 灯体 ${fmt(pat)} に接続OK` })
+          } else {
+            // 一部だけ届いている＝「半分暗い」状態。緑OKと言い切らず、欠けている番号を名指しする
+            setDmxLamp({
+              on: true,
+              note: `${fmt(hit)} は接続OK／${fmt(missing)} が未受信（卓の出力設定を確認）`
+            })
+          }
         }
       } catch {
         /* 診断は保険。失敗しても本番動作に影響させない */
@@ -1266,7 +1276,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const dmxClash = engine.dmxOverlaps() // 卓アドレスが衝突している灯体番号（空＝なし）
   // DMXパッチ済みの公演は、EASYモードで開いてもパッチ表を出す（会場でユニバース/アドレスを
   // 直す手段が消えるのを防ぐ。未パッチの公演では今まで通り隠れたまま＝簡単さは保つ）。
-  const dmxPatched = engine.beams.some((b) => !!b.dmx)
+  // 一度でもパッチが見えたらこのセッション中は出し続ける＝「解除」した瞬間にパッチ表ごと
+  // 消えて再パッチできなくなる事故を防ぐ。
+  const dmxPatchedNow = engine.beams.some((b) => !!b.dmx)
+  const dmxPatchedStickyRef = useRef(false)
+  if (dmxPatchedNow) dmxPatchedStickyRef.current = true
+  const dmxPatched = dmxPatchedNow || dmxPatchedStickyRef.current
   const colorLocked = engine.colorOwnedByFx()
   const activeFx = FX_BUTTONS.filter((b) => engine.fxState(b.key))
   const masterPct = Math.round(engine.st.master * 100)
