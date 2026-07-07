@@ -218,6 +218,10 @@ interface AppState {
   setGlowAmount: (px: number) => void
   /** 電飾のにじみ(グロー)の全体既定 px（0=なし）。図形側 glowPx が優先。 */
   setLedGlowPx: (px: number) => void
+  /** 部品の連続配置モード：パレットのカードをクリック→キャンバスをクリック連打で
+   *  置き続ける（Escで終了）。null=通常。ドラッグ&ドロップは従来どおり並存。 */
+  placingPart: string | null
+  setPlacingPart: (part: string | null) => void
   setSyphonName: (name: string) => void
   /** Show title — becomes the default save filename. */
   setChartName: (name: string) => void
@@ -866,6 +870,8 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glowAmount: px } } })),
   setLedGlowPx: (px) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, ledGlowPx: px } } })),
+  placingPart: null,
+  setPlacingPart: (placingPart) => set({ placingPart }),
   setSyphonName: (name) => set((s) => ({ chart: { ...s.chart, syphon: { name } } })),
   setChartName: (name) => set((s) => ({ chart: { ...s.chart, name } })),
   helpOpen: false,

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { C, F } from '../ui/tokens'
+import { useStore } from '../state/store'
 import { PART_ICON } from '../render/part-icons'
 import { familyOfType } from '../model/part-family'
 import type { ShapeType, PartFamily } from '../model/types'
@@ -444,6 +445,9 @@ const CARDS: {
  *  cell). 4-up grid so every card stays readable as the family grows. */
 export function PartsPalette(): React.JSX.Element {
   // 電飾モード＝電飾(decor)パーツのみ。照明灯体(Spot/Moving/PAR等)は照明モードへ。照明/電飾フィルタは廃止。
+  const placingPart = useStore((s) => s.placingPart)
+  const setPlacingPart = useStore((s) => s.setPlacingPart)
+  const setTool = useStore((s) => s.setTool)
 
   const card = (c: (typeof CARDS)[number]): React.JSX.Element => (
     <div
@@ -453,8 +457,21 @@ export function PartsPalette(): React.JSX.Element {
         e.dataTransfer.setData('application/x-decor-part', c.part)
         e.dataTransfer.effectAllowed = 'copy'
       }}
-      title={c.title}
-      style={cardStyle}
+      onClick={() => {
+        // クリック＝連続配置モード（キャンバスをクリック連打で置き続ける・Escかもう一度クリックで終了）
+        if (placingPart === c.part) {
+          setPlacingPart(null)
+        } else {
+          setPlacingPart(c.part)
+          setTool('select')
+        }
+      }}
+      title={`${c.title}\nクリック→キャンバスを連打で置き続け（Esc で終了）／ドラッグでも置けます`}
+      style={
+        placingPart === c.part
+          ? { ...cardStyle, borderColor: C.amber, boxShadow: `inset 0 0 0 0.5px ${C.amber}` }
+          : cardStyle
+      }
     >
       <svg
         viewBox="0 0 24 24"

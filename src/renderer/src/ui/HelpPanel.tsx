@@ -51,6 +51,7 @@ export function HelpPanel(): React.JSX.Element {
           <Section title="編集">
             <Row k="⌘Z / ⌘⇧Z" v="取り消し / やり直し（Zだけでも可）" />
             <Row k="⌘C → ⌘V" v="コピー → クリックでスタンプ連打（Escで終了）" />
+            <Row k="部品カードをクリック" v="連続配置 — キャンバス連打で置き続け（Escで終了）" />
             <Row k="⌘D 連打" v="複製 — 1個目を置いた間隔のまま等間隔に並ぶ" />
             <Row k="⌘A" v="今の曲ページを全選択" />
             <Row k="⌘G" v="選んだ線を1本に結合（同じフェーダー）" />

@@ -920,7 +920,9 @@ export function EditorCanvas(): React.JSX.Element {
         setCtxMenu(null)
         const stp = useStore.getState()
         stp.setPasteMark(null)
-        if (stp.pasteArmed) {
+        if (stp.placingPart) {
+          stp.setPlacingPart(null) // leave continuous part placement first
+        } else if (stp.pasteArmed) {
           stp.setPasteArmed(false) // leave stamp mode first
         } else if (draftRef.current) {
           setDraft(null)
@@ -1321,6 +1323,22 @@ export function EditorCanvas(): React.JSX.Element {
       return
     }
     if (e.button !== 0) return
+    // 部品の連続配置モード：クリック連打で置き続ける（Escで終了・別ツールを選んだら解除）
+    const placing = useStore.getState().placingPart
+    if (placing) {
+      if (tool !== 'select') {
+        useStore.getState().setPlacingPart(null)
+      } else {
+        const cell = toCell(e.clientX, e.clientY)
+        const center = snapPartCenter({ x: cell.x + 0.5, y: cell.y + 0.5 })
+        if (mask && !isDrawable(center)) {
+          showBlocked()
+          return
+        }
+        placePartAt(placing, center)
+        return // モードは解除しない＝次のクリックでまた置ける
+      }
+    }
     const p = toCanvas(e.clientX, e.clientY)
     if (tool === 'select') {
       const raw = toCanvasRaw(e.clientX, e.clientY)
@@ -2011,29 +2029,36 @@ export function EditorCanvas(): React.JSX.Element {
     if (!PARTS.includes(part)) return
     e.preventDefault()
     const cell = toCell(e.clientX, e.clientY)
-    let center = { x: cell.x + 0.5, y: cell.y + 0.5 }
-    // dropped parts click onto a nearby island / canvas centre (Snap ON のとき)
-    if (useStore.getState().snapToPixel) {
-      const tol = Math.max(3, 8 / viewRef.current.scale)
-      const nearest = (v: number, cands: number[]): number => {
-        let best = v
-        let bd = tol
-        for (const c of cands) {
-          const d = Math.abs(c - v)
-          if (d <= bd) {
-            bd = d
-            best = c
-          }
-        }
-        return best
-      }
-      center = { x: nearest(center.x, centerCand.xs), y: nearest(center.y, centerCand.ys) }
-    }
+    const center = snapPartCenter({ x: cell.x + 0.5, y: cell.y + 0.5 })
     if (mask && !isDrawable(center)) {
       showBlocked()
       return
     }
     useStore.getState().setTool('select')
+    placePartAt(part, center)
+  }
+
+  /** 部品の置き先スナップ: 近くの島/中心へピタッ（Snap ON のとき）。D&Dとクリック配置で共用。 */
+  const snapPartCenter = (center: Point): Point => {
+    if (!useStore.getState().snapToPixel) return center
+    const tol = Math.max(3, 8 / viewRef.current.scale)
+    const nearest = (v: number, cands: number[]): number => {
+      let best = v
+      let bd = tol
+      for (const c of cands) {
+        const d = Math.abs(c - v)
+        if (d <= bd) {
+          bd = d
+          best = c
+        }
+      }
+      return best
+    }
+    return { x: nearest(center.x, centerCand.xs), y: nearest(center.y, centerCand.ys) }
+  }
+
+  /** 部品を1個置く（既定サイズ・既定パラメータ）。D&D配置と連続クリック配置で共用。 */
+  const placePartAt = (part: string, center: Point): void => {
     if (part === 'bulb') {
       addShape({
         type: 'bulb',
@@ -2178,9 +2203,10 @@ export function EditorCanvas(): React.JSX.Element {
     return undefined
   }, [unit])
 
+  const placingPart = useStore((s) => s.placingPart)
   const cursor = spaceUi
     ? 'grab'
-    : pasteArmed
+    : pasteArmed || placingPart
       ? 'copy'
       : (cursorOv ?? (tool === 'select' ? 'default' : 'crosshair'))
 
