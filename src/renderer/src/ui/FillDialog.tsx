@@ -11,7 +11,8 @@ const MODES: { id: ChannelMode; label: string }[] = [
   { id: 'rgb', label: 'RGB (3ch)' },
   { id: 'rgbdim', label: 'RGB+Dim (4ch)' },
   { id: 'dim', label: 'Dim (1ch)' },
-  { id: 'rgbw', label: 'RGBW (5ch)' }
+  { id: 'rgbw4', label: 'RGBW (4ch)' },
+  { id: 'rgbw', label: 'RGBW+Dim (5ch)' }
 ]
 
 export function FillDialog({ onClose }: { onClose: () => void }): React.JSX.Element {

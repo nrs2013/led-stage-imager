@@ -25,7 +25,7 @@ export type ShapeType =
 /** 部品の種別：電飾(LED/装飾) か 照明(ステージ灯体)。棚のグループ分け・表示フィルタ用。 */
 export type PartFamily = 'decor' | 'light'
 export type DisplayMode = 'stroke' | 'fill' | 'both'
-export type ChannelMode = 'rgb' | 'rgbdim' | 'dim' | 'rgbw' | 'beam6' | 'beam8'
+export type ChannelMode = 'rgb' | 'rgbdim' | 'dim' | 'rgbw' | 'rgbw4' | 'beam6' | 'beam8'
 export type BulbStyle = 'clear' | 'frost'
 
 export interface Point {

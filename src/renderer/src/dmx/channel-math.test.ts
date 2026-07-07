@@ -22,12 +22,23 @@ describe('channelCount', () => {
     expect(channelCount('rgbdim')).toBe(4)
     expect(channelCount('dim')).toBe(1)
     expect(channelCount('rgbw')).toBe(5)
+    expect(channelCount('rgbw4')).toBe(4)
     expect(channelCount('beam6')).toBe(6)
     expect(channelCount('beam8')).toBe(8)
   })
 })
 
 describe('fixtureColor', () => {
+  it('rgbw4: W が白として全色に足される（4ch・調光chなし・現場の照明チーム向け 2026-07-07）', () => {
+    // R=100 G=0 B=0 W=50 → [150, 50, 50]（Wは全色に加算・255でクランプ）
+    const data = uni({ 0: 100, 1: 0, 2: 0, 3: 50 })
+    const fx = { id: 'f', shapeId: 's', universe: 0, start: 1, mode: 'rgbw4' as const }
+    expect(fixtureColor(fx, data, false)).toEqual([150, 50, 50])
+    // W 全開のみ → 真っ白
+    const w = uni({ 0: 0, 1: 0, 2: 0, 3: 255 })
+    expect(fixtureColor(fx, w, false)).toEqual([255, 255, 255])
+  })
+
   it('rgb mode passes channels straight through (start is 1-based)', () => {
     const data = uni({ 0: 10, 1: 20, 2: 30 }) // addresses 1,2,3 -> indices 0,1,2
     expect(fixtureColor(fx('rgb', 1), data, false)).toEqual([10, 20, 30])

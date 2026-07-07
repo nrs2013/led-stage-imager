@@ -85,7 +85,8 @@ const CHANNEL_MODES: { id: ChannelMode; label: string }[] = [
   { id: 'rgb', label: 'RGB (3ch)' },
   { id: 'rgbdim', label: 'RGB+Dim (4ch)' },
   { id: 'dim', label: 'Dim (1ch)' },
-  { id: 'rgbw', label: 'RGBW (5ch)' },
+  { id: 'rgbw4', label: 'RGBW (4ch)' },
+  { id: 'rgbw', label: 'RGBW+Dim (5ch)' },
   { id: 'beam6', label: 'Beam Moving (6ch)' },
   { id: 'beam8', label: 'Beam Generic (P/T/Dim/Shut/RGB/Zoom 8ch)' }
 ]
@@ -99,7 +100,7 @@ function modesForFamily(
   const want = new Set<ChannelMode>(
     family === 'light'
       ? ['beam8', 'beam6', 'dim']
-      : ['rgb', 'rgbdim', 'dim', 'rgbw', 'beam6']
+      : ['rgb', 'rgbdim', 'dim', 'rgbw4', 'rgbw', 'beam6']
   )
   want.add(current)
   return CHANNEL_MODES.filter((m) => want.has(m.id))

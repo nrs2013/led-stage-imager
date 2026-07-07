@@ -12,6 +12,8 @@ export function channelCount(mode: ChannelMode): number {
       return 1
     case 'rgbw':
       return 5
+    case 'rgbw4':
+      return 4
     case 'beam6':
       return 6
     case 'beam8':
@@ -42,6 +44,17 @@ export function fixtureColor(fx: Fixture, data: Uint8Array, gamma: boolean): RGB
       const d = (data[i] ?? 0) / 255
       const c = fx.fixedColor ?? [255, 255, 255]
       rgb = [clamp(c[0] * d), clamp(c[1] * d), clamp(c[2] * d)]
+      break
+    }
+    case 'rgbw4': {
+      // 標準の4ch RGBW（R,G,B,W・調光chなし）。W は白として全色に足す。
+      // 現場の照明チームのリクエスト(2026-07-07)＝卓の汎用RGBWフィクスチャと同じ並び。
+      const w = data[i + 3] ?? 0
+      rgb = [
+        clamp((data[i] ?? 0) + w),
+        clamp((data[i + 1] ?? 0) + w),
+        clamp((data[i + 2] ?? 0) + w)
+      ]
       break
     }
     case 'rgbw': {
