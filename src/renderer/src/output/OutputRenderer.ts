@@ -236,7 +236,7 @@ export class OutputRenderer {
       const rgb = man ?? fixtureColor(fx, data, gamma)
       const { hue, intensity } = bulbHueIntensity(rgb)
       // Shutter(beam8)で消灯。手動色(テストフェーダー)経路では適用しない＝卓由来のみ。
-      const I = man ? intensity : intensity * shutterGate(fx, data)
+      const I = man ? intensity : intensity * shutterGate(fx, data, this.frameTime)
       if (I <= 0.004) continue
       const pose = man ? { pan: 0, tilt: 0, zoom: 0 } : beamPose(fx, data)
       lights.push({ shape: s, hue, I, pose })

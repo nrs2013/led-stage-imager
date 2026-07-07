@@ -46,6 +46,38 @@ describe('fixtureColor', () => {
     // Shutter=0 で gate が 0（消灯ゲート）・W ch は Shutter と別枠
     expect(shutterGate(fx, uni({ 3: 0 }))).toBe(0)
     expect(shutterGate(fx, uni({ 3: 255 }))).toBe(1)
+  })
+
+  it('shutterGate: 現場プロファイルの値マップ（0-7=閉/8-245=ストロボ/246-255=開・2026-07-07確定）', () => {
+    const fx = { id: 'f', shapeId: 's', universe: 0, start: 1, mode: 'beam9' as const }
+    // 閉レンジ
+    expect(shutterGate(fx, uni({ 3: 0 }), 500)).toBe(0)
+    expect(shutterGate(fx, uni({ 3: 7 }), 500)).toBe(0)
+    // 開レンジ（常時1・時刻に依らない）
+    expect(shutterGate(fx, uni({ 3: 246 }), 0)).toBe(1)
+    expect(shutterGate(fx, uni({ 3: 246 }), 12345)).toBe(1)
+    expect(shutterGate(fx, uni({ 3: 255 }), 999)).toBe(1)
+    // ストロボレンジ：1秒を1msずつサンプリング → 0と1が両方出て、点灯率はほぼ50%
+    const data = uni({ 3: 127 })
+    let on = 0
+    for (let ms = 0; ms < 1000; ms++) if (shutterGate(fx, data, ms) === 1) on++
+    expect(on).toBeGreaterThan(400)
+    expect(on).toBeLessThan(600)
+    // 値が大きいほど速い（1秒間の点滅の切り替わり回数が増える）
+    const toggles = (v) => {
+      const d = uni({ 3: v })
+      let n = 0
+      let prev = shutterGate(fx, d, 0)
+      for (let ms = 1; ms < 1000; ms++) {
+        const g = shutterGate(fx, d, ms)
+        if (g !== prev) n++
+        prev = g
+      }
+      return n
+    }
+    expect(toggles(240)).toBeGreaterThan(toggles(20))
+    // 時計なし（互換呼び出し）ではストロボ値は「開」扱い
+    expect(shutterGate(fx, uni({ 3: 127 }))).toBe(1)
     // Zoom は 9ch目（index 8）: 128=中央
     const pose = beamPose(fx, uni({ 0: 255, 1: 0, 8: 255 }))
     expect(pose.pan).toBeCloseTo(1, 5)

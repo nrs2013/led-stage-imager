@@ -1470,7 +1470,7 @@ export class ImageLightEngine {
   /** パッチ灯体に卓の値を直書き（色=色相, gauge=明るさ×Shutter, pan/tilt/zoom）。setter は
    *  通さない（毎フレーム pushHistory＝undo爆発・選択干渉を避ける）。未パッチ灯体は触らない
    *  ＝従来どおりアプリ内/MIDIで操作。電飾モードと同じ dmx/channel-math を流用。 */
-  private applyDmx(eff: Record<number, Uint8Array>, gamma: boolean): void {
+  private applyDmx(eff: Record<number, Uint8Array>, gamma: boolean, nowMs = 0): void {
     for (const b of this.beams) {
       const p = b.dmx
       if (!p) continue
@@ -1489,7 +1489,7 @@ export class ImageLightEngine {
       const m = Math.max(col[0], col[1], col[2]) / 255 // 明るさ
       const hue: RGB3 =
         m > 0.004 ? [col[0] / m, col[1] / m, col[2] / m] : [col[0], col[1], col[2]]
-      const gate = p.mode === 'beam8' || p.mode === 'beam9' ? shutterGate(fx, data) : 1
+      const gate = p.mode === 'beam8' || p.mode === 'beam9' ? shutterGate(fx, data, nowMs) : 1
       // PTZ チャンネルを持つモード(beam6/beam8)だけ向き/ズームを上書き。
       // rgb/dim 等の非ビームモードでは beamPose が 0 を返すため、上書きすると
       // 仕込んだ pan/tilt/zoom が毎フレーム home に潰れる＝配置データ事故になる。
@@ -1504,7 +1504,7 @@ export class ImageLightEngine {
   }
 
   renderFrame(now = performance.now()): void {
-    if (this.dmxFrame) this.applyDmx(this.dmxFrame, this.dmxGamma) // 卓(DMX)支配の灯体に先に焼く
+    if (this.dmxFrame) this.applyDmx(this.dmxFrame, this.dmxGamma, now) // 卓(DMX)支配の灯体に先に焼く
     this.updateVideoFrame() // 動画シーンなら mat を今のコマへ
     const ms = now - this.t0
     const decorT = this.decorTime(now) // 電飾チェイス用の時計（playing 中だけ進む・1フレーム1回）

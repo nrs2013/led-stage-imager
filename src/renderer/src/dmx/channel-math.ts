@@ -123,9 +123,19 @@ export function beamPose(fx: Fixture, data: Uint8Array): BeamPose {
   return { pan: 0, tilt: 0, zoom: 0 }
 }
 
-/** Shutter ゲート（beam8 の +3ch）。0=消灯→0、それ以外=点灯→1。色には混ぜず描画強度を断つ用。
- *  ストロボ(高域での点滅)は将来の時間制御。今は「0=消灯／それ以外=点灯」の二値。 */
-export function shutterGate(fx: Fixture, data: Uint8Array): number {
+/** Shutter ゲート（beam8/beam9 の +3ch）。現場の照明チームのプロファイル実測に合わせた値マップ
+ *  （2026-07-07 卓接続チェック当日に確定）:
+ *    0〜7   = 閉（強制消灯）
+ *    8〜245 = ストロボ（値が大きいほど速い・約1〜15Hz・50%デューティ。描画30fpsのため上限15Hz）
+ *    246〜255 = 開（常時点灯）
+ *  nowMs はストロボの時計（renderFrame の現在時刻）。省略時は開閉のみ（互換用・開扱い）。 */
+export function shutterGate(fx: Fixture, data: Uint8Array, nowMs?: number): number {
   if (fx.mode !== 'beam8' && fx.mode !== 'beam9') return 1
-  return (data[fx.start - 1 + 3] ?? 0) === 0 ? 0 : 1
+  const v = data[fx.start - 1 + 3] ?? 0
+  if (v <= 7) return 0
+  if (v >= 246) return 1
+  if (nowMs == null) return 1 // 時計が無い呼び出しでは「開」扱い（従来互換）
+  const t = (v - 8) / (245 - 8)
+  const hz = 1 + t * 14 // 8=約1Hz 〜 245=約15Hz
+  return ((nowMs * hz) / 1000) % 1 < 0.5 ? 1 : 0
 }
