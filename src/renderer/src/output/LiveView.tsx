@@ -4,20 +4,15 @@ import { OutputRenderer } from './OutputRenderer'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
 import { C, F } from '../ui/tokens'
 
-interface DecorApi {
-  publishFrame?: (width: number, height: number, buffer: Uint8ClampedArray) => void
-}
-
 const FPS = 30
 const INTERVAL = 1000 / FPS
 
-/** Live output view. `publish` controls whether frames go to Syphon (the editor window
- *  publishes; the fullscreen preview window mirrors with publish=false). `bare` hides chrome. */
+/** 出力の「見た目」を映す表示専用ビュー（?live 起動の出力専用機と Fullscreen 窓で使用）。
+ *  Syphon/NDI への送出はここではなく useChartOutput（常時出力・2026-07-07 Live廃止）が担う。
+ *  `bare` hides chrome. */
 export function LiveView({
-  publish = true,
   bare = false
 }: {
-  publish?: boolean
   bare?: boolean
 } = {}): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -26,10 +21,9 @@ export function LiveView({
     const canvas = canvasRef.current
     if (!canvas) return
     const renderer = new OutputRenderer(canvas)
-    const api = (window as unknown as { api?: DecorApi }).api
     let lastErrLog = 0
     const tick = (): void => {
-      // 1フレームの例外で出力(Syphon)が本番中ずっと固まらないよう、毎フレーム握って次へ進む。
+      // 1フレームの例外で表示が固まり続けないよう、毎フレーム握って次へ進む。
       try {
         const st = useStore.getState()
         const { chart, dmxByUniverse } = st
@@ -42,9 +36,6 @@ export function LiveView({
           Date.now()
         )
         renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
-        if (publish && api?.publishFrame) {
-          api.publishFrame(chart.canvas.w, chart.canvas.h, renderer.readRGBA())
-        }
       } catch (err) {
         const now = Date.now()
         if (now - lastErrLog > 2000) {
@@ -53,12 +44,12 @@ export function LiveView({
         }
       }
     }
-    // setInterval (not requestAnimationFrame) so the Syphon output keeps publishing even
+    // setInterval (not requestAnimationFrame) so the view keeps updating even
     // when the window is backgrounded / on a second display (rAF would be throttled/paused).
     const iv = setInterval(tick, INTERVAL)
     tick()
     return () => clearInterval(iv)
-  }, [publish])
+  }, [])
 
   return (
     <div

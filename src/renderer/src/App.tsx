@@ -7,6 +7,7 @@ import { PartsPalette } from './editor/PartsPalette'
 import { LayersPanel } from './editor/LayersPanel'
 import { PatchTable } from './editor/PatchTable'
 import { LiveView } from './output/LiveView'
+import { useChartOutput } from './output/use-chart-output'
 import { StatusBar } from './ui/StatusBar'
 import { StartScreen } from './ui/StartScreen'
 import { ManualFaders } from './test/ManualFaders'
@@ -77,7 +78,7 @@ function OutputApp(): React.JSX.Element {
   useOutputReceiver()
   return (
     <div style={{ height: '100%', background: '#000' }}>
-      <LiveView publish={false} bare />
+      <LiveView bare />
     </div>
   )
 }
@@ -217,6 +218,7 @@ function EditorApp(): React.JSX.Element {
   useAutosave()
   useOpenFile()
   useOpenShowFile()
+  useChartOutput() // 電飾の Syphon/NDI 出力は常時（Live廃止・照明モードと同じ作法）
   // 画像照明モード: エディタ/Liveに代えて全画面表示（自前でSyphonへpublish）。
   // hooks は全てこの分岐より前で呼ぶこと（条件付きreturnの後にhookは置けない）。
   if (imageLight) return <ImageLightingMode onExit={() => setImageLight(false)} />

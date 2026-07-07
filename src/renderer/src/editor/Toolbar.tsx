@@ -118,7 +118,6 @@ export function Toolbar({
   onToggleTest?: () => void
 } = {}): React.JSX.Element {
   const mode = useStore((s) => s.mode)
-  const setMode = useStore((s) => s.setMode)
   const tool = useStore((s) => s.tool)
   const setTool = useStore((s) => s.setTool)
   const penWidth = useStore((s) => s.penWidth)
@@ -254,17 +253,22 @@ export function Toolbar({
         </>
       )}
 
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button style={buttonStyle({ active: mode === 'edit' })} onClick={() => setMode('edit')}>
-          Edit
-        </button>
-        <button
-          style={buttonStyle({ active: mode === 'live', accent: C.amber, accentRGB: '245,200,120' })}
-          onClick={() => setMode('live')}
-        >
-          Live
-        </button>
-      </div>
+      {/* 出力は常時（Live/Edit切替は2026-07-07に廃止＝押し忘れでResolumeが黒になる事故を根絶）。
+          Syphon/NDIへは useChartOutput が編集中も含めて流し続けている。 */}
+      <span
+        style={{
+          fontFamily: F.ui,
+          fontSize: 11,
+          color: C.amber,
+          border: `0.5px solid ${C.border}`,
+          borderRadius: 4,
+          padding: '5px 10px',
+          userSelect: 'none'
+        }}
+        title="Syphon/NDI「LED STAGE IMAGER」へ常に出力中（編集中の絵もそのまま出ます。隠したい時はResolume側でレイヤーを落とす）"
+      >
+        ● OUT LIVE
+      </span>
     </header>
   )
 }
