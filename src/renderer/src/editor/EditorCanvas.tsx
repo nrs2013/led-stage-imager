@@ -1347,7 +1347,8 @@ export function EditorCanvas(): React.JSX.Element {
         return
       }
       // ⌘+press in the arrow = paint dots, but only once a real drag starts
-      if (e.metaKey) {
+      // (Windows は ⌘ が無いので Ctrl でも＝他のショートカットと同じ metaKey||ctrlKey 作法)
+      if (e.metaKey || e.ctrlKey) {
         const cell = toCell(e.clientX, e.clientY)
         const center = { x: cell.x + 0.5, y: cell.y + 0.5 }
         if (mask && !isDrawable(center)) {

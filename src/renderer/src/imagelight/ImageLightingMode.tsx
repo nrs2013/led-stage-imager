@@ -427,7 +427,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         const s = await api.getStatus!()
         // Syphon が動いていてクライアント未接続のときだけ送信を省く。それ以外は送る。
         syphonReadyRef.current = s.syphonAvailable ? s.hasClients : true
-        setLive({ midiIn: (s.midiIn ?? 0) > 0, out: !!s.syphonAvailable && !!s.hasClients })
+        // 出力ランプ: Mac=Syphonの受け手あり / Windows=Syphonが無いので NDI 直送の稼働で判定
+        //（従来は syphonAvailable 前提だったため Windows で永久に消灯していた）
+        const out =
+          s.platform === 'darwin'
+            ? !!s.syphonAvailable && !!s.hasClients
+            : !!(s as { ndiActive?: boolean }).ndiActive
+        setLive({ midiIn: (s.midiIn ?? 0) > 0, out })
       } catch {
         syphonReadyRef.current = true // 取得失敗 → 送る側に倒す
       }

@@ -19,7 +19,7 @@
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps && node scripts/patch-node-syphon.mjs",
     "build:unpack": "npm run build && electron-builder --dir",
-    "build:win": "npm run build && electron-builder --win",
+    "build:win": "node scripts/check-win-ndi.mjs && npm run build && electron-builder --win --x64",
     "build:mac": "node scripts/patch-node-syphon.mjs && electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux"
   },

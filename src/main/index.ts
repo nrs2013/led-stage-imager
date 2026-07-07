@@ -242,6 +242,25 @@ if (process.platform !== 'darwin') {
   if (arg && existsSync(arg)) pendingOpenPath = arg
 }
 
+// 二重起動防止：Windows では関連付けファイルのダブルクリックが「新しいプロセスの起動」で
+// 届くため、ロックが無いとアプリが2個立ち上がる（6454二重bind＝DMXがどちらに届くか不定・
+// NDI送信が2本・自動保存の潰し合い）。2個目は既存へファイルを回して即終了する。
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', (_e, argv) => {
+    const p = argv.find(
+      (a) => a.toLowerCase().endsWith('.ledimager') || a.toLowerCase().endsWith('.ledshow')
+    )
+    if (p && existsSync(p)) deliverOpenFile(p)
+    const w = mainWindow
+    if (w && !w.isDestroyed()) {
+      if (w.isMinimized()) w.restore()
+      w.focus()
+    }
+  })
+}
+
 /** 閉じる/終了の前に「保存されていない変更」を確認する（画像照明モードのみ対象）。
  *  renderer の window.__ilDirty / __ilSaveForClose を呼んで判断。1.5秒応答が無い時は
  *  安全側＝「未保存あり」とみなして確認ダイアログを出す（黙って閉じてデータを落とさない）。 */
@@ -495,7 +514,9 @@ app.whenReady().then(() => {
       platform: process.platform,
       ndiActive: ndi.active, // NDI 配信中（ブリッジ or 直送が稼働）
       ndiRx: ndi.rx, // 受け手(Resolume 等)の接続数
-      midiIn: getMidiPorts().length // CoreMIDI で検出した入力ポート数
+      // Mac=CoreMIDI のポート数 / Windows=renderer の Web MIDI が検出した入力数
+      //（CoreMIDI は Mac 専用なので、Windows で常に 0＝ランプ永久消灯になるのを防ぐ）
+      midiIn: process.platform === 'darwin' ? getMidiPorts().length : midiInputs.length
     }
   })
 
@@ -630,10 +651,13 @@ app.whenReady().then(() => {
   ipcMain.handle('imagelight:open-show', async () => {
     const w = mainWindow
     if (!w || w.isDestroyed()) return null
-    // 1ファイル(.ledshow)も 旧フォルダ(show.json+media/)も、どちらも選べる。
+    // Mac: 1ファイル(.ledshow)も 旧フォルダ(show.json+media/)も、どちらも選べる。
+    // Windows: openFile と openDirectory は併用不可（併用するとフォルダ専用になり
+    // .ledshow が一切選べなくなる）→ ファイル選択のみ（旧フォルダ形式はMac時代の遺産）。
     const res = await dialog.showOpenDialog(w, {
       title: '公演を開く（1ファイル または フォルダ）',
-      properties: ['openFile', 'openDirectory'],
+      properties:
+        process.platform === 'darwin' ? ['openFile', 'openDirectory'] : ['openFile'],
       filters: [{ name: 'LED STAGE IMAGER Show', extensions: ['ledshow'] }]
     })
     if (res.canceled || res.filePaths.length === 0) return null

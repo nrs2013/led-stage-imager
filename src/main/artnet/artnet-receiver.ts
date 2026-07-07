@@ -23,7 +23,10 @@ export class ArtNetReceiver extends EventEmitter {
   start(port = ARTNET_PORT): void {
     this.stop()
     this.port = port
-    const sock = createSocket({ type: 'udp4', reuseAddr: true })
+    // reuseAddr は macOS のみ。Windows の SO_REUSEADDR は「他アプリが既に使っている
+    // 6454 への二重bind」を成功させてしまい、EADDRINUSE が出ず競合検出（受信エラー表示）が
+    // 一生効かない＋ユニキャストDMXがどちらのアプリに届くか不定になる。
+    const sock = createSocket({ type: 'udp4', reuseAddr: process.platform === 'darwin' })
     sock.on('message', (msg, rinfo) => {
       // 卓の「誰かいる？」(ArtPoll) には絞り込みに関係なく返事する（見つけてもらうのが目的）
       if (

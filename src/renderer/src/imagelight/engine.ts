@@ -3657,6 +3657,7 @@ export class ImageLightEngine {
   setLearnPattern(i: number | null): void {
     this.learnPattern = i
     if (i !== null) {
+      this.initMidi() // Windows は Web MIDI をここで初期化（Mac は CoreMIDI 主経路・冪等）
       this.learnScene = null // 排他：シーン Learn を消す
       this.learnFx = null
       this.learnColor = null
@@ -3689,6 +3690,7 @@ export class ImageLightEngine {
     if (i !== null && (i < 0 || i >= this.scenes.length)) return
     this.learnScene = i
     if (i !== null) {
+      this.initMidi() // Windows は Web MIDI をここで初期化（Mac は CoreMIDI 主経路・冪等）
       // 他の Learn 系を全部消す（同時に 2 つ待たない）。
       this.learnPattern = null
       this.masterLearn = false
@@ -4173,6 +4175,7 @@ export class ImageLightEngine {
   setLearnStrobe(on: boolean): void {
     this.learnStrobe = on
     if (on) {
+      this.initMidi() // Windows は Web MIDI をここで初期化（Mac は CoreMIDI 主経路・冪等）
       this.learnFx = null
       this.learnColor = null
       this.learnPattern = null
@@ -4190,6 +4193,7 @@ export class ImageLightEngine {
   setLearnMotifChase(on: boolean): void {
     this.learnMotifChase = on
     if (on) {
+      this.initMidi() // Windows は Web MIDI をここで初期化（Mac は CoreMIDI 主経路・冪等）
       this.learnFx = null
       this.learnColor = null
       this.learnPattern = null
