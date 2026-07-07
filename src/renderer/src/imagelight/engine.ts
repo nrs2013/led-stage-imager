@@ -87,6 +87,18 @@ export const MAX_BEAMS = 64
 /** 配置スナップ（吸着）の効く距離。論理座標(LW=1600基準)のpx。 */
 const SNAP = 9
 
+/** 実機ムービングの首振り上限＝合計220度（±110度）。灯体（motifなし）だけに効く。
+ *  炎/火花の噴出向きは首振りではないので対象外（±180のまま）。 */
+export const TILT_MAX = 110
+export function clampTilt(v: number): number {
+  return Math.max(-TILT_MAX, Math.min(TILT_MAX, v))
+}
+/** 置いた高さで上吊り/床置きを自動判定：写真の上半分に置いたら上吊り。写真が無ければ画面の半分。 */
+export function autoHang(y: number, box: { y: number; h: number } | null): 'above' | undefined {
+  const mid = box ? box.y + box.h / 2 : LH / 2
+  return y < mid ? 'above' : undefined
+}
+
 export type FxKey =
   | 'search'
   | 'rndsearch'
@@ -108,8 +120,11 @@ export interface Beam {
   w1: number
   len: number
   pan: number // °
-  tilt: number // °
+  tilt: number // °（灯体は±110=実機の220度振り幅。tilt=0が定位置＝床置きは真上/上吊りは真下）
   zoom: number // 倍率（×1=置いた姿=HOME）
+  /** 上吊り(above)＝トラスから下向き。undefined＝床置き（従来通り上向き）。
+   *  配置と同格＝全シーン共通（Lookには含めない）。描画時に180度足すだけでDMX/保存は無改修。 */
+  hang?: 'above' | 'below'
   gauge: number // 0..1
   color: RGB3
   mute?: boolean
@@ -1145,8 +1160,15 @@ export class ImageLightEngine {
     return colorChaseColor(this.fxp.colorchase, this.effectiveChasePalette(), ms, i)
   }
   private tiltNow(b: Beam, ms: number): number {
-    if (!this.st.search) return b.tilt
-    return searchTilt(b.tilt, this.fxp.search, this.fxp.rndsearch, this.st.searchRandom, b.sp, ms)
+    // clampTilt＝サーチの揺れ・古い保存値も実機同様±110の端で止まる（呼び元は灯体のみ）
+    if (!this.st.search) return clampTilt(b.tilt)
+    return clampTilt(
+      searchTilt(b.tilt, this.fxp.search, this.fxp.rndsearch, this.st.searchRandom, b.sp, ms)
+    )
+  }
+  /** 上吊り灯体は描画の基準方向を180度回す（真下が定位置になる）。 */
+  private hangDeg(b: Beam): number {
+    return b.hang === 'above' ? 180 : 0
   }
 
   // ---------- ビーム描画（世界座標・モック移植） ----------
@@ -1495,7 +1517,8 @@ export class ImageLightEngine {
       // 仕込んだ pan/tilt/zoom が毎フレーム home に潰れる＝配置データ事故になる。
       if (p.mode === 'beam6' || p.mode === 'beam8' || p.mode === 'beam9') {
         b.pan = pose.pan * 90 // ±90°
-        b.tilt = pose.tilt * 180 // ±180°
+        // 灯体は±110＝実機の220度振り幅（128=定位置は従来通り）。SFX(motif)は噴出向き＝±180のまま。
+        b.tilt = pose.tilt * (b.motif ? 180 : TILT_MAX)
         b.zoom = pose.zoom >= 0 ? 1 + pose.zoom * 3 : 1 + pose.zoom * 0.85 // 128=×1 / 全開×4 / 全閉×0.15
       }
       b.color = hue
@@ -1558,7 +1581,7 @@ export class ImageLightEngine {
       beams.forEach((b, i) => {
         b._cn = this.colorNow(b, i, ms)
         if (!b.motif) {
-          b._tn = this.tiltNow(b, ms)
+          b._tn = this.tiltNow(b, ms) + this.hangDeg(b) // 上吊りは180度回して真下基準
           b._zp = this.st.zoompulse ? zoomPulseK(this.fxp.zoompulse, ms) : 1
         }
       })
@@ -1722,7 +1745,8 @@ export class ImageLightEngine {
       ac.globalCompositeOperation = 'source-over'
       ac.setTransform(Q, 0, 0, Q, 0, 0)
       beams.forEach((bm, i) => {
-        if (!bm.motif && !bm.front) this.drawAirBeam(ac, bm, Is[i], bm._tn ?? this.tiltNow(bm, ms))
+        if (!bm.motif && !bm.front)
+          this.drawAirBeam(ac, bm, Is[i], bm._tn ?? this.tiltNow(bm, ms) + this.hangDeg(bm))
       })
       ac.globalCompositeOperation = 'destination-out'
       ac.drawImage(this.mat, b.x, b.y, b.w, b.h)
@@ -2099,6 +2123,11 @@ export class ImageLightEngine {
   get selectedTilt(): number {
     return this.beams[this.selected[0]]?.tilt ?? 0
   }
+  /** 選択中の先頭SFXマークの TILT（灯体と混在選択でも噴出向きを正しく表示。灯体は±110・SFXは±180で値が割れるため）。 */
+  get selectedSfxTilt(): number {
+    const b = this.selectedBeams.find((x) => x.motif === 'flame' || x.motif === 'sparkler')
+    return b?.tilt ?? 0
+  }
   /** 単独選択（素クリック）。互換: -1 を渡すと全選択。 */
   selectBeam(i: number): void {
     if (i === -1) {
@@ -2282,6 +2311,7 @@ export class ImageLightEngine {
     this.beams.push({
       x,
       y,
+      hang: autoHang(y, this.box), // 写真の上半分に置いたら上吊り（切替ボタンで直せる）
       w0: beamRef?.w0 ?? 40,
       w1: beamRef?.w1 ?? 260,
       len: beamRef?.len ?? 600,
@@ -2833,12 +2863,23 @@ export class ImageLightEngine {
   }
   setTilt(v: number): void {
     this.pushHistory('tilt')
-    this.targets().forEach((b) => (b.tilt = v))
+    // 灯体は実機同様±110で止める。SFX(motifあり)は噴出向き＝±180のまま素通し。
+    this.targets().forEach((b) => (b.tilt = b.motif ? v : clampTilt(v)))
     this.bump()
   }
   setZoom(mult: number): void {
     this.pushHistory('zoom')
     this.targets().forEach((b) => (b.zoom = mult))
+    this.bump()
+  }
+  /** 選択灯体の上吊り⇄床置き切替（先頭選択の反対へ全選択を揃える・⌘Zで戻る）。
+   *  SFX/フロントは対象外＝首振りの基準方向という概念が無い。 */
+  toggleHang(): void {
+    const t = this.targets().filter((b) => !b.motif && !b.front)
+    if (!t.length) return
+    this.pushHistory('hang')
+    const to = t[0].hang === 'above' ? undefined : ('above' as const)
+    t.forEach((b) => (b.hang = to))
     this.bump()
   }
   home(): void {
@@ -3486,7 +3527,7 @@ export class ImageLightEngine {
       b.gauge = f.gauge
       b.color = f.color.slice() as RGB3
       b.pan = f.pan
-      b.tilt = f.tilt
+      b.tilt = b.motif ? f.tilt : clampTilt(f.tilt) // 古いシーンの±110超えは端で止める
       b.zoom = f.zoom
       b.mute = !!f.mute // 旧パターン(未保存)は false=ミュート無し
       b.solo = !!f.solo
@@ -3597,7 +3638,8 @@ export class ImageLightEngine {
           Math.round(lerp(f.color[2], t.color[2], e))
         ] as RGB3
         b.pan = lerp(f.pan, t.pan, e)
-        b.tilt = lerp(f.tilt, t.tilt, e)
+        // 灯体は±110で止める（applyLookと同じ。古いシーンの±180が居座らないように）。Lookは書き換えない。
+        b.tilt = b.motif ? lerp(f.tilt, t.tilt, e) : clampTilt(lerp(f.tilt, t.tilt, e))
         b.zoom = lerp(f.zoom, t.zoom, e)
       })
       this.bump(false)
@@ -3609,7 +3651,7 @@ export class ImageLightEngine {
           b.gauge = t.gauge
           b.color = t.color.slice() as RGB3
           b.pan = t.pan
-          b.tilt = t.tilt
+          b.tilt = b.motif ? t.tilt : clampTilt(t.tilt) // applyLookと同じクランプ
           b.zoom = t.zoom
         })
         this.sceneFadeActive = false
@@ -3632,7 +3674,7 @@ export class ImageLightEngine {
         b.gauge = f.gauge
         b.color = f.color.slice() as RGB3
         b.pan = f.pan
-        b.tilt = f.tilt
+        b.tilt = b.motif ? f.tilt : clampTilt(f.tilt) // applyLookと同じクランプ
         b.zoom = f.zoom
       })
     }
@@ -4542,6 +4584,7 @@ export class ImageLightEngine {
     // 灯体配置を復元（無い古いファイルは空＝従来どおり）。
     this.beams = (show.beams ?? []).map((b) => ({
       ...b,
+      tilt: b.motif ? b.tilt : clampTilt(b.tilt ?? 0), // 古い保存の±110超えは端で止める（hangはスプレッドで復元）
       color: b.color.slice() as RGB3,
       sp: { ...b.sp },
       dmx: b.dmx ? { ...b.dmx } : undefined // 深いコピー＝複数灯が同じdmxオブジェクトを共有する事故防止

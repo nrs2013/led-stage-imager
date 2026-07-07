@@ -637,7 +637,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     })
     // 選択灯体の PAN/TILT/ZOOM・寸法も物理つまみ(MIDI CC)で動かせるよう登録
     map.set('pose.pan', (v01) => engine.setPan(Math.round(-90 + 180 * v01)))
-    map.set('pose.tilt', (v01) => engine.setTilt(Math.round(-180 + 360 * v01)))
+    // 灯体は実機同様±110（220度）。SFX選択中は噴出向き＝±180のまま。
+    map.set('pose.tilt', (v01) =>
+      engine.setTilt(
+        engine.hasSfxSelected ? Math.round(-180 + 360 * v01) : Math.round(-110 + 220 * v01)
+      )
+    )
     map.set('pose.zoom', (v01) => engine.setZoom((15 + (400 - 15) * v01) / 100))
     map.set('rig.w0', (v01) => engine.setRig('w0', Math.round(8 + (180 - 8) * v01)))
     map.set('rig.w1', (v01) => engine.setRig('w1', Math.round(20 + (700 - 20) * v01)))
@@ -1982,7 +1987,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                         ⌘+CLICK to place · always on while lit · PLACED {sfxType === 'flame' ? engine.flamePlacedCount : engine.sparklerPlacedCount}
                       </div>
                       {engine.hasSfxSelected && (
-                        <PoseRow label="TILT" min={-180} max={180} value={engine.selectedTilt}
+                        <PoseRow label="TILT" min={-180} max={180} value={engine.selectedSfxTilt}
                           fmt={(v) => v + '°'} onChange={(v) => engine.setTilt(v)} engine={engine} learnId="pose.tilt" />
                       )}
                     </>
@@ -2749,6 +2754,16 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     </>
                   )}
                   <div className="il2-act">
+                    {/* 照明モード用の上吊り/床置き切替（EasyモードはPTZカード側に同じボタン） */}
+                    {lightingOnly && !ref.motif && !ref.front && (
+                      <button
+                        className="il-mini"
+                        onClick={() => engine.toggleHang()}
+                        title="上吊り⇄床置きを切替（220度の振り幅の基準が真下⇄真上になる・⌘Zで戻る）"
+                      >
+                        {ref.hang === 'above' ? '上吊り' : '床置き'}
+                      </button>
+                    )}
                     <button
                       className="il-mini"
                       onClick={() => engine.removeSelected()}
@@ -3273,8 +3288,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             />
             <PoseRow
               label="TILT"
-              min={-180}
-              max={180}
+              min={ref?.motif ? -180 : -110}
+              max={ref?.motif ? 180 : 110}
               value={ref?.tilt ?? 0}
               fmt={(v) => v + '°'}
               onChange={(v) => engine.setTilt(v)}
@@ -3291,7 +3306,18 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               engine={engine}
               learnId="pose.zoom"
             />
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              {ref && !ref.motif && !ref.front ? (
+                <button
+                  className="il-mini"
+                  onClick={() => engine.toggleHang()}
+                  title="上吊り⇄床置きを切替（220度の振り幅の基準が真下⇄真上になる・⌘Zで戻る）"
+                >
+                  {ref.hang === 'above' ? '上吊り' : '床置き'}
+                </button>
+              ) : (
+                <span />
+              )}
               <button className="il-mini" onClick={() => engine.home()}>
                 Home
               </button>
