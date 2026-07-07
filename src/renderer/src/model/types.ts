@@ -75,6 +75,9 @@ export interface Shape {
   letterColors?: string[]
   /** Neon / Festoon: glow dial 0–100 (halo reach; のむさんの「光りすぎ防止」ツマミ). */
   neonGlow?: number
+  /** 電飾のにじみ(グロー)半径 px — この図形だけの上書き。undefined=全体設定
+   *  (settings.ledGlowPx) に従う・0=この図形はにじみ無し。出力(LIVE/Syphon)にのみ効く。 */
+  glowPx?: number
   /** Festoon only: sag depth as % of the span between the two grabbed ends. */
   sagPct?: number
   /** Festoon only: bulb spacing in px along the wire (longer string = more bulbs). */
@@ -147,6 +150,9 @@ export interface Chart {
     gamma: boolean
     glow: boolean
     glowAmount: number
+    /** 電飾のにじみ(グロー)半径 px — 全図形の既定（0/未設定=なし・1px刻み）。
+     *  図形側の glowPx が指定されていればそちらが勝つ。Smoke(glow/glowAmount=会場の霞)とは別物。 */
+    ledGlowPx?: number
     /** Real stage width in millimetres. When set, the chart is calibrated to real
      *  scale (1px = stageWidthMm / canvas.w mm) and parts drop at true physical size
      *  via model/scale.mmToCanvasPx. Absent = uncalibrated (parts use raw px). */

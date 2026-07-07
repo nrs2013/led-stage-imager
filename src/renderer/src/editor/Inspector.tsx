@@ -821,6 +821,32 @@ export function Inspector(): React.JSX.Element {
         </div>
       )}
 
+      {/* 電飾のにじみ(グロー)上書き — 全体既定(Setup)に対して、この図形だけ変える */}
+      {shape.type !== 'image' && shape.type !== 'uplight' && shape.type !== 'movinghead' && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <Field
+            label={shape.glowPx != null ? 'Glow px（この図形だけ）' : 'Glow px（全体に従う）'}
+            flex={1}
+          >
+            <NumberField
+              value={shape.glowPx ?? chart.settings.ledGlowPx ?? 0}
+              min={0}
+              max={50}
+              onChange={(v) => updateShape(shape.id, { glowPx: Math.max(0, Math.min(50, v)) })}
+            />
+          </Field>
+          {shape.glowPx != null && (
+            <button
+              style={{ ...buttonStyle({}), marginBottom: 12, whiteSpace: 'nowrap' }}
+              title="この図形だけの指定をやめて、Setup の全体設定に戻す"
+              onClick={() => updateShape(shape.id, { glowPx: undefined })}
+            >
+              全体に従う
+            </button>
+          )}
+        </div>
+      )}
+
       <div style={{ height: 1, background: C.border, margin: `${rowGap}px 0` }} />
 
       {/* DMX address */}

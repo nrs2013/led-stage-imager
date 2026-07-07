@@ -21,6 +21,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const setChartName = useStore((s) => s.setChartName)
   const setGlow = useStore((s) => s.setGlow)
   const setGlowAmount = useStore((s) => s.setGlowAmount)
+  const setLedGlowPx = useStore((s) => s.setLedGlowPx)
   const setStageWidthMeters = useStore((s) => s.setStageWidthMeters)
   const fitFixturesToScale = useStore((s) => s.fitFixturesToScale)
 
@@ -193,6 +194,33 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             />
           </div>
         )}
+        <div style={{ marginBottom: 12 }}>
+          <label style={fieldLabel}>
+            Glow — 電飾のにじみ {chart.settings.ledGlowPx ?? 0}px（0=なし・図形ごとの上書きは右パネル）
+          </label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="range"
+              min={0}
+              max={50}
+              step={1}
+              value={chart.settings.ledGlowPx ?? 0}
+              style={{ flex: 1, accentColor: C.accent }}
+              onChange={(e) => setLedGlowPx(Number(e.target.value))}
+            />
+            <input
+              type="number"
+              min={0}
+              max={50}
+              step={1}
+              value={chart.settings.ledGlowPx ?? 0}
+              style={{ ...inputStyle, width: 72 }}
+              onChange={(e) =>
+                setLedGlowPx(Math.max(0, Math.min(50, Math.floor(Number(e.target.value) || 0))))
+              }
+            />
+          </div>
+        </div>
       </div>
     </div>
   )

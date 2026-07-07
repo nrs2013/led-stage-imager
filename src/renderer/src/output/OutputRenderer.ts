@@ -32,6 +32,7 @@ import {
   parDiameter,
   pattDiameter
 } from '../render/fixtures'
+import { groupShapesByGlow } from './glow'
 import { drawRoomLampLit, roomLampDiameter } from '../render/roomlamp'
 import { drawStreetLampLit, streetLampDiameter } from '../render/streetlamp'
 import { drawChandelierLit, chandelierDiameter } from '../render/chandelier'
@@ -51,6 +52,9 @@ const ZEROS = new Uint8Array(512)
 export class OutputRenderer {
   private ctx: CanvasRenderingContext2D
   private bloom?: HTMLCanvasElement
+  /** 電飾グロー用の作業キャンバス（src=対象図形のみ描く / blur=にじませた絵）。 */
+  private glowSrc?: HTMLCanvasElement
+  private glowBlur?: HTMLCanvasElement
   /** Uplight pipeline buffers (写真×光マップの乗算合成用). */
   private lightMap?: HTMLCanvasElement
   private smoothMap?: HTMLCanvasElement
@@ -92,7 +96,79 @@ export class OutputRenderer {
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
 
-    for (const shape of chart.shapes) {
+    this.drawShapesPass(chart.shapes, fxByShape, dmxByUniverse, gamma, manual)
+
+    // 電飾のにじみ(グロー): 半径ごとに「その図形だけを別キャンバスに描く→blur→加算」。
+    // 本体はシャープなまま残る（芯＋にじみ）。blur は通常キャンバス(GPU)側で行う —
+    // this.ctx は willReadFrequently=CPU なので、そこに filter を掛けると激重（地雷）。
+    const glowGroups = groupShapesByGlow(
+      chart.shapes.filter((s) => fxByShape.has(s.id)),
+      chart.settings
+    )
+    if (glowGroups.size > 0) {
+      if (!this.glowSrc) this.glowSrc = document.createElement('canvas')
+      if (!this.glowBlur) this.glowBlur = document.createElement('canvas')
+      for (const cvs of [this.glowSrc, this.glowBlur]) {
+        if (cvs.width !== w) cvs.width = w
+        if (cvs.height !== h) cvs.height = h
+      }
+      const sctx = this.glowSrc.getContext('2d')
+      const bctx = this.glowBlur.getContext('2d')
+      if (sctx && bctx) {
+        for (const [radius, subset] of glowGroups) {
+          sctx.globalCompositeOperation = 'source-over'
+          sctx.clearRect(0, 0, w, h)
+          sctx.globalCompositeOperation = 'lighter'
+          sctx.lineJoin = 'round'
+          sctx.lineCap = 'round'
+          // drawShape 群は this.ctx に描く設計なので、一時的に差し替えて同じ経路で描く
+          const saved = this.ctx
+          this.ctx = sctx as CanvasRenderingContext2D
+          this.drawShapesPass(subset, fxByShape, dmxByUniverse, gamma, manual)
+          this.ctx = saved
+          bctx.clearRect(0, 0, w, h)
+          bctx.filter = `blur(${radius}px)`
+          bctx.drawImage(this.glowSrc, 0, 0)
+          bctx.filter = 'none'
+          ctx.globalCompositeOperation = 'lighter'
+          ctx.drawImage(this.glowBlur, 0, 0)
+        }
+      }
+    }
+
+    // Photo materials lit by uplight beams (light map → multiply → additive)
+    this.renderUplights(chart, fxByShape, dmxByUniverse, gamma, manual)
+
+    // Optional global "smoke" glow: a whole-output bloom. The LEDs themselves stay crisp;
+    // this just mimics how stage haze spreads them. Off by default.
+    if (chart.settings.glow) {
+      const amt = Math.max(1, chart.settings.glowAmount || 12)
+      if (!this.bloom) this.bloom = document.createElement('canvas')
+      this.bloom.width = w
+      this.bloom.height = h
+      const bctx = this.bloom.getContext('2d')
+      if (bctx) {
+        bctx.clearRect(0, 0, w, h)
+        bctx.filter = `blur(${amt}px)`
+        bctx.drawImage(this.canvas, 0, 0)
+        bctx.filter = 'none'
+        ctx.globalCompositeOperation = 'lighter'
+        ctx.drawImage(this.bloom, 0, 0)
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = 1
+  }
+
+  /** 電飾図形をまとめて描く（メイン描画とグローパスで共用。描き先は this.ctx）。 */
+  private drawShapesPass(
+    shapes: Shape[],
+    fxByShape: Map<string, Fixture>,
+    dmxByUniverse: Record<number, Uint8Array>,
+    gamma: boolean,
+    manual: Record<string, RGB> | null
+  ): void {
+    for (const shape of shapes) {
       const fx = fxByShape.get(shape.id)
       if (!fx) continue
       const reps = repeatCount(shape)
@@ -135,29 +211,6 @@ export class OutputRenderer {
         this.drawShape(shape, rgb, dx * i, dy * i, i)
       }
     }
-
-    // Photo materials lit by uplight beams (light map → multiply → additive)
-    this.renderUplights(chart, fxByShape, dmxByUniverse, gamma, manual)
-
-    // Optional global "smoke" glow: a whole-output bloom. The LEDs themselves stay crisp;
-    // this just mimics how stage haze spreads them. Off by default.
-    if (chart.settings.glow) {
-      const amt = Math.max(1, chart.settings.glowAmount || 12)
-      if (!this.bloom) this.bloom = document.createElement('canvas')
-      this.bloom.width = w
-      this.bloom.height = h
-      const bctx = this.bloom.getContext('2d')
-      if (bctx) {
-        bctx.clearRect(0, 0, w, h)
-        bctx.filter = `blur(${amt}px)`
-        bctx.drawImage(this.canvas, 0, 0)
-        bctx.filter = 'none'
-        ctx.globalCompositeOperation = 'lighter'
-        ctx.drawImage(this.bloom, 0, 0)
-      }
-    }
-    ctx.globalCompositeOperation = 'source-over'
-    ctx.globalAlpha = 1
   }
 
   /** Photo materials + uplights: every lit beam pours into ONE light map (linear
