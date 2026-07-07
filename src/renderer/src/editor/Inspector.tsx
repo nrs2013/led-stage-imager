@@ -88,7 +88,8 @@ const CHANNEL_MODES: { id: ChannelMode; label: string }[] = [
   { id: 'rgbw4', label: 'RGBW (4ch)' },
   { id: 'rgbw', label: 'RGBW+Dim (5ch)' },
   { id: 'beam6', label: 'Beam Moving (6ch)' },
-  { id: 'beam8', label: 'Beam Generic (P/T/Dim/Shut/RGB/Zoom 8ch)' }
+  { id: 'beam8', label: 'Beam Generic (P/T/Dim/Shut/RGB/Zoom 8ch)' },
+  { id: 'beam9', label: 'Beam Generic+W (P/T/Dim/Shut/RGBW/Zoom 9ch)' }
 ]
 
 /** 種別で出すmodeを絞る。照明灯体はビーム系中心、電飾は従来。
@@ -99,7 +100,7 @@ function modesForFamily(
 ): { id: ChannelMode; label: string }[] {
   const want = new Set<ChannelMode>(
     family === 'light'
-      ? ['beam8', 'beam6', 'dim']
+      ? ['beam9', 'beam8', 'beam6', 'dim']
       : ['rgb', 'rgbdim', 'dim', 'rgbw4', 'rgbw', 'beam6']
   )
   want.add(current)

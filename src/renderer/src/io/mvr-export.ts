@@ -21,6 +21,7 @@ const MODE_NAMES: Record<Fixture['mode'], string> = {
   dim: 'Dim',
   rgbw: 'RGBW Dim',
   rgbw4: 'RGBW',
+  beam9: 'Beam RGBW Zoom',
   beam6: 'Beam 6ch',
   beam8: 'Beam 8ch'
 }

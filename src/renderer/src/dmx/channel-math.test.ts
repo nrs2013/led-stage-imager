@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fixtureColor, channelCount, beamPose } from './channel-math'
+import { fixtureColor, channelCount, beamPose, shutterGate } from './channel-math'
 import type { Fixture } from '../model/types'
 
 const uni = (over: Record<number, number>): Uint8Array => {
@@ -23,12 +23,36 @@ describe('channelCount', () => {
     expect(channelCount('dim')).toBe(1)
     expect(channelCount('rgbw')).toBe(5)
     expect(channelCount('rgbw4')).toBe(4)
+    expect(channelCount('beam9')).toBe(9)
     expect(channelCount('beam6')).toBe(6)
     expect(channelCount('beam8')).toBe(8)
   })
 })
 
 describe('fixtureColor', () => {
+  it('beam9: beam8にWを足した9ch＝Dimmer×(RGB+W)・Shutter/PTZ位置も正しい（現場リクエスト 2026-07-07）', () => {
+    // ch: 1=Pan 2=Tilt 3=Dimmer 4=Shutter 5=R 6=G 7=B 8=W 9=Zoom（start=1）
+    const fx = { id: 'f', shapeId: 's', universe: 0, start: 1, mode: 'beam9' as const }
+    // Dimmer全開・R=100・W=50 → [150, 50, 50]
+    const data = uni({ 2: 255, 3: 255, 4: 100, 7: 50 })
+    expect(fixtureColor(fx, data, false)).toEqual([150, 50, 50])
+    // Dimmer半分 → 全体が半分
+    const half = uni({ 2: 128, 3: 255, 4: 100, 7: 50 })
+    expect(fixtureColor(fx, half, false)).toEqual([
+      Math.round(150 * (128 / 255)),
+      Math.round(50 * (128 / 255)),
+      Math.round(50 * (128 / 255))
+    ])
+    // Shutter=0 で gate が 0（消灯ゲート）・W ch は Shutter と別枠
+    expect(shutterGate(fx, uni({ 3: 0 }))).toBe(0)
+    expect(shutterGate(fx, uni({ 3: 255 }))).toBe(1)
+    // Zoom は 9ch目（index 8）: 128=中央
+    const pose = beamPose(fx, uni({ 0: 255, 1: 0, 8: 255 }))
+    expect(pose.pan).toBeCloseTo(1, 5)
+    expect(pose.tilt).toBeCloseTo(-128 / 127, 5)
+    expect(pose.zoom).toBeCloseTo(1, 5)
+  })
+
   it('rgbw4: W が白として全色に足される（4ch・調光chなし・現場の照明チーム向け 2026-07-07）', () => {
     // R=100 G=0 B=0 W=50 → [150, 50, 50]（Wは全色に加算・255でクランプ）
     const data = uni({ 0: 100, 1: 0, 2: 0, 3: 50 })

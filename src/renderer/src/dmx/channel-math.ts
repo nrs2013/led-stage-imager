@@ -18,6 +18,8 @@ export function channelCount(mode: ChannelMode): number {
       return 6
     case 'beam8':
       return 8
+    case 'beam9':
+      return 9
   }
 }
 
@@ -82,6 +84,19 @@ export function fixtureColor(fx: Fixture, data: Uint8Array, gamma: boolean): RGB
       ]
       break
     }
+    case 'beam9': {
+      // beam8 に White を1ch足した9ch: Pan,Tilt,Dimmer,Shutter,R,G,B,W,Zoom。
+      // 「今まで通りの概念のままWを一丁追加」（現場の照明チーム 2026-07-07）。
+      // 色は Dimmer(+2)×(RGB(+4..+6) + W(+7))。W は白として全色に加算。
+      const d = (data[i + 2] ?? 0) / 255
+      const w = data[i + 7] ?? 0
+      rgb = [
+        clamp(((data[i + 4] ?? 0) + w) * d),
+        clamp(((data[i + 5] ?? 0) + w) * d),
+        clamp(((data[i + 6] ?? 0) + w) * d)
+      ]
+      break
+    }
   }
   return gamma ? [gammaCorrect(rgb[0]), gammaCorrect(rgb[1]), gammaCorrect(rgb[2])] : rgb
 }
@@ -104,12 +119,13 @@ export function beamPose(fx: Fixture, data: Uint8Array): BeamPose {
   const n = (v: number | undefined): number => (((v ?? 128) - 128) / 127) || 0
   if (fx.mode === 'beam6') return { pan: n(data[i + 3]), tilt: n(data[i + 4]), zoom: n(data[i + 5]) }
   if (fx.mode === 'beam8') return { pan: n(data[i]), tilt: n(data[i + 1]), zoom: n(data[i + 7]) }
+  if (fx.mode === 'beam9') return { pan: n(data[i]), tilt: n(data[i + 1]), zoom: n(data[i + 8]) }
   return { pan: 0, tilt: 0, zoom: 0 }
 }
 
 /** Shutter ゲート（beam8 の +3ch）。0=消灯→0、それ以外=点灯→1。色には混ぜず描画強度を断つ用。
  *  ストロボ(高域での点滅)は将来の時間制御。今は「0=消灯／それ以外=点灯」の二値。 */
 export function shutterGate(fx: Fixture, data: Uint8Array): number {
-  if (fx.mode !== 'beam8') return 1
+  if (fx.mode !== 'beam8' && fx.mode !== 'beam9') return 1
   return (data[fx.start - 1 + 3] ?? 0) === 0 ? 0 : 1
 }

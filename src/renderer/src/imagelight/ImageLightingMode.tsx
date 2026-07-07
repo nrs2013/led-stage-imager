@@ -2858,6 +2858,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                               onChange={(e) => engine.setBeamDmx({ mode: e.target.value as ChannelMode })}
                             >
                               <option value="beam8">beam8 · P/T/Dim/Sh/RGB/Zoom</option>
+                              <option value="beam9">beam9 · P/T/Dim/Sh/RGB+W/Zoom（白入り）</option>
                               <option value="beam6">beam6 · RGB/P/T/Zoom</option>
                               <option value="rgb">rgb · RGB</option>
                               <option value="rgbw4">rgbw · RGBW（白入り4ch）</option>

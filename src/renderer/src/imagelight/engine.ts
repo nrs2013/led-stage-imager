@@ -1489,11 +1489,11 @@ export class ImageLightEngine {
       const m = Math.max(col[0], col[1], col[2]) / 255 // 明るさ
       const hue: RGB3 =
         m > 0.004 ? [col[0] / m, col[1] / m, col[2] / m] : [col[0], col[1], col[2]]
-      const gate = p.mode === 'beam8' ? shutterGate(fx, data) : 1
+      const gate = p.mode === 'beam8' || p.mode === 'beam9' ? shutterGate(fx, data) : 1
       // PTZ チャンネルを持つモード(beam6/beam8)だけ向き/ズームを上書き。
       // rgb/dim 等の非ビームモードでは beamPose が 0 を返すため、上書きすると
       // 仕込んだ pan/tilt/zoom が毎フレーム home に潰れる＝配置データ事故になる。
-      if (p.mode === 'beam6' || p.mode === 'beam8') {
+      if (p.mode === 'beam6' || p.mode === 'beam8' || p.mode === 'beam9') {
         b.pan = pose.pan * 90 // ±90°
         b.tilt = pose.tilt * 180 // ±180°
         b.zoom = pose.zoom >= 0 ? 1 + pose.zoom * 3 : 1 + pose.zoom * 0.85 // 128=×1 / 全開×4 / 全閉×0.15
