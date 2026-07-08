@@ -53,6 +53,9 @@ interface AppState {
   selectedIds: string[]
   dmxByUniverse: Record<number, Uint8Array>
   lastSeenByUniverse: Record<number, number>
+  /** 卓の値が「実際に変わった」たびに +1。描画ループが変化時だけ即描画するための目印。
+   *  無変化（卓は44Hzで同じ値を流し続ける）では進めない＝普段の30fps負荷を増やさない。 */
+  dmxRev: number
   manualMode: boolean
   manualByFixture: Record<string, [number, number, number]>
   /** 棚＆キャンバスの種別フィルタ（照明だけ/電飾だけ/両方）。UI状態でありchart(保存対象)には入れない。 */
@@ -282,6 +285,14 @@ function initialStarted(): boolean {
   return typeof window !== 'undefined' && window.location.search.includes('demo')
 }
 
+/** 2つのDMXフレームが同一値か（変化検知用・512バイト程度を素直に比較）。 */
+function dmxBytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
 export const useStore = create<AppState>()((set, get) => ({
   chart: initialChart(),
   mode: typeof window !== 'undefined' && window.location.search.includes('live') ? 'live' : 'edit',
@@ -290,6 +301,7 @@ export const useStore = create<AppState>()((set, get) => ({
   selectedIds: [],
   dmxByUniverse: {},
   lastSeenByUniverse: {},
+  dmxRev: 0,
   manualMode: false,
   manualByFixture: {},
   paletteFilter: 'all',
@@ -641,11 +653,16 @@ export const useStore = create<AppState>()((set, get) => ({
       const now = Date.now()
       const dmx = { ...s.dmxByUniverse }
       const seen = { ...s.lastSeenByUniverse }
+      let changed = false
       for (const [u, data] of entries) {
+        const prev = dmx[u]
+        if (!changed && (!prev || !dmxBytesEqual(prev, data))) changed = true
         dmx[u] = data
         seen[u] = now
       }
-      return { dmxByUniverse: dmx, lastSeenByUniverse: seen }
+      // 実際に値が変わったフレームだけ dmxRev を進める＝描画ループが「変化時だけ即描画」できる。
+      // 無変化（卓は44Hzで同じ値を流し続ける）では据え置き＝普段の30fpsを保ち負荷を増やさない。
+      return { dmxByUniverse: dmx, lastSeenByUniverse: seen, dmxRev: changed ? s.dmxRev + 1 : s.dmxRev }
     }),
   artnetError: null,
   setArtnetError: (artnetError) => set({ artnetError }),

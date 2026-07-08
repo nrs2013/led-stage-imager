@@ -494,6 +494,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     let raf = 0
     let lastPublish = 0
     let lastRender = 0
+    let lastDmxRev = -1 // 前回描いた時の卓リビジョン。変わっていたら間引きを外して即描画する。
     // 出力(Syphon/NDI)の重い読み出し(getImageData)は、連続アニメ中は最大このfpsに間引く。
     const PUBLISH_MIN_MS = 1000 / 30
     // 描画(renderFrame)もアニメ中は上限fpsに間引く。灯体ごとの重い処理を半分にしてカクつき防止。
@@ -552,6 +553,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         engine.isAnimating() ||
         rubberRef.current != null ||
         pieceCreateRef.current != null
+      // 卓の値が変わったフレームは間引きを外して即描画（DMXパッチ灯体がある時だけ意味を持つ）。
+      const dmxRev = useStore.getState().dmxRev
+      const dmxDirty = engine.hasDmxPatched() && dmxRev !== lastDmxRev
       if (!animating && v === lastVRef.current && !forceRenderRef.current) {
         // 表示ズーム/パンだけの変化＝前回の絵を今の view で貼り直すだけ。
         // エンジン再計算も出力(Syphon/NDI)送信もしない＝本番出力へ負荷ゼロ。
@@ -561,9 +565,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         }
         return
       }
-      // 連続アニメ中は描画を上限fpsに間引く（単発変更・強制描画は即・出力は元々30fps）。
-      if (animating && !forceRenderRef.current && now - lastRender < RENDER_MIN_MS) return
+      // 連続アニメ中は描画を上限fpsに間引く（単発変更・強制描画・卓の値変化は即描く）。
+      if (animating && !forceRenderRef.current && !dmxDirty && now - lastRender < RENDER_MIN_MS) return
       lastRender = now
+      lastDmxRev = dmxRev
       forceRenderRef.current = false
       displayDirtyRef.current = false // 本描画に含まれるので消しておく
       lastVRef.current = v
@@ -585,10 +590,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       engine.renderFrame(now)
       // まず画面へ（軽い・毎フレーム）。重い出力読み出しは後で間引いて行う。
       blit()
-      // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更は即送る）。
+      // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更・卓の値変化は即送る）。
       // フェイルオープン：未接続が確証できる時だけ省く。
       if (syphonReadyRef.current && api?.publishFrame) {
-        if (!animating || now - lastPublish >= PUBLISH_MIN_MS) {
+        if (!animating || dmxDirty || now - lastPublish >= PUBLISH_MIN_MS) {
           lastPublish = now
           api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
         }

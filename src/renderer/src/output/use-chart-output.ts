@@ -22,7 +22,9 @@ export function useChartOutput(): void {
     const api = (window as unknown as { api?: DecorApi }).api
     if (!api?.publishFrame) return // ブラウザ(UI確認用)では何もしない
     let lastErrLog = 0
+    let lastTickAt = 0 // 直近の描画時刻＝下の即描画のレート上限に使う
     const tick = (): void => {
+      lastTickAt = performance.now()
       // 1フレームの例外で出力が本番中ずっと固まらないよう、毎フレーム握って次へ進む。
       try {
         const st = useStore.getState()
@@ -46,9 +48,20 @@ export function useChartOutput(): void {
         }
       }
     }
-    // setInterval (rAFでなく)＝ウィンドウが裏や最小化でも出力が止まらない
-    const iv = setInterval(tick, INTERVAL)
+    // setInterval (rAFでなく)＝ウィンドウが裏や最小化でも出力が止まらない（30fpsハートビート・信号ロス処理）。
+    // 直前に即描画(subscribe)が走っていたらこの回は省く＝連続変化中に heartbeat と二重描画して
+    // readRGBA/publish が無駄に2倍走るのを防ぐ（idle時・裏画面では毎回走り従来どおり30fps）。
+    const iv = setInterval(() => {
+      if (performance.now() - lastTickAt >= INTERVAL) tick()
+    }, INTERVAL)
+    // 卓の値が変わったら次の33ms枠を待たず即描画（変化時だけ・最短~60fpsに制限してSyphon読み出しの氾濫を防ぐ）。
+    const unsub = useStore.subscribe((s, prev) => {
+      if (s.dmxRev !== prev.dmxRev && performance.now() - lastTickAt >= 1000 / 60) tick()
+    })
     tick()
-    return () => clearInterval(iv)
+    return () => {
+      clearInterval(iv)
+      unsub()
+    }
   }, [])
 }
