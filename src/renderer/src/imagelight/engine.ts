@@ -275,13 +275,11 @@ interface Snap {
   sfxChaseMs: number
 }
 
-/** 灯体を「中央の一番下を1番に、左右の外側ほど大きく（同距離は右が先）、下の段→上の段」へ
+/** 灯体を「左下を1番に、下の段を左→右、終わったら一つ上の段もまた左→右」へ
  *  並べる順番 perm を返す（perm[newIndex]=oldIndex）。renumberByPosition と単体テストで共有する純関数。 */
 export function renumberOrder(pts: { x: number; y: number }[], lh: number = LH): number[] {
   const n = pts.length
   if (n < 2) return pts.map((_, i) => i)
-  const xs = pts.map((p) => p.x)
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2
   const bandTol = lh * 0.05 // 縦これ以内＝同じ段とみなす
   const items = pts.map((p, i) => ({ i, x: p.x, y: p.y })).sort((a, b) => b.y - a.y) // 下(yが大)から
   const rows: { i: number; x: number; y: number }[][] = []
@@ -290,19 +288,10 @@ export function renumberOrder(pts: { x: number; y: number }[], lh: number = LH):
     if (row && Math.abs(it.y - row[0].y) <= bandTol) row.push(it)
     else rows.push([it])
   }
-  const spread = Math.max(...xs) - Math.min(...xs)
-  const eps = Math.max(0.5, spread * 0.01) // この幅以内のx＝中央とみなす
   const perm: number[] = []
   for (const row of rows) {
-    const mid = row.filter((it) => Math.abs(it.x - cx) <= eps)
-    const right = row.filter((it) => it.x - cx > eps).sort((a, b) => a.x - b.x) // 中央寄りの右から
-    const left = row.filter((it) => cx - it.x > eps).sort((a, b) => b.x - a.x) // 中央寄りの左から
-    for (const it of mid) perm.push(it.i)
-    const m = Math.max(right.length, left.length)
-    for (let k = 0; k < m; k++) {
-      if (right[k]) perm.push(right[k].i) // 右を先
-      if (left[k]) perm.push(left[k].i) // 次に左
-    }
+    row.sort((a, b) => a.x - b.x) // 段の中は左→右
+    for (const it of row) perm.push(it.i) // 下の段から順に、各段を左→右で番号を振る
   }
   return perm
 }
@@ -2278,8 +2267,8 @@ export class ImageLightEngine {
     this.bump()
   }
 
-  /** 灯体の番号(=並び順)を「置いた場所」で振り直す。中央の一番下を1番に、左右の外側へ
-   *  行くほど大きく（同距離は右が先）、下の段→上の段へ。事故防止＝各シーンの保存(fix)と
+  /** 灯体の番号(=並び順)を「置いた場所」で振り直す。左下を1番に、下の段を左→右、
+   *  終わったら一つ上の段もまた左→右へ。事故防止＝各シーンの保存(fix)と
    *  各パターンの保存(look.lights)も同じ並びに揃える（呼び出しがズレない）。⌘Zで戻せる。 */
   renumberByPosition(): void {
     const n = this.beams.length
