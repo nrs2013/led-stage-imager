@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ImageLightEngine, LW, LH, IW, IH, MAX_BEAMS, type FxKey } from './engine'
+import { ImageLightEngine, LW, LH, IW, IH, MAX_BEAMS, type FxKey, type FireKey } from './engine'
 import { COLORS, hexToRgb, rgbToHex, sameRgb, type RGB3 } from './colors'
 import { FX_BUTTONS, FX_LABEL, FX_PARAMS } from './fxdefs'
 import { DECOR_NONDIR } from './decor-pattern'
@@ -301,6 +301,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // 出力(Syphon/NDI)送信も走らせない＝ピンチ中に本番出力へ負荷をかけない。
   const displayDirtyRef = useRef(false)
   const [renaming, setRenaming] = useState<{ i: number; value: string } | null>(null)
+  // SFXシーン（CUEタブの特効の段）: 保存待ち＋名前変更中
+  const [sfxArm, setSfxArm] = useState(false)
+  const [renamingSfx, setRenamingSfx] = useState<{ i: number; value: string } | null>(null)
 
   // ---- 表示ズーム（画面の見た目だけ拡大・縮小。Syphon/NDI出力には一切影響しない）
   // f=fit(全体表示)比の倍率、cx/cy=画面中央に見せる舞台(LW×LH)座標。
@@ -731,6 +734,32 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
+      // 発射ボタン LEARN 待機中：Esc で中止、それ以外のキーで割当
+      if (engine.learnFire != null) {
+        if (e.key === 'Escape') {
+          engine.setLearnFire(null)
+          e.preventDefault()
+          return
+        }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignFireShortcut(engine.learnFire, lc, null)
+        e.preventDefault()
+        return
+      }
+      // SFXシーン LEARN 待機中：Esc で中止、それ以外のキーで割当
+      if (engine.learnSfxScene != null) {
+        if (e.key === 'Escape') {
+          engine.setLearnSfxScene(null)
+          e.preventDefault()
+          return
+        }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignSfxSceneShortcut(engine.learnSfxScene, lc, null)
+        e.preventDefault()
+        return
+      }
       if (e.key === '?') {
         setShowKeys(true)
         e.preventDefault()
@@ -810,6 +839,21 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const ck = code ? Object.keys(engine.colorKey).find((h) => engine.colorKey[h] === code) : undefined
       if (ck) {
         engine.setColor(hexToRgb(ck))
+        e.preventDefault()
+        return
+      }
+      // 割り当て済みのキーで特効の発射ボタン/SFXシーン
+      const fireK = code
+        ? (Object.keys(engine.fireKeyMap) as FireKey[]).find((k) => engine.fireKeyMap[k] === code)
+        : undefined
+      if (fireK) {
+        engine.toggleFire(fireK)
+        e.preventDefault()
+        return
+      }
+      const sxi = code ? engine.sfxScenes.findIndex((s) => s && s.key === code) : -1
+      if (sxi >= 0) {
+        engine.applySfxScene(sxi)
         e.preventDefault()
         return
       }
@@ -2161,6 +2205,160 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     </button>
                   </div>
                 )}
+              </div>
+              <div className="il2-sec">
+                <div className="il2-eb">
+                  <span className="il2-kind">特効</span>
+                  <b>SFX FIRE</b>
+                </div>
+                {/* 発射ボタン（キッカケで押す大ボタン）。照明のCUEとは完全に独立 */}
+                <div className="il-firegrid">
+                  {(['flame', 'sparkler', 'smoke', 'rain'] as const).map((k) => {
+                    const assigned = engine.fireKeyMap[k] || engine.fireMidiMap[k] != null
+                    return (
+                      <div key={k} className="il-firecell">
+                        <button
+                          className={'il-firebtn' + (engine.fireOn(k) ? ' on' : '')}
+                          onClick={() => engine.toggleFire(k)}
+                          title={
+                            k === 'flame' ? '炎の発射ゲート。OFFの間は炎が一切出ない（誤発防止）'
+                            : k === 'sparkler' ? '火花の発射ゲート。OFFの間は火花が一切出ない（誤発防止）'
+                            : k === 'smoke' ? 'ロースモークの入/切（SFXタブのONと同じ）'
+                            : '雨/雪の入/切（SFXタブのONと同じ）'
+                          }
+                        >
+                          {k === 'flame' ? 'FLAME' : k === 'sparkler' ? 'SPARKLER' : k === 'smoke' ? 'SMOKE' : 'RAIN'}
+                        </button>
+                        <button
+                          className={'il-ic' + (engine.learnFire === k ? ' learnon' : assigned ? ' assigned' : '')}
+                          title={engine.learnFire === k ? '割当待ち（キーかMIDIを押す・もう一度で中止）' : 'LEARN — このボタンを押すキー/MIDIを覚えさせる（右クリックで解除）'}
+                          onClick={() => engine.setLearnFire(engine.learnFire === k ? null : k)}
+                          onContextMenu={(e) => { e.preventDefault(); engine.clearFireShortcut(k) }}
+                        >
+                          {engine.learnFire === k
+                            ? '◎'
+                            : assigned
+                              ? [codeLabel(engine.fireKeyMap[k] ?? null), engine.fireMidiMap[k] != null ? 'N' + engine.fireMidiMap[k] : ''].filter(Boolean).join(' ')
+                              : '○'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+                {/* SFXシーン＝どの炎/火花マークが撃つかの組み合わせ。呼出はクリック/キー/MIDI */}
+                <div className="il-lbl" style={{ marginTop: 10 }}>炎・火花のシーン</div>
+                {(() => {
+                  // 保存されるのは「選択中の炎/火花」（無選択なら置いてある全部）＝saveSfxSceneと同じ数え方を表示
+                  const selMarks = engine.selectedBeams.filter(
+                    (b) => b.motif === 'flame' || b.motif === 'sparkler'
+                  ).length
+                  const allMarks = engine.beams.filter(
+                    (b) => b.motif === 'flame' || b.motif === 'sparkler'
+                  ).length
+                  const what = selMarks > 0 ? `選択中の${selMarks}発` : `置いてある全部の${allMarks}発`
+                  return (
+                    <button
+                      className={'il-mini' + (sfxArm ? ' learnon' : '')}
+                      style={{ width: '100%', textAlign: 'center', marginBottom: 6 }}
+                      onClick={() => setSfxArm(!sfxArm)}
+                      title="撃ちたい炎/火花マークをキャンバスで選んでから押し、保存する番号をクリック（何も選んでいなければ置いてある全部を記憶）"
+                    >
+                      {sfxArm
+                        ? `↓ 保存する番号をクリック — ${what}（取消はもう一度）`
+                        : `● 炎/火花をシーンへ保存（今なら${what}）`}
+                    </button>
+                  )
+                })()}
+                <div className="il-buildpats">
+                  {engine.sfxScenes.map((s, i) => (
+                    <div
+                      key={i}
+                      className={'il-patrow il-sfxrow' + (sfxArm ? ' armed' : '') + (engine.activeSfxScene === i ? ' on' : '')}
+                      onClick={() => {
+                        if (sfxArm) {
+                          engine.saveSfxScene(i)
+                          setSfxArm(false)
+                          return
+                        }
+                        if (s) engine.applySfxScene(i)
+                      }}
+                    >
+                      <span className="pn">{i + 1}</span>
+                      {/* 保存待ち(sfxArm)中は名前の上のクリックも行に通す＝一番広い場所で保存できる */}
+                      <span className="pname" onClick={(e) => { if (renamingSfx?.i === i || !sfxArm) e.stopPropagation() }}>
+                        {renamingSfx?.i === i ? (
+                          <input
+                            autoFocus
+                            value={renamingSfx.value}
+                            onChange={(e) => setRenamingSfx({ i, value: e.target.value })}
+                            onKeyDown={(e) => {
+                              e.stopPropagation()
+                              if (e.key === 'Enter') {
+                                engine.renameSfxScene(i, renamingSfx.value)
+                                setRenamingSfx(null)
+                              } else if (e.key === 'Escape') setRenamingSfx(null)
+                            }}
+                            onBlur={() => {
+                              engine.renameSfxScene(i, renamingSfx.value)
+                              setRenamingSfx(null)
+                            }}
+                          />
+                        ) : (
+                          <span
+                            style={{ cursor: s ? 'text' : 'default' }}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation()
+                              if (s) setRenamingSfx({ i, value: s.name })
+                            }}
+                          >
+                            {s ? s.name + '（' + s.ids.length + '発）' : '（空き）'}
+                          </span>
+                        )}
+                      </span>
+                      <button
+                        className={
+                          'il-ic' +
+                          (engine.learnSfxScene === i ? ' learnon' : '') +
+                          (s && (s.key || s.midi != null) && engine.learnSfxScene !== i ? ' assigned' : '')
+                        }
+                        title={
+                          engine.learnSfxScene === i
+                            ? '割当待ち（キーかMIDIを押す・もう一度で中止）'
+                            : 'LEARN — このシーンを呼ぶキー/MIDIを覚えさせる'
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!s) return
+                          engine.setLearnSfxScene(engine.learnSfxScene === i ? null : i)
+                        }}
+                      >
+                        {engine.learnSfxScene === i
+                          ? '◎'
+                          : s && (s.key || s.midi != null)
+                            ? [codeLabel(s.key), s.midi != null ? 'N' + s.midi : ''].filter(Boolean).join(' ')
+                            : '○'}
+                      </button>
+                      <button
+                        className="il-ic"
+                        title="このシーンを消す"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          engine.removeSfxScene(i)
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="il-mini"
+                  style={{ width: '100%', textAlign: 'center', marginTop: 6 }}
+                  onClick={() => engine.clearSfxArm()}
+                  title="シーンの絞り込みを外して、置いてある炎/火花マーク全部が撃てる状態に戻す"
+                >
+                  ALL（全部撃てる状態に戻す）
+                </button>
               </div>
               <div className="il2-sec">
                 <div className="il2-eb">
@@ -4377,6 +4575,13 @@ const IL_CSS = `
 .il-buildpats{display:flex;flex-direction:column;gap:6px;}
 .il-patrow{display:flex;align-items:center;gap:6px;background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;padding:8px 9px;cursor:pointer;}
 .il-patrow.armed{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,.3) inset;}
+.il-firegrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;}
+.il-firecell{display:flex;gap:6px;align-items:stretch;}
+.il-firebtn{flex:1;padding:16px 4px;font-size:12px;letter-spacing:.14em;color:#fff;background:rgba(255,255,255,.06);border:0.5px solid rgba(255,255,255,.5);border-radius:6px;cursor:pointer;font-family:'Bebas Neue',sans-serif;}
+.il-firebtn:hover{background:rgba(255,255,255,.12);}
+.il-firebtn.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,.10);box-shadow:0 0 0 1px rgba(251,191,36,.35) inset;}
+.il-sfxrow{min-height:38px;}
+.il-sfxrow.on{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,.3) inset;}
 .il-patrow .pn{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--il-dim);width:12px;}
 .il-patrow .pname{flex:1;font-size:11.5px;}
 .il-patrow .pname input{width:100%;background:#15130f;border:0.5px solid var(--il-line);color:var(--il-txt);font-size:11.5px;border-radius:4px;padding:2px 4px;font-family:inherit;}

@@ -222,6 +222,35 @@ export interface Pattern {
   look: Look
 }
 
+/** SFXシーン＝「どの炎/火花マークが撃つか」＋発射パターンの記憶（キッカケ運用・CUEタブから呼ぶ）。
+ *  照明のPattern(CUE)とは完全に独立＝照明を切り替えても特効は変わらない。 */
+export interface SfxScene {
+  name: string
+  key: string | null
+  midi: number | null
+  ids: number[] // 撃つマークの sfxId（炎/火花混在OK）
+  chaseMode: 'all' | 'random' | 'inout' | 'outin'
+  chaseMs: number
+}
+
+/** 発射ボタンの種類（CUEタブの大ボタン）。 */
+export type FireKey = 'flame' | 'sparkler' | 'smoke' | 'rain'
+
+/** その特効マークが発射ゲート/シーン絞り込みを通れるか（純関数・テスト対象）。
+ *  ゲートOFF=そのSFXは一切出ない（誤発防止）。armed指定中はID一致だけ通す（ID未割当は撃たない）。 */
+export function sfxGateAllows(
+  motif: 'flame' | 'sparkler',
+  flameFire: boolean,
+  sparklerFire: boolean,
+  armed: Set<number> | null,
+  sfxId: number | undefined
+): boolean {
+  if (motif === 'flame' && !flameFire) return false
+  if (motif === 'sparkler' && !sparklerFire) return false
+  if (armed && !(sfxId != null && armed.has(sfxId))) return false
+  return true
+}
+
 export interface Scene {
   name: string
   kind: 'photo' | 'video'
@@ -273,6 +302,10 @@ interface Snap {
   scenes: Scene[]
   sfxChaseMode: 'random' | 'all' | 'inout' | 'outin'
   sfxChaseMs: number
+  // SFXシーン（保存/削除を⌘Zで戻せるように。発射ゲートは本番の意思なのでSnapに含めない）
+  sfxScenes: (SfxScene | null)[]
+  sfxArmedIds: number[] | null
+  activeSfxScene: number
 }
 
 /** 灯体を「左下を1番に、各段は左→右、下の段→上の段」の順で並べる順番 perm を返す
@@ -392,6 +425,17 @@ export interface ShowFile {
     seqMs?: number
     flameChase?: { on?: boolean; pattern?: 'random' | 'all' | 'inout' | 'outin'; ms?: number }
     sfxChase?: { mode?: 'random' | 'all' | 'inout' | 'outin'; ms?: number }
+    /** 発射ゲート（無い古い保存＝両方true＝従来どおり）。smoke/rainのONは lowSmoke.on/rain.on が担当。 */
+    fire?: { flame?: boolean; sparkler?: boolean }
+    /** SFXシーン（6枠・nullは空き）。無い古い保存＝全部空き。 */
+    sfxScenes?: (SfxScene | null)[]
+    /** 撃つマークの絞り込み（SFXシーン適用中）。無い/null＝全部撃てる。 */
+    armedIds?: number[] | null
+    /** 適用中のSFXシーン番号（UIの点灯表示の復元用）。無い/-1＝なし。 */
+    activeScene?: number
+    /** 発射ボタンのキー/MIDI割当。 */
+    fireKeyMap?: Partial<Record<FireKey, string>>
+    fireMidiMap?: Partial<Record<FireKey, number>>
   }
   /** 見え方: 色ノリ（光の色を写真に乗せる量 0..0.4）。無い＝0（従来）。 */
   colorWash?: number
@@ -552,10 +596,157 @@ export class ImageLightEngine {
       .filter((b) => b.motif === 'flame' && this.sfxOn(b))
       .map((b) => ({ fx: b.x / LW, fy: b.y / LH, dir: this.dirOf(b) }))
   }
-  /** その特効マークが「今点いているか」。通常はミュート判定、シーケンサー再生中は今のステップ。 */
+  /** その特効マークが「今点いているか」。発射ゲート→シーン絞り込み→ミュート/シーケンサーの順。 */
   private sfxOn(b: Beam): boolean {
+    if (b.motif === 'flame' || b.motif === 'sparkler') {
+      if (!sfxGateAllows(b.motif, this.flameFireGate, this.sparklerFireGate, this.sfxArmedIds, b.sfxId))
+        return false
+    }
     if (this.sfxSeqPlaying) return b.sfxId != null && this.currentSeqSet().has(b.sfxId)
     return this.isLit(b)
+  }
+
+  // ---- SFX発射ゲート＋SFXシーン（キッカケ運用・2026-07-11のむさん依頼）----
+  /** 発射ゲート。falseの間はその特効を一切出さない（本番のキッカケでCUEタブの大ボタンON）。
+   *  既定true＝従来どおり「置けば点く」（編集中に見えないと困る・古い保存もそのまま）。 */
+  flameFireGate = true
+  sparklerFireGate = true
+  /** 撃つマークの絞り込み（SFXシーン適用中）。null＝全部撃てる。 */
+  sfxArmedIds: Set<number> | null = null
+  /** SFXシーン6枠。 */
+  sfxScenes: (SfxScene | null)[] = [null, null, null, null, null, null]
+  /** 今呼んでいるSFXシーン番号（-1=なし/ALL）。UIの点灯表示用。 */
+  activeSfxScene = -1
+  setFlameFire(v: boolean): void { this.flameFireGate = v; this.bump() }
+  setSparklerFire(v: boolean): void { this.sparklerFireGate = v; this.bump() }
+  /** 発射ボタン（CUEタブ）のON/OFF。smoke/rainは既存のon切替へ委譲。 */
+  toggleFire(k: FireKey): void {
+    if (k === 'flame') this.setFlameFire(!this.flameFireGate)
+    else if (k === 'sparkler') this.setSparklerFire(!this.sparklerFireGate)
+    else if (k === 'smoke') this.setLowSmokeOn(!this.lowSmoke.on)
+    else this.setRainOn(!this.rain.on)
+  }
+  fireOn(k: FireKey): boolean {
+    if (k === 'flame') return this.flameFireGate
+    if (k === 'sparkler') return this.sparklerFireGate
+    if (k === 'smoke') return this.lowSmoke.on
+    return this.rain.on
+  }
+  /** SFXシーン保存：選択中の炎/火花マーク（無選択なら置いてある全部）＋今の発射パターンを番号へ。
+   *  名前とキー/MIDI割当は上書きでも引き継ぐ。 */
+  saveSfxScene(i: number): void {
+    this.ensureSfxIds()
+    const isMark = (b: Beam): boolean => b.motif === 'flame' || b.motif === 'sparkler'
+    const sel = this.selected.map((x) => this.beams[x]).filter(Boolean).filter(isMark) as Beam[]
+    const src = sel.length ? sel : this.beams.filter(isMark)
+    if (!src.length || i < 0 || i >= this.sfxScenes.length) return
+    this.pushHistory('sfxscene')
+    const prev = this.sfxScenes[i]
+    this.sfxScenes[i] = {
+      name: prev?.name || 'SFX ' + (i + 1),
+      key: prev?.key ?? null,
+      midi: prev?.midi ?? null,
+      ids: src.map((b) => b.sfxId!),
+      chaseMode: this.sfxChaseMode,
+      chaseMs: this.sfxChaseMs
+    }
+    // 適用中のシーンを上書きしたら、絞り込みも新しい中身に合わせる（表示と発射のズレ防止）
+    if (this.activeSfxScene === i) this.sfxArmedIds = new Set(this.sfxScenes[i]!.ids)
+    this.bump()
+  }
+  /** SFXシーン呼出：撃つマークをこの組み合わせに絞る＋発射パターンを切替。照明には触らない。 */
+  applySfxScene(i: number): void {
+    const s = this.sfxScenes[i]
+    if (!s) return
+    this.sfxArmedIds = new Set(s.ids)
+    this.sfxChaseMode = s.chaseMode
+    this.sfxChaseMs = s.chaseMs
+    this.activeSfxScene = i
+    this.bump(false)
+  }
+  /** ALL＝絞り込み解除（置いてあるマーク全部が撃てる状態へ）。 */
+  clearSfxArm(): void {
+    this.sfxArmedIds = null
+    this.activeSfxScene = -1
+    this.bump(false)
+  }
+  renameSfxScene(i: number, name: string): void {
+    const s = this.sfxScenes[i]
+    if (!s) return
+    s.name = name.trim() || 'SFX ' + (i + 1)
+    this.bump()
+  }
+  removeSfxScene(i: number): void {
+    if (!this.sfxScenes[i]) return
+    this.pushHistory('sfxscene')
+    this.sfxScenes[i] = null
+    if (this.learnSfxScene === i) this.learnSfxScene = null // 消した枠のLEARN待ちを残さない
+    if (this.activeSfxScene === i) this.clearSfxArm()
+    this.bump()
+  }
+  // 発射ボタン/SFXシーンのキー・MIDI割当（1キー1役＝clear*Everywhereに参加）
+  fireKeyMap: Partial<Record<FireKey, string>> = {}
+  fireMidiMap: Partial<Record<FireKey, number>> = {}
+  learnFire: FireKey | null = null
+  learnSfxScene: number | null = null
+  setLearnFire(k: FireKey | null): void {
+    this.learnFire = k
+    if (k != null) {
+      this.learnSfxScene = null
+      this.learnPattern = null
+      this.learnScene = null
+      this.learnFx = null
+      this.learnParam = null
+      this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
+      this.masterLearn = false
+      this.initMidi()
+    }
+    this.bump(false)
+  }
+  setLearnSfxScene(i: number | null): void {
+    this.learnSfxScene = i
+    if (i != null) {
+      this.learnFire = null
+      this.learnPattern = null
+      this.learnScene = null
+      this.learnFx = null
+      this.learnParam = null
+      this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
+      this.masterLearn = false
+      this.initMidi()
+    }
+    this.bump(false)
+  }
+  assignFireShortcut(k: FireKey, code: string | null, midi: number | null): void {
+    if (code != null) this.clearKeyEverywhere(code)
+    if (midi != null) this.clearMidiNoteEverywhere(midi)
+    if (code != null) this.fireKeyMap[k] = code
+    if (midi != null) this.fireMidiMap[k] = midi
+    this.learnFire = null
+    this.bump()
+  }
+  clearFireShortcut(k: FireKey): void {
+    delete this.fireKeyMap[k]
+    delete this.fireMidiMap[k]
+    this.bump()
+  }
+  assignSfxSceneShortcut(i: number, code: string | null, midi: number | null): void {
+    const s = this.sfxScenes[i]
+    if (!s) {
+      this.learnSfxScene = null // 空き枠へのLEARNは中止（待ち続けてキーを吸わない）
+      this.bump(false)
+      return
+    }
+    if (code != null) this.clearKeyEverywhere(code)
+    if (midi != null) this.clearMidiNoteEverywhere(midi)
+    if (code != null) s.key = code
+    if (midi != null) s.midi = midi
+    this.learnSfxScene = null
+    this.bump()
   }
 
   // ---- 特効ステップシーケンサー（炎＋火花共通・ドラムマシン風の格子）----
@@ -609,10 +800,12 @@ export class ImageLightEngine {
   flameChaseOn = false
   flameChasePattern: 'random' | 'all' | 'inout' | 'outin' = 'inout'
   flameChaseMs = 420 // 旧チェイスの保存互換用フィールド（発射は sfxChase に統一）
-  /** 置いた炎を全部いっぺんに発射（無ければ標準4本）。 */
+  /** 置いた炎を全部いっぺんに発射（無ければ標準4本）。発射ゲートOFF中は撃たない（誤発防止）。
+   *  SFXシーンで絞り込み中は「標準4本」へのフォールバックもしない（外したはずの炎が出る事故防止）。 */
   flameFireAll(): void {
+    if (!this.flameFireGate) return
     if (this.flamePoints.length) this.flamePoints.forEach((p) => this.flame.fire(p.fx, p.fy, 1, p.dir))
-    else this.flame.fireRow()
+    else if (!this.sfxArmedIds) this.flame.fireRow()
     this.bump()
   }
   // ---- SFX 発射パターン（炎・火花 共通）：置いた点を 全部同時/内→外/外→内/ランダム で順に発射 ----
@@ -946,7 +1139,10 @@ export class ImageLightEngine {
         }))
       })),
       sfxChaseMode: this.sfxChaseMode,
-      sfxChaseMs: this.sfxChaseMs
+      sfxChaseMs: this.sfxChaseMs,
+      sfxScenes: this.sfxScenes.map((sc) => (sc ? { ...sc, ids: sc.ids.slice() } : null)),
+      sfxArmedIds: this.sfxArmedIds ? [...this.sfxArmedIds] : null,
+      activeSfxScene: this.activeSfxScene
     }
   }
   private restore(s: Snap): void {
@@ -978,6 +1174,11 @@ export class ImageLightEngine {
     }))
     this.sfxChaseMode = s.sfxChaseMode
     this.sfxChaseMs = s.sfxChaseMs
+    this.sfxScenes = s.sfxScenes.map((sc) => (sc ? { ...sc, ids: sc.ids.slice() } : null))
+    this.sfxArmedIds = s.sfxArmedIds ? new Set(s.sfxArmedIds) : null
+    this.activeSfxScene =
+      s.activeSfxScene >= 0 && this.sfxScenes[s.activeSfxScene] ? s.activeSfxScene : -1
+    if (this.learnSfxScene != null && !this.sfxScenes[this.learnSfxScene]) this.learnSfxScene = null
     const ai = s.activeScene >= 0 && s.activeScene < this.scenes.length ? s.activeScene : -1
     // 動画: 表示中だけ再生・他は停止
     this.scenes.forEach((sc, i) => {
@@ -2736,6 +2937,11 @@ export class ImageLightEngine {
     })
     for (const k of Object.keys(this.fxKey) as FxKey[]) if (this.fxKey[k] === code) delete this.fxKey[k]
     for (const h of Object.keys(this.colorKey)) if (this.colorKey[h] === code) delete this.colorKey[h]
+    for (const k of Object.keys(this.fireKeyMap) as FireKey[])
+      if (this.fireKeyMap[k] === code) delete this.fireKeyMap[k]
+    this.sfxScenes.forEach((s) => {
+      if (s && s.key === code) s.key = null
+    })
   }
   /** 同じ MIDI ノートを持つ他カテゴリ(strobe/FX/color/pattern/scene)から外す＝「1ノート1役」。 */
   private clearMidiNoteEverywhere(note: number): void {
@@ -2748,6 +2954,11 @@ export class ImageLightEngine {
     })
     this.scenes.forEach((s) => {
       if (s.midiNote === note) s.midiNote = null
+    })
+    for (const k of Object.keys(this.fireMidiMap) as FireKey[])
+      if (this.fireMidiMap[k] === note) delete this.fireMidiMap[k]
+    this.sfxScenes.forEach((s) => {
+      if (s && s.midi === note) s.midi = null
     })
   }
   /** 本番シーン切替の方式（cut/fade）と時間(ms)を設定。 */
@@ -3694,6 +3905,8 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnSfxScene = null
     }
     this.bump(false)
   }
@@ -3730,6 +3943,8 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnSfxScene = null
     }
     this.bump(false)
   }
@@ -4140,6 +4355,8 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnSfxScene = null
       this.initMidi()
     }
     this.bump(false)
@@ -4153,6 +4370,8 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnSfxScene = null
       this.initMidi()
     }
     this.bump(false)
@@ -4168,6 +4387,8 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnSfxScene = null
       this.initMidi()
     }
     this.bump(false)
@@ -4212,6 +4433,8 @@ export class ImageLightEngine {
       this.learnPattern = null
       this.learnScene = null
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnSfxScene = null
     }
     this.bump(false)
   }
@@ -4230,6 +4453,8 @@ export class ImageLightEngine {
       this.learnPattern = null
       this.learnScene = null
       this.learnStrobe = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnSfxScene = null
     }
     this.bump(false)
   }
@@ -4249,6 +4474,8 @@ export class ImageLightEngine {
     if ((stt & 0xf0) === 0x90 && vel > 0) {
       // ノートON：LEARN中なら割当、そうでなければ割当済みを発火
       if (this.learnFx != null) this.assignFxShortcut(this.learnFx, null, note)
+      else if (this.learnFire != null) this.assignFireShortcut(this.learnFire, null, note)
+      else if (this.learnSfxScene != null) this.assignSfxSceneShortcut(this.learnSfxScene, null, note)
       else if (this.learnPattern != null) this.assignShortcut(this.learnPattern, null, note)
       else if (this.learnScene != null) this.assignSceneMidi(this.learnScene, note)
       else if (this.learnStrobe) {
@@ -4268,8 +4495,12 @@ export class ImageLightEngine {
       } else {
         const fk = (Object.keys(this.fxMidi) as FxKey[]).find((k) => this.fxMidi[k] === note)
         const ck = Object.keys(this.colorMidi).find((h) => this.colorMidi[h] === note)
+        const fireK = (Object.keys(this.fireMidiMap) as FireKey[]).find((k) => this.fireMidiMap[k] === note)
+        const sxi = this.sfxScenes.findIndex((s) => s && s.midi === note)
         if (fk) this.fxToggle(fk)
         else if (ck) this.setColor(hexToRgb(ck))
+        else if (fireK) this.toggleFire(fireK)
+        else if (sxi >= 0) this.applySfxScene(sxi)
         else {
           const pi = this.patterns.findIndex((p) => p && p.midi === note)
           if (pi >= 0) this.applyPattern(pi)
@@ -4483,7 +4714,13 @@ export class ImageLightEngine {
         seqSteps: this.sfxSeqSteps.map((s) => s.slice()),
         seqMs: this.sfxSeqMs,
         flameChase: { on: this.flameChaseOn, pattern: this.flameChasePattern, ms: this.flameChaseMs },
-        sfxChase: { mode: this.sfxChaseMode, ms: this.sfxChaseMs }
+        sfxChase: { mode: this.sfxChaseMode, ms: this.sfxChaseMs },
+        fire: { flame: this.flameFireGate, sparkler: this.sparklerFireGate },
+        sfxScenes: this.sfxScenes.map((s) => (s ? { ...s, ids: s.ids.slice() } : null)),
+        armedIds: this.sfxArmedIds ? [...this.sfxArmedIds] : null,
+        activeScene: this.activeSfxScene,
+        fireKeyMap: { ...this.fireKeyMap },
+        fireMidiMap: { ...this.fireMidiMap }
       }
     }
     return { json: JSON.stringify(show, null, 2), media }
@@ -4621,6 +4858,33 @@ export class ImageLightEngine {
         this.sfxChaseMode = sfx.flameChase.pattern
         if (typeof sfx.flameChase.ms === 'number') this.sfxChaseMs = sfx.flameChase.ms
       }
+      // 発射ゲート＋SFXシーンの復元（無い古い保存＝ゲート両方true・シーン空き・絞り込み無し＝従来どおり）
+      this.flameFireGate = sfx.fire?.flame ?? true
+      this.sparklerFireGate = sfx.fire?.sparkler ?? true
+      this.sfxScenes = Array.from({ length: 6 }, (_, i) => {
+        const s = sfx.sfxScenes?.[i]
+        return s && Array.isArray(s.ids)
+          ? { name: s.name || 'SFX ' + (i + 1), key: s.key ?? null, midi: s.midi ?? null,
+              ids: s.ids.slice(), chaseMode: s.chaseMode || 'all', chaseMs: s.chaseMs || 420 }
+          : null
+      })
+      this.sfxArmedIds = Array.isArray(sfx.armedIds) && sfx.armedIds.length ? new Set(sfx.armedIds) : null
+      // 絞り込み中のまま保存した公演は、どのシーンが点いていたかも復元（表示と発射のズレ防止）
+      this.activeSfxScene =
+        this.sfxArmedIds && typeof sfx.activeScene === 'number' && sfx.activeScene >= 0 && this.sfxScenes[sfx.activeScene]
+          ? sfx.activeScene
+          : -1
+      this.fireKeyMap = { ...(sfx.fireKeyMap ?? {}) }
+      this.fireMidiMap = { ...(sfx.fireMidiMap ?? {}) }
+    } else {
+      // sfxブロック自体が無い古い保存＝全部既定へ（前のショーの状態を引きずらない）
+      this.flameFireGate = true
+      this.sparklerFireGate = true
+      this.sfxScenes = [null, null, null, null, null, null]
+      this.sfxArmedIds = null
+      this.activeSfxScene = -1
+      this.fireKeyMap = {}
+      this.fireMidiMap = {}
     }
     // 見え方（色ノリ・ベース明るさ）を復元。無い古いファイルは 0＝従来の見た目。
     this.colorWash = typeof show.colorWash === 'number' ? Math.max(0, Math.min(0.4, show.colorWash)) : 0
@@ -4628,8 +4892,14 @@ export class ImageLightEngine {
     this.sfxSeqPlaying = false
     this.sfxSeqIndex = 0
     // sfxId カウンタを復元（既存の最大+1）＝復元後に足す炎/火花のID衝突を防ぐ。
+    // ID採番の再開位置は「マークが今持つID」だけでなく、SFXシーン/絞り込み/シーケンサーが
+    // 参照しているIDも跨ぐ（消したマークのIDを新しいマークが再利用すると、保存済みシーンが
+    // 無関係なマークに化けて誤発射するため）。
     let maxSfxId = 0
     for (const b of this.beams) if (typeof b.sfxId === 'number' && b.sfxId > maxSfxId) maxSfxId = b.sfxId
+    for (const s of this.sfxScenes) if (s) for (const id of s.ids) if (id > maxSfxId) maxSfxId = id
+    if (this.sfxArmedIds) for (const id of this.sfxArmedIds) if (id > maxSfxId) maxSfxId = id
+    for (const col of this.sfxSeqSteps) for (const id of col) if (id > maxSfxId) maxSfxId = id
     this.sfxIdSeq = maxSfxId + 1
     // 復元した灯体配置は「ユーザーが置いた配置」そのもの。これを立てないと selectScene →
     // placeRigAtPhotoBottom が全灯体の縦位置を写真下端に潰してしまう（位置が全部リセットされるバグ）。
