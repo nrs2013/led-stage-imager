@@ -3348,6 +3348,10 @@ export class ImageLightEngine {
     }
     for (const u of this.allUrls) URL.revokeObjectURL(u) // 削除済み含め全URLをここで解放
     this.allUrls = []
+    // 炎/ロースモークの WebGL コンテキストも明示解放。モードを出入りするたびに engine が作り直され、
+    // 解放しないとコンテキストが溜まって上限(~16)に達し、特効が描けなくなる。unmount からここが呼ばれる。
+    this.flame.dispose()
+    this.lowSmoke.dispose()
   }
   private fitImage(): void {
     if (!this.mat) {
@@ -3632,8 +3636,13 @@ export class ImageLightEngine {
   }
   selectScene(i: number): void {
     if (!this.scenes[i]) return
-    if (this.activeScene >= 0 && this.activeScene !== i) {
-      this.saveFixState(this.activeScene)
+    // 同じシーンを選び直した時は何もしない。抜けないと下の loadFixState(i) が「そのシーンに来てから
+    // 変えたミュート/ソロ」を古い保存値で巻き戻す＝本番で消した灯体が復活する事故になる。
+    if (this.activeScene === i) return
+    if (this.activeScene >= 0) {
+      // 復元中(restoring)は saveFixState を呼ばない：復元したばかりの各シーンの fix を、まだ設定前の
+      // beams（全部ミュート無し）で上書きして潰してしまうため。
+      if (!this.restoring) this.saveFixState(this.activeScene)
       const prev = this.scenes[this.activeScene]
       if (prev?.kind === 'video') prev.video?.pause() // 非表示の動画は止める（軽さ・本数対策）
     }
@@ -4655,6 +4664,9 @@ export class ImageLightEngine {
   /** 公演まるごとの書き出し材料を作る（リグ＋シーン一覧＋メディアのファイル）。
    *  写真=元dataURL／動画=blobをfetchしてdataURL化。重いので保存時だけ呼ぶ。 */
   async serializeShow(): Promise<{ json: string; media: { file: string; dataUrl: string }[] }> {
+    // 表示中シーンの最新ミュート/ソロを fix に確定してから書き出す。fix はシーンを離れる時にしか
+    // 同期されないので、これが無いと「今のシーンで消した灯体」が保存されず、開き直すと点いてしまう。
+    if (this.activeScene >= 0) this.saveFixState(this.activeScene)
     const media: { file: string; dataUrl: string }[] = []
     const scenesMeta: ShowSceneMeta[] = []
     for (let i = 0; i < this.scenes.length; i++) {

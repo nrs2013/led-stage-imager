@@ -98,7 +98,7 @@ export class LowSmokeFX {
   }
   on = false
   private matterCv = mkCanvas(MW, MH)
-  private gl: WebGLRenderingContext | null
+  private gl: WebGLRenderingContext | null = null
   private prog: WebGLProgram | null = null
   private u: Record<string, WebGLUniformLocation | null> = {}
   private ok = false
@@ -107,12 +107,25 @@ export class LowSmokeFX {
   private env = 0 // 溜まり 0..1
 
   constructor() {
+    this.ensureGL()
+  }
+
+  /** WebGLコンテキストを用意（無ければ作る）。dispose 後に再び描画される時（開発時 React StrictMode の
+   *  マウント→cleanup→再マウントなど）も、ここが作り直すので煙が復活する。捨てられたエンジンは二度と
+   *  描画されない＝作り直されず、dispose で解放されたまま＝コンテキスト枯渇を防ぐ。 */
+  private ensureGL(): void {
+    if (this.gl) return
+    // loseContext 後は同じ canvas から新しい context を取れないので canvas ごと作り直す。
+    this.matterCv = mkCanvas(MW, MH)
     const gl = (this.matterCv.getContext('webgl', {
       premultipliedAlpha: false,
       alpha: true,
       antialias: false
     }) || null) as WebGLRenderingContext | null
     this.gl = gl
+    this.prog = null
+    this.u = {}
+    this.ok = false
     if (gl) {
       try {
         this.initGL(gl)
@@ -158,6 +171,7 @@ export class LowSmokeFX {
   get active(): boolean { return this.on || this.env > 0.01 }
 
   tick(now: number): void {
+    this.ensureGL() // dispose 後に再開した時はここで作り直す
     const gl = this.gl
     if (!gl || !this.ok || !this.prog) return
     if (!this.t0) this.t0 = now
@@ -198,5 +212,16 @@ export class LowSmokeFX {
   refill(): void {
     this.env = 0
     this.on = true
+  }
+  /** WebGLコンテキストを明示解放（モード退出で engine ごと捨てる時に呼ぶ）。出入りを繰り返した時に
+   *  コンテキストが溜まって上限(~16)に達し、煙が描けなくなるのを防ぐ。 */
+  dispose(): void {
+    try {
+      this.gl?.getExtension('WEBGL_lose_context')?.loseContext()
+    } catch {
+      /* noop */
+    }
+    this.gl = null
+    this.ok = false
   }
 }

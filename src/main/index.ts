@@ -119,11 +119,11 @@ function startEngine(): void {
   }
   receiver.on('dmx', (pkt: ArtDmxPacket) => {
     const msg = { universe: pkt.universe, sequence: pkt.sequence, data: pkt.data }
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('artnet:dmx', msg)
+    broadcast('artnet:dmx', msg)
   })
   // CoreMIDI 直読みの MIDI 入力（Web MIDI が効かないため）。受信を renderer(engine) へ転送。
   startMidiInput((s, d1, d2) => {
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('midi:message', [s, d1, d2])
+    broadcast('midi:message', [s, d1, d2])
   })
   // 受信機の生死を画面へ通知（bind失敗＝ポート使用中などは今まで無言で死んでいた）。
   // 🔴 起動直後のエラーは画面がまだ無い時に起きる＝最後の状態を覚えておき、
@@ -132,11 +132,11 @@ function startEngine(): void {
     console.error('[artnet] receiver error:', err)
     const msg = String((err as NodeJS.ErrnoException)?.code ?? err)
     lastArtnetStatus = { ok: false, detail: msg }
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('artnet:status', lastArtnetStatus)
+    broadcast('artnet:status', lastArtnetStatus)
   })
   receiver.on('listening', () => {
     lastArtnetStatus = { ok: true, detail: '' }
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('artnet:status', lastArtnetStatus)
+    broadcast('artnet:status', lastArtnetStatus)
   })
   receiver.start()
   console.log('[engine] Art-Net receiver (UDP 6454) + Syphon/NDI "LED STAGE IMAGER" started')
@@ -204,19 +204,27 @@ function closePreview(): void {
  *  .ledimager（チャート・JSON）→ chart:open-path（⌘S の上書き先にも設定）。
  *  .ledshow（画像照明の公演・ZIP）→ imagelight:open-path（バイト列を渡す）。
  *  画面がまだ無い起動直後は pendingOpenPath に積み、did-finish-load で流す。 */
+/** 全ウィンドウへ IPC 送信（破棄済みは飛ばす）。出力用の別窓を本番中に閉じた瞬間に届いた通知を、
+ *  破棄済みの webContents に send して main プロセスごと落とす事故を防ぐ。 */
+function broadcast(channel: string, ...args: unknown[]): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send(channel, ...args)
+  }
+}
+
 function deliverOpenFile(p: string): void {
   const w = mainWindow
   const ready = w && !w.isDestroyed() && !w.webContents.isLoading()
   const isShow = p.toLowerCase().endsWith('.ledshow')
-  // .ledshow は画像照明モードの公演。チャートの ⌘S 上書き先(currentChartPath)にはしない。
-  // 上書き先の確定は renderer が「実際に開けた」時に行う（ここでは決めない）。
-  if (!isShow) currentChartPath = p
+  // チャートの ⌘S 上書き先(currentChartPath)はここで eager に覚えない。renderer が「実際に開けた」時だけ
+  // 'chart:opened' で確定する。ここで覚えると、開くのをキャンセル/読込失敗した後の ⌘S が、開こうと
+  // した別ファイルを黙って上書きする事故になる（path を第2引数で渡す＝開けた時だけ確定に使う）。
   if (ready) {
     try {
       if (isShow) {
         w!.webContents.send('imagelight:open-path', { bytes: readFileSync(p), path: p })
       } else {
-        w!.webContents.send('chart:open-path', readFileSync(p, 'utf8'))
+        w!.webContents.send('chart:open-path', readFileSync(p, 'utf8'), p)
       }
       if (w!.isMinimized()) w!.restore()
       w!.focus()
@@ -533,6 +541,11 @@ app.whenReady().then(() => {
     })
     return res.canceled || !res.filePath ? null : res.filePath
   }
+  // renderer が「実際にチャートを開けた」時だけ ⌘S 上書き先を確定する（deliverOpenFile は覚えない）。
+  // 開くのをキャンセル/読込失敗した時は呼ばれない＝別ファイルを黙って上書きする事故を防ぐ。
+  ipcMain.on('chart:opened', (_e, path: string) => {
+    if (typeof path === 'string' && path) currentChartPath = path
+  })
   ipcMain.handle('chart:save', async (_e, json: string, name: string) => {
     if (!currentChartPath) {
       const p = await askSavePath(name)

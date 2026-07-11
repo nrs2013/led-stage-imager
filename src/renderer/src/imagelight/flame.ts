@@ -157,7 +157,7 @@ export class FlameFX {
   private bodyGL = mkCanvas(FW, FH) // WebGL: 火球本体(透過)
   private glowCv = mkCanvas(FW, FH) // Canvas2D: 照らし用(ぼかし)
   private glowCtx: CanvasRenderingContext2D
-  private gl: WebGLRenderingContext | null
+  private gl: WebGLRenderingContext | null = null
   private prog: WebGLProgram | null = null
   private u: Record<string, WebGLUniformLocation | null> = {}
   private shots: Shot[] = []
@@ -167,12 +167,25 @@ export class FlameFX {
 
   constructor() {
     this.glowCtx = this.glowCv.getContext('2d')!
+    this.ensureGL()
+  }
+
+  /** WebGLコンテキストを用意（無ければ作る）。dispose 後に再び描画される時（開発時 React StrictMode の
+   *  マウント→cleanup→再マウントなど）も、ここが作り直すので炎が復活する。捨てられたエンジンは二度と
+   *  描画されない＝作り直されず、dispose で解放されたまま＝コンテキスト枯渇を防ぐ。 */
+  private ensureGL(): void {
+    if (this.gl) return
+    // loseContext 後は同じ canvas から新しい context を取れないので canvas ごと作り直す。
+    this.bodyGL = mkCanvas(FW, FH)
     const gl = (this.bodyGL.getContext('webgl', {
       premultipliedAlpha: false,
       alpha: true,
       antialias: false
     }) || null) as WebGLRenderingContext | null
     this.gl = gl
+    this.prog = null
+    this.u = {}
+    this.ok = false
     if (gl) {
       try {
         this.initGL(gl)
@@ -308,6 +321,7 @@ export class FlameFX {
   }
 
   private renderBody(now: number): void {
+    this.ensureGL() // dispose 後に再開した時はここで作り直す
     const gl = this.gl
     if (!gl || !this.ok || !this.prog) return
     gl.useProgram(this.prog)
@@ -352,5 +366,15 @@ export class FlameFX {
     c.drawImage(this.bodyGL, 0, 0, FW, FH)
     c.filter = 'none'
     c.globalAlpha = 1
+  }
+  /** WebGLコンテキストを明示解放（モード退出で engine ごと捨てる時に呼ぶ）。出入りを繰り返した時に
+   *  コンテキストが溜まって上限(~16)に達し、炎が描けなくなるのを防ぐ。 */
+  dispose(): void {
+    try {
+      this.gl?.getExtension('WEBGL_lose_context')?.loseContext()
+    } catch {
+      /* noop */
+    }
+    this.gl = null
   }
 }

@@ -77,12 +77,14 @@ const api = {
     ipcRenderer.invoke('chart:saveAs', json, name),
   chartNew: (): Promise<boolean> => ipcRenderer.invoke('chart:new'),
   openChartFile: (): Promise<string | null> => ipcRenderer.invoke('chart:open'),
-  // ダブルクリックで開かれたファイルの中身(JSON)がメインから届く
-  onOpenChartPath: (cb: (json: string) => void): (() => void) => {
-    const h = (_e: IpcRendererEvent, json: string): void => cb(json)
+  // ダブルクリックで開かれたファイルの中身(JSON)＋パスがメインから届く
+  onOpenChartPath: (cb: (json: string, path?: string) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, json: string, path?: string): void => cb(json, path)
     ipcRenderer.on('chart:open-path', h)
     return () => ipcRenderer.removeListener('chart:open-path', h)
   },
+  // 実際に開けた時だけ⌘S上書き先を確定（キャンセル/失敗時は呼ばない＝別ファイル誤上書き防止）
+  chartOpened: (path: string): void => ipcRenderer.send('chart:opened', path),
   // ダブルクリックで開かれた .ledshow（画像照明の公演・ZIPのバイト列＋パス）がメインから届く
   onOpenShowPath: (cb: (p: { bytes: Uint8Array; path: string }) => void): (() => void) => {
     const h = (_e: IpcRendererEvent, p: { bytes: Uint8Array; path: string }): void => cb(p)

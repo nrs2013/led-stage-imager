@@ -33,7 +33,8 @@ interface DecorApi {
   onEditPaste?: (cb: () => void) => (() => void) | void
   nativeCopy?: () => void
   nativePaste?: () => void
-  onOpenChartPath?: (cb: (json: string) => void) => (() => void) | void
+  onOpenChartPath?: (cb: (json: string, path?: string) => void) => (() => void) | void
+  chartOpened?: (path: string) => void
   onOpenShowPath?: (cb: (p: { bytes: Uint8Array; path: string }) => void) => (() => void) | void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
@@ -152,7 +153,7 @@ function useMenuUndo(): void {
 /** ダブルクリックで開かれた .ledimager（main から JSON が届く）を読み込んで表示する。 */
 function useOpenFile(): void {
   useEffect(() => {
-    const off = getApi()?.onOpenChartPath?.((json) => {
+    const off = getApi()?.onOpenChartPath?.((json, path) => {
       try {
         const c = parseChart(json)
         const st = useStore.getState()
@@ -166,6 +167,8 @@ function useOpenFile(): void {
         st.setImageLight(false)
         st.setChart(c)
         st.setStarted(true)
+        // 実際に開けた時だけ ⌘S 上書き先を確定（キャンセル/失敗時はここに来ない＝別ファイル誤上書き防止）
+        if (path) getApi()?.chartOpened?.(path)
       } catch (e) {
         console.error('[open-file] parse failed', e)
       }
