@@ -275,34 +275,23 @@ interface Snap {
   sfxChaseMs: number
 }
 
-/** 灯体を「中央の一番下を1番に、左右の外側ほど大きく（同距離は右が先）、下の段→上の段」へ
- *  並べる順番 perm を返す（perm[newIndex]=oldIndex）。renumberByPosition と単体テストで共有する純関数。 */
+/** 灯体を「左下を1番に、各段は左→右、下の段→上の段」の順で並べる順番 perm を返す
+ *  （perm[newIndex]=oldIndex）。renumberByPosition と単体テストで共有する純関数。 */
 export function renumberOrder(pts: { x: number; y: number }[], lh: number = LH): number[] {
   const n = pts.length
   if (n < 2) return pts.map((_, i) => i)
-  const xs = pts.map((p) => p.x)
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2
   const bandTol = lh * 0.05 // 縦これ以内＝同じ段とみなす
-  const items = pts.map((p, i) => ({ i, x: p.x, y: p.y })).sort((a, b) => b.y - a.y) // 下(yが大)から
+  const items = pts.map((p, i) => ({ i, x: p.x, y: p.y })).sort((a, b) => b.y - a.y) // 下(yが大)の段から
   const rows: { i: number; x: number; y: number }[][] = []
   for (const it of items) {
     const row = rows[rows.length - 1]
     if (row && Math.abs(it.y - row[0].y) <= bandTol) row.push(it)
     else rows.push([it])
   }
-  const spread = Math.max(...xs) - Math.min(...xs)
-  const eps = Math.max(0.5, spread * 0.01) // この幅以内のx＝中央とみなす
+  // 各段は左(xが小)から右(xが大)へ。段は下から上（items を下優先で積んだ順）。
   const perm: number[] = []
   for (const row of rows) {
-    const mid = row.filter((it) => Math.abs(it.x - cx) <= eps)
-    const right = row.filter((it) => it.x - cx > eps).sort((a, b) => a.x - b.x) // 中央寄りの右から
-    const left = row.filter((it) => cx - it.x > eps).sort((a, b) => b.x - a.x) // 中央寄りの左から
-    for (const it of mid) perm.push(it.i)
-    const m = Math.max(right.length, left.length)
-    for (let k = 0; k < m; k++) {
-      if (right[k]) perm.push(right[k].i) // 右を先
-      if (left[k]) perm.push(left[k].i) // 次に左
-    }
+    for (const it of [...row].sort((a, b) => a.x - b.x)) perm.push(it.i)
   }
   return perm
 }

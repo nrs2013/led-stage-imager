@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { renumberOrder } from './engine'
 
-describe('renumberOrder（番号を中央下→左右の外へ振り直す）', () => {
-  it('一段：中央が1、同距離は右が先で左右交互に外へ', () => {
-    // x: -2,-1,0,1,2（同じ段）。中央=index2
+describe('renumberOrder（番号を左下→右・下の段から上へ振り直す）', () => {
+  it('一段：左端が1番、右へ順に増える', () => {
+    // x: -2,-1,0,1,2（同じ段・index 0..4）。左端(x=-2, index0)から右へ。
     const pts = [
       { x: -2, y: 0 },
       { x: -1, y: 0 },
@@ -11,11 +11,10 @@ describe('renumberOrder（番号を中央下→左右の外へ振り直す）', 
       { x: 1, y: 0 },
       { x: 2, y: 0 }
     ]
-    // 期待(old index)：中央2 → 右1個3 → 左1個1 → 右2個4 → 左2個0
-    expect(renumberOrder(pts, 100)).toEqual([2, 3, 1, 4, 0])
+    expect(renumberOrder(pts, 100)).toEqual([0, 1, 2, 3, 4])
   })
 
-  it('下の段が先、その中で中央下→外側', () => {
+  it('下の段が先、その中で左→右', () => {
     const pts = [
       { x: -1, y: 0 }, // 0 上段
       { x: 0, y: 0 }, // 1 上段
@@ -24,8 +23,8 @@ describe('renumberOrder（番号を中央下→左右の外へ振り直す）', 
       { x: 0, y: 100 }, // 4 下段
       { x: 1, y: 100 } // 5 下段
     ]
-    // 下段(中央4,右5,左3) → 上段(中央1,右2,左0)
-    expect(renumberOrder(pts, 200)).toEqual([4, 5, 3, 1, 2, 0])
+    // 下段を左→右(3,4,5) → 上段を左→右(0,1,2)
+    expect(renumberOrder(pts, 200)).toEqual([3, 4, 5, 0, 1, 2])
   })
 
   it('perm は全 index をちょうど1回ずつ含む（保存データの並べ替えが安全）', () => {

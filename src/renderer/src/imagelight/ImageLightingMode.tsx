@@ -3043,9 +3043,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 className="il-mini"
                 style={{ width: '100%', textAlign: 'center' }}
                 onClick={() => engine.renumberByPosition()}
-                title="灯体の番号を配置で振り直す：中央の一番下を1番に、左右の外側へ行くほど大きく、下の段→上の段へ。各シーン/パターンの保存もズレないよう一緒に並べ替えます（⌘Zで戻せる）。"
+                title="灯体の番号を配置で振り直す：左下を1番に、各段は左から右へ、下の段から上の段へ。各シーン/パターンの保存もズレないよう一緒に並べ替えます（⌘Zで戻せる）。"
               >
-                番号を振り直す（中央下 → 左右の外へ）
+                番号を振り直す（左下 → 右 → 上の段）
               </button>
               {(lightingOnly || dmxPatched) && (
                 <>
