@@ -157,6 +157,7 @@ export interface Beam {
   motifSpeed?: number
   motifReverse?: boolean // マーキー逆方向チェイス
   motifSeed?: number // 星の散布レイアウトを固定（移動しても再シャッフルしない）
+  motifStarSize?: number // 星1粒の大きさ（0.5〜30・stars専用・未設定は既定3）
   // フロント灯体：前から当たる丸い光（プール）。下からの円錐ビーム(drawWallBeam)の代わりに
   //  光マップへ丸いプールを描く＝写真が照らされて「通った所だけセットが浮かぶ」。プール半径は motifDiam を流用。
   front?: boolean
@@ -1650,7 +1651,8 @@ export class ImageLightEngine {
           { x: b.x - d / 2, y: b.y - d / 2 },
           { x: b.x + d / 2, y: b.y + d / 2 }
         ],
-        starSeed: b.motifSeed ?? 1
+        starSeed: b.motifSeed ?? 1,
+        starSize: b.motifStarSize // 未設定は genStars 側で既定3にフォールバック（旧公演もそのまま）
       } as unknown as Shape
       drawStarsLit(g, shape, rgb, 0, ms) // 白い星
       drawStarsLit(g, shape, rgb, 1, ms) // 青い星
@@ -2726,6 +2728,11 @@ export class ImageLightEngine {
   setMotifDiam(v: number): void {
     const n = Math.max(4, Math.round(v))
     this.targets().forEach((b) => { b.motifDiam = n })
+    this.bump()
+  }
+  setMotifStarSize(v: number): void {
+    const n = Math.max(0.5, Math.min(30, v)) // stars.ts の starsSize と同じ範囲
+    this.targets().forEach((b) => { b.motifStarSize = n })
     this.bump()
   }
   setMotifText(s: string): void {

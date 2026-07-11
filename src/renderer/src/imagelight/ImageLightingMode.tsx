@@ -2611,6 +2611,22 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       />
                       <div className="il-val big">{ref.motifDiam ?? 200}px</div>
                     </div>
+                    {ref.motif === 'stars' && (
+                      <>
+                        <div className="il-lbl" style={{ marginTop: 8 }}>星の粒の大きさ（STAR DOT）</div>
+                        <div className="il-frow">
+                          <input
+                            type="range"
+                            min={0.5}
+                            max={30}
+                            step={0.5}
+                            value={ref.motifStarSize ?? 3}
+                            onChange={(e) => engine.setMotifStarSize(+e.target.value)}
+                          />
+                          <div className="il-val big">{ref.motifStarSize ?? 3}</div>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
                 <button
@@ -3287,6 +3303,22 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   />
                   <div className="il-val big">{ref.motifDiam ?? 200}px</div>
                 </div>
+                {ref.motif === 'stars' && (
+                  <>
+                    <div className="il-lbl">星の粒の大きさ（STAR DOT）</div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={30}
+                        step={0.5}
+                        value={ref.motifStarSize ?? 3}
+                        onChange={(e) => engine.setMotifStarSize(+e.target.value)}
+                      />
+                      <div className="il-val big">{ref.motifStarSize ?? 3}</div>
+                    </div>
+                  </>
+                )}
                 {ref.motif === 'marquee' && (
                   <>
                     <div className="il-lbl">
