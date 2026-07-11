@@ -3908,8 +3908,10 @@ export const SFX_PARAMS: Record<'flame' | 'sparkler' | 'rain' | 'smoke', { core:
       sp('sfx.smoke.top', 'HEIGHT', 0.03, 0.6, 0.01, (e) => e.getLowSmokeParams().top, (e, v) => e.setLowSmokeParams({ top: v }))
     ],
     more: [
-      sp('sfx.smoke.billow', 'BILLOW', 0, 0.4, 0.01, (e) => e.getLowSmokeParams().billow, (e, v) => e.setLowSmokeParams({ billow: v })),
-      sp('sfx.smoke.speed', 'DRIFT', 0.2, 2.5, 0.05, (e) => e.getLowSmokeParams().speed, (e, v) => e.setLowSmokeParams({ speed: v }))
+      sp('sfx.smoke.billow', 'BILLOW', 0, 0.6, 0.01, (e) => e.getLowSmokeParams().billow, (e, v) => e.setLowSmokeParams({ billow: v })),
+      sp('sfx.smoke.speed', 'DRIFT', 0.2, 2.5, 0.05, (e) => e.getLowSmokeParams().speed, (e, v) => e.setLowSmokeParams({ speed: v })),
+      sp('sfx.smoke.spill', 'SPILL', 0, 1, 0.02, (e) => e.getLowSmokeParams().spill ?? 0.55, (e, v) => e.setLowSmokeParams({ spill: v })),
+      sp('sfx.smoke.tear', 'TEAR', 0, 1, 0.02, (e) => e.getLowSmokeParams().tear ?? 0.35, (e, v) => e.setLowSmokeParams({ tear: v }))
     ]
   }
 }
