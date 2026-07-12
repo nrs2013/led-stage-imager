@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ImageLightEngine, LW, LH, IW, IH, MAX_BEAMS, type FxKey, type FireKey } from './engine'
+import { ImageLightEngine, LW, LH, IW, IH, MAX_BEAMS, type Beam, type FxKey, type FireKey } from './engine'
 import { COLORS, hexToRgb, rgbToHex, sameRgb, type RGB3 } from './colors'
 import { FX_BUTTONS, FX_LABEL, FX_PARAMS } from './fxdefs'
 import { DECOR_NONDIR } from './decor-pattern'
@@ -418,10 +418,31 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const [backupOpen, setBackupOpen] = useState(false) // バックアップ一覧の開閉
   const [showRigSize, setShowRigSize] = useState(false) // 照明モード: サイズ(出口幅/広がり/伸び)の折りたたみ。普段は隠す
   const hudTabRef = useRef(hudTab)
+  // タブ連動の選択制限: そのタブのものしか触れない（SFX=炎/火花・DECOR=飾り・他=照明）。
+  // クリック/囲み選択・⌘A・ALL すべてここを通す。ref を読むので古いクロージャからでも常に最新。
+  const tabAllows = (b: Pick<Beam, 'motif'>): boolean => {
+    const t = hudTabRef.current
+    if (t === 'sfx') return b.motif === 'flame' || b.motif === 'sparkler'
+    if (t === 'decor') return !!b.motif && b.motif !== 'flame' && b.motif !== 'sparkler'
+    return !b.motif
+  }
+  /** そのタブで触れる灯体が全部選ばれているか（ALLボタンの点灯判定）。 */
+  const isTabAllSelected = (): boolean => {
+    const idx = engine.beams.map((b, i) => (tabAllows(b) ? i : -1)).filter((i) => i >= 0)
+    return idx.length > 0 && idx.every((i) => engine.isSelected(i))
+  }
   useEffect(() => {
     hudTabRef.current = hudTab
+    engine.filterSelection(tabAllows) // タブ切替: そのタブで触れないものは選択から外す
     forceRenderRef.current = true // タブ切替で特効マーカー表示が変わる→1回描き直す
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hudTab])
+  // undo復元・削除後の自動選択・公演復元＝プログラムからの選択にも同じタブ制限を効かせる（engine側の門番）
+  useEffect(() => {
+    engine.selGuard = tabAllows
+    return () => { engine.selGuard = null }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine])
   useEffect(() => {
     const api = getApi()
     if (!api?.getStatus) return // getStatus が無くてもデフォルト true のまま＝送る
@@ -783,11 +804,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         return
       }
       // BUILD: Delete / Backspace で選択中の灯体を削除（PLAY中・全選択(ALL)時は無効＝誤爆防止）
+      // 全選択の判定はタブ連動（isTabAllSelected）＝⌘A/ALLがタブ絞りになった今も「ALL→Deleteの一括消滅」を防ぐ
       if (
         (e.code === 'Delete' || e.code === 'Backspace') &&
         uiModeRef.current === 'build' &&
         engine.selected.length > 0 &&
-        !engine.isAllSelected()
+        !isTabAllSelected()
       ) {
         engine.removeSelected()
         e.preventDefault()
@@ -797,9 +819,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const tgt = e.target as HTMLElement | null
       const typing =
         !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)
-      // BUILD: ⌘A / Ctrl+A で灯体を全選択
+      // BUILD: ⌘A / Ctrl+A で全選択（タブ連動＝そのタブのものだけ。SFXタブなら炎/火花だけ）
       if (!typing && uiModeRef.current === 'build' && (e.metaKey || e.ctrlKey) && e.code === 'KeyA') {
-        engine.selectAll()
+        engine.selectWhere(tabAllows)
         e.preventDefault()
         return
       }
@@ -884,14 +906,11 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     const n = engine.beams.length
     if (n === 0) return
     const cur = engine.selected.length === 1 ? engine.selected[0] : -1
-    const next =
-      e.code === 'ArrowDown'
-        ? cur < 0
-          ? 0
-          : Math.min(n - 1, cur + 1)
-        : cur < 0
-          ? n - 1
-          : Math.max(0, cur - 1)
+    // タブ連動: 表に出ていない（そのタブで触れない）行は飛ばして次へ
+    const dir = e.code === 'ArrowDown' ? 1 : -1
+    let next = cur < 0 ? (dir === 1 ? 0 : n - 1) : cur + dir
+    while (next >= 0 && next < n && !tabAllows(engine.beams[next])) next += dir
+    if (next < 0 || next >= n) return
     engine.selectBeam(next)
     e.preventDefault()
     e.stopPropagation()
@@ -994,6 +1013,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     // 番号下のM/S（クリックでトグル）
     for (let i = beams.length - 1; i >= 0; i--) {
       const b = beams[i]
+      if (!tabAllows(b)) continue // タブ連動: M/Sバッジもそのタブのものしか触れない
       if (Math.abs(p.y - (b.y + 17)) < 11 / zf) {
         if (Math.abs(p.x - (b.x - 11)) < 10 / zf) {
           engine.selectBeam(i)
@@ -1028,6 +1048,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     let hit = -1
     for (let i = beams.length - 1; i >= 0; i--) {
       const b = beams[i]
+      if (!tabAllows(b)) continue // タブ連動: そのタブのものしか触れない
       if (engine.isSelected(i) && hitTest(b)) {
         hit = i
         break
@@ -1036,6 +1057,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     if (hit < 0)
       for (let i = beams.length - 1; i >= 0; i--) {
         const b = beams[i]
+        if (!tabAllows(b)) continue // タブ連動: そのタブのものしか触れない
         if (hitTest(b)) {
           hit = i
           break
@@ -1174,7 +1196,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const maxY = Math.max(rb.y0, rb.y1)
       if (maxX - minX > 6 || maxY - minY > 6) {
         const ids = engine.beams
-          .map((b, i) => (b.x >= minX && b.x <= maxX && b.y >= minY && b.y <= maxY ? i : -1))
+          .map((b, i) =>
+            tabAllows(b) && b.x >= minX && b.x <= maxX && b.y >= minY && b.y <= maxY ? i : -1
+          ) // タブ連動: 囲み選択もそのタブのものだけ
           .filter((i) => i >= 0)
         engine.setSelection(ids, rb.add)
       } else if (!rb.add) {
@@ -2039,6 +2063,17 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                         <PoseRow label="TILT" min={-180} max={180} value={engine.selectedSfxTilt}
                           fmt={(v) => v + '°'} onChange={(v) => engine.setTilt(v)} engine={engine} learnId="pose.tilt" />
                       )}
+                      <div className="il-lbl" style={{ marginTop: 8 }}>ALIGN（選んだ炎/火花をそろえる）</div>
+                      <div className="il2-act il-alignrow" style={{ flexWrap: 'nowrap', gap: 3 }}>
+                        <button className="il-mini il-icn" title="左ぞろえ" onClick={() => engine.alignLeft()}><AlignIcon kind="left" /></button>
+                        <button className="il-mini il-icn" title="左右中央でそろえる" onClick={() => engine.alignCenterX()}><AlignIcon kind="cx" /></button>
+                        <button className="il-mini il-icn" title="右ぞろえ" onClick={() => engine.alignRight()}><AlignIcon kind="right" /></button>
+                        <button className="il-mini il-icn" title="上ぞろえ" onClick={() => engine.alignTop()}><AlignIcon kind="top" /></button>
+                        <button className="il-mini il-icn" title="上下中央でそろえる" onClick={() => engine.alignMiddle()}><AlignIcon kind="my" /></button>
+                        <button className="il-mini il-icn" title="下ぞろえ" onClick={() => engine.alignBottom()}><AlignIcon kind="bottom" /></button>
+                        <button className="il-mini il-icn" title="横に等間隔（3つ以上選ぶ）" onClick={() => engine.distributeX()}><AlignIcon kind="dx" /></button>
+                        <button className="il-mini il-icn" title="縦に等間隔（3つ以上選ぶ）" onClick={() => engine.distributeY()}><AlignIcon kind="dy" /></button>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -3014,8 +3049,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 >
                   <div className="il-pshd">
                     <button
-                      className={'il-fxall' + (engine.isAllSelected() ? ' on' : '')}
-                      onClick={() => engine.selectAll()}
+                      className={'il-fxall' + (isTabAllSelected() ? ' on' : '')}
+                      onClick={() => engine.selectWhere(tabAllows)}
                       title="全灯まとめて"
                     >
                       <span className="nm">ALL</span>
@@ -3023,6 +3058,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <span className="il-pscol"><span>FID</span><span>Addr</span><span>Mode</span></span>
                   </div>
                   {engine.beams.map((b, i) => {
+                    if (!tabAllows(b)) return null // タブ連動: パッチ表もそのタブのものだけ（番号は元のまま飛ぶ）
                     const psSel = engine.isSelected(i)
                     const psClash = dmxClash.includes(i + 1)
                     return (
@@ -3156,13 +3192,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               ) : (
               <div className="il-strip">
                 <button
-                  className={'il-fxall' + (engine.isAllSelected() ? ' on' : '')}
-                  onClick={() => engine.selectAll()}
+                  className={'il-fxall' + (isTabAllSelected() ? ' on' : '')}
+                  onClick={() => engine.selectWhere(tabAllows)}
                   title="全灯まとめて"
                 >
                   <span className="nm">ALL</span>
                 </button>
-                {engine.beams.map((b, i) => (
+                {engine.beams.map((b, i) => tabAllows(b) && (
                   <button
                     key={i}
                     className={

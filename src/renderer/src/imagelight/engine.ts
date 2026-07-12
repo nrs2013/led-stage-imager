@@ -1155,7 +1155,8 @@ export class ImageLightEngine {
     this.beams = s.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined }))
     this.st = { ...s.st }
     this.fxp = JSON.parse(JSON.stringify(s.fxp))
-    this.selected = s.selected.filter((i) => i >= 0 && i < s.beams.length)
+    // タブ制限（selGuard）も通す＝⌘Zで「今のタブで触れないもの」が選択に復活しない
+    this.selected = s.selected.filter((i) => i >= 0 && i < s.beams.length && this.selAllowed(this.beams[i]))
     this.patterns = JSON.parse(JSON.stringify(s.patterns))
     this.userColors = s.userColors.map((c) => c.slice() as RGB3)
     this.chasePalette = s.chasePalette.map((c) => c.slice() as RGB3)
@@ -2333,6 +2334,26 @@ export class ImageLightEngine {
     this.selected = this.beams.map((_, i) => i)
     this.bump(false)
   }
+  /** 選択に入れてよい灯体の条件（UIがタブ制限を登録）。クリック等のUI操作だけでなく、
+   *  undo復元・削除後の自動選択・公演復元といった「プログラムからの選択」にも同じ制限を
+   *  効かせる門番。null=制限なし（従来どおり）。 */
+  selGuard: ((b: Beam) => boolean) | null = null
+  private selAllowed(b: Beam | undefined): boolean {
+    return !!b && (!this.selGuard || this.selGuard(b))
+  }
+  /** 条件に合う灯体だけ全選択（タブ連動のALL/⌘A用＝SFXタブなら炎/火花だけ等）。 */
+  selectWhere(pred: (b: Beam) => boolean): void {
+    this.selected = this.beams.map((b, i) => (pred(b) ? i : -1)).filter((i) => i >= 0)
+    this.bump(false)
+  }
+  /** 選択から条件に合わないものを外す（タブ切替時＝そのタブで触れないものを選択に残さない）。 */
+  filterSelection(pred: (b: Beam) => boolean): void {
+    const next = this.selected.filter((i) => this.beams[i] && pred(this.beams[i]))
+    if (next.length !== this.selected.length) {
+      this.selected = next
+      this.bump(false)
+    }
+  }
   /** Shift+クリック: 選択に足す/外す。 */
   toggleSelectBeam(i: number): void {
     if (i < 0 || i >= this.beams.length) return
@@ -2800,7 +2821,9 @@ export class ImageLightEngine {
     this.rigCustomized = true
     const drop = new Set(this.selected)
     this.beams = this.beams.filter((_, i) => !drop.has(i))
-    this.selected = this.beams.length ? [Math.min(this.selected[0], this.beams.length - 1)] : []
+    // 削除後の自動選択（隣）もタブ制限を通す＝SFXタブで炎を消した直後に照明が選ばれる事故を防ぐ
+    const ni = this.beams.length ? Math.min(this.selected[0], this.beams.length - 1) : -1
+    this.selected = ni >= 0 && this.selAllowed(this.beams[ni]) ? [ni] : []
     this.bump()
   }
   /** ⌘C: 選択中の灯体ぜんぶを内部クリップボードへ（仕込み・向き・色を丸ごと）。
@@ -4928,7 +4951,9 @@ export class ImageLightEngine {
     // 灯体があれば先頭を選択しておく（初期化直後と同じ＝selected=[0]）。空のままだと
     // 復元直後に GAUGE/COLOR/PTZ を動かしても targets() が空で何も効かず「直したのに効かない」
     // 見え方になるため、初期状態と挙動を揃える。
-    this.selected = this.beams.length ? [0] : []
+    // タブ制限を通る最初の灯体を選ぶ（先頭が炎/飾りだと「触れないものが選ばれて始まる」ため）
+    const fi = this.beams.findIndex((b) => this.selAllowed(b))
+    this.selected = fi >= 0 ? [fi] : []
     this.selectScene(this.scenes.length ? 0 : -1)
     this.bump()
     return true
