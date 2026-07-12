@@ -8,6 +8,7 @@
  */
 import { WHITE, COLORS, sameRgb, hexToRgb, type RGB3 } from './colors'
 import { fixtureColor, beamPose, shutterGate, shutterStable, channelCount } from '../dmx/channel-math'
+import { goboTex, type GoboKind } from './gobo'
 import { FlameFX, type FlameParams } from './flame'
 import { SparklerFX, type SparklerParams } from './sparkler'
 import { RainFX, type RainParams } from './rain'
@@ -158,6 +159,9 @@ export interface Beam {
   motifReverse?: boolean // マーキー逆方向チェイス
   motifSeed?: number // 星の散布レイアウトを固定（移動しても再シャッフルしない）
   motifStarSize?: number // 星1粒の大きさ（0.5〜30・stars専用・未設定は既定3）
+  gobo?: GoboKind // フロント灯体の光だまりに乗せる柄（未設定=柄なし）
+  goboSharp?: number // 柄のくっきり度 0..1（既定0.65・生成時焼き分け＝毎フレームblurしない）
+  goboSpd?: number // 柄の回転速さ 0..1（既定0.3）
   gaugeStable?: number // 卓駆動時の「ストロボの明滅を除いた明るさ」。シーン保存が暗相0を拾わないため
   // フロント灯体：前から当たる丸い光（プール）。下からの円錐ビーム(drawWallBeam)の代わりに
   //  光マップへ丸いプールを描く＝写真が照らされて「通った所だけセットが浮かぶ」。プール半径は motifDiam を流用。
@@ -1588,6 +1592,7 @@ export class ImageLightEngine {
     const p = 0.85 * (1 - edge) // ふちが効くほど中心の塗りプラトーが小さく＝外へなだらかに
     g.save()
     g.globalCompositeOperation = 'screen' // 加算でなく screen＝重なっても白飛びしすぎない（ビームと同じ流儀）
+    if (b.gobo) g.globalAlpha = 0.25 // 柄が主役＝素の光は薄い下地だけ（承認モックと同じ配分）
     const gr = g.createRadialGradient(cx, cy, 1, cx, cy, R)
     gr.addColorStop(0, rgs(col, 1))
     if (p > 0.001) gr.addColorStop(p, rgs(col, 1))
@@ -1597,6 +1602,61 @@ export class ImageLightEngine {
     g.beginPath()
     g.arc(cx, cy, R, 0, Math.PI * 2)
     g.fill()
+    g.restore()
+    if (b.gobo) this.drawGoboPool(g, b, col, cx, cy, R, p, ms)
+  }
+  /** ゴボ（光の柄）: 小さなスクラッチで「柄を回転→光色に染める→プールの丸い減衰でマスク」を
+   *  組み立ててから光マップへ screen で1回描く。全部 drawImage/fill だけ＝毎フレーム blur なし。 */
+  private goboScratch: HTMLCanvasElement | null = null
+  private drawGoboPool(
+    g: CanvasRenderingContext2D,
+    b: Beam,
+    col: number[],
+    cx: number,
+    cy: number,
+    R: number,
+    p: number,
+    ms: number
+  ): void {
+    if (!b.gobo) return
+    if (!this.goboScratch) {
+      this.goboScratch = document.createElement('canvas')
+      this.goboScratch.width = this.goboScratch.height = 512
+    }
+    const sc = this.goboScratch.getContext('2d')!
+    const sharp = b.goboSharp ?? 0.65
+    const ang = (ms / 1000) * (b.goboSpd ?? 0.3) * 0.7
+    sc.globalCompositeOperation = 'source-over'
+    sc.globalAlpha = 1
+    sc.clearRect(0, 0, 512, 512)
+    sc.save()
+    sc.translate(256, 256)
+    sc.rotate(ang)
+    sc.drawImage(goboTex(b.gobo, sharp, 0), -256, -256)
+    if (b.gobo === 'water') {
+      // 2枚目を逆回転で lighter 重ね＝ゆらめく干渉（承認モックと同じ）
+      sc.globalCompositeOperation = 'lighter'
+      sc.rotate(-ang * 2.7)
+      sc.drawImage(goboTex(b.gobo, sharp, 1), -256, -256)
+    }
+    sc.restore()
+    // 柄の白を光の色に差し替え（アルファは柄のまま）
+    sc.globalCompositeOperation = 'source-in'
+    sc.fillStyle = rgs(col, 1)
+    sc.fillRect(0, 0, 512, 512)
+    // プールと同じ丸い減衰でマスク＝黒地に柄が漏れない
+    sc.globalCompositeOperation = 'destination-in'
+    const m = sc.createRadialGradient(256, 256, 1, 256, 256, 256)
+    m.addColorStop(0, 'rgba(255,255,255,1)')
+    if (p > 0.001) m.addColorStop(p, 'rgba(255,255,255,1)')
+    m.addColorStop((p + 1) / 2, 'rgba(255,255,255,0.45)')
+    m.addColorStop(1, 'rgba(255,255,255,0)')
+    sc.fillStyle = m
+    sc.fillRect(0, 0, 512, 512)
+    sc.globalCompositeOperation = 'source-over'
+    g.save()
+    g.globalCompositeOperation = 'screen'
+    g.drawImage(this.goboScratch, cx - R, cy - R, R * 2, R * 2)
     g.restore()
   }
   /** セット接触面（根元）の焼け＝白飛びホットスポット＋出口の際のにじみ。screen 合成。 */
@@ -2784,6 +2844,23 @@ export class ImageLightEngine {
   setFrontEdge(v: number): void {
     const n = Math.max(0, Math.min(1, v))
     this.targets().forEach((b) => { if (b.front) b.frontEdge = n })
+    this.bump()
+  }
+  /** ゴボ（光の柄）: フロント灯体だけに効く。null=柄なし。 */
+  setGobo(kind: GoboKind | null): void {
+    this.targets().forEach((b) => {
+      if (b.front) b.gobo = kind ?? undefined
+    })
+    this.bump()
+  }
+  setGoboSharp(v: number): void {
+    const n = Math.max(0, Math.min(1, v))
+    this.targets().forEach((b) => { if (b.front) b.goboSharp = n })
+    this.bump()
+  }
+  setGoboSpd(v: number): void {
+    const n = Math.max(0, Math.min(1, v))
+    this.targets().forEach((b) => { if (b.front) b.goboSpd = n })
     this.bump()
   }
   /** リアルな発光画像を灯体として追加（明るさだけで光る・色は画像のまま）。 */

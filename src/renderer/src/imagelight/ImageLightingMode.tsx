@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { ImageLightEngine, LW, LH, IW, IH, MAX_BEAMS, type Beam, type FxKey, type FireKey } from './engine'
+import { GOBO_KINDS } from './gobo'
 import { COLORS, hexToRgb, rgbToHex, sameRgb, type RGB3 } from './colors'
 import { FX_BUTTONS, FX_LABEL, FX_PARAMS } from './fxdefs'
 import { DECOR_NONDIR } from './decor-pattern'
@@ -3615,6 +3616,54 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       />
                       <div className="il-val big">{Math.round(ref.frontAmp ?? 320)}px</div>
                     </div>
+                    <div className="il-lbl">ゴボ（光の柄）</div>
+                    <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                      <button
+                        className={'il-mini' + (!ref.gobo ? ' learnon' : '')}
+                        onClick={() => engine.setGobo(null)}
+                        title="柄なし（今までどおりの丸い光）"
+                      >
+                        なし
+                      </button>
+                      {GOBO_KINDS.map((gk) => (
+                        <button
+                          key={gk.kind}
+                          className={'il-mini' + (ref.gobo === gk.kind ? ' learnon' : '')}
+                          onClick={() => engine.setGobo(gk.kind)}
+                          title={gk.title}
+                        >
+                          {gk.label}
+                        </button>
+                      ))}
+                    </div>
+                    {ref.gobo && (
+                      <>
+                        <div className="il-lbl">柄のくっきり度</div>
+                        <div className="il-frow">
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={ref.goboSharp ?? 0.65}
+                            onChange={(e) => engine.setGoboSharp(+e.target.value)}
+                          />
+                          <div className="il-val big">{(ref.goboSharp ?? 0.65).toFixed(2)}</div>
+                        </div>
+                        <div className="il-lbl">柄の回転（速さ）</div>
+                        <div className="il-frow">
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={ref.goboSpd ?? 0.3}
+                            onChange={(e) => engine.setGoboSpd(+e.target.value)}
+                          />
+                          <div className="il-val big">{(ref.goboSpd ?? 0.3).toFixed(2)}</div>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </>
