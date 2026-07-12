@@ -237,6 +237,12 @@ export interface SfxScene {
 
 /** 発射ボタンの種類（CUEタブの大ボタン）。 */
 export type FireKey = 'flame' | 'sparkler' | 'smoke' | 'rain'
+/** GO進行の1ステップ: 呼ぶシーン(pattern)・撃つ特効シーン(sfx)・メモ。null=その要素は変えない。 */
+export interface CueStep {
+  pattern: number | null
+  sfx: number | null
+  memo: string
+}
 
 /** その特効マークが発射ゲート/シーン絞り込みを通れるか（純関数・テスト対象）。
  *  ゲートOFF=そのSFXは一切出ない（誤発防止）。armed指定中はID一致だけ通す（ID未割当は撃たない）。 */
@@ -308,6 +314,10 @@ interface Snap {
   sfxScenes: (SfxScene | null)[]
   sfxArmedIds: number[] | null
   activeSfxScene: number
+  // GO進行表（編集を⌘Zで戻せるように。実行位置 cuePos は本番の意思なので含めない）
+  cueSheet?: CueStep[]
+  goKeyMap?: { go?: string; back?: string }
+  goMidiMap?: { go?: number; back?: number }
 }
 
 /** 灯体を「左下を1番に、各段は左→右、下の段→上の段」の順で並べる順番 perm を返す
@@ -438,6 +448,12 @@ export interface ShowFile {
     /** 発射ボタンのキー/MIDI割当。 */
     fireKeyMap?: Partial<Record<FireKey, string>>
     fireMidiMap?: Partial<Record<FireKey, number>>
+  }
+  /** GO進行（キューシート）。無い古い保存＝空の進行表。 */
+  go?: {
+    steps?: CueStep[]
+    keys?: { go?: string; back?: string }
+    midi?: { go?: number; back?: number }
   }
   /** 見え方: 色ノリ（光の色を写真に乗せる量 0..0.4）。無い＝0（従来）。 */
   colorWash?: number
@@ -694,6 +710,7 @@ export class ImageLightEngine {
   setLearnFire(k: FireKey | null): void {
     this.learnFire = k
     if (k != null) {
+      this.learnGo = null
       this.learnSfxScene = null
       this.learnPattern = null
       this.learnScene = null
@@ -711,6 +728,7 @@ export class ImageLightEngine {
     this.learnSfxScene = i
     if (i != null) {
       this.learnFire = null
+      this.learnGo = null
       this.learnPattern = null
       this.learnScene = null
       this.learnFx = null
@@ -748,6 +766,100 @@ export class ImageLightEngine {
     if (code != null) s.key = code
     if (midi != null) s.midi = midi
     this.learnSfxScene = null
+    this.bump()
+  }
+
+  // ---- GO進行（キューシート）: 曲順に「シーン＋特効シーン」を並べ、本番はGOを押すだけで次へ ----
+  cueSheet: CueStep[] = []
+  cuePos = -1 // 実行位置（-1=開始前。保存しない＝公演を開いたら先頭前から）
+  goKeyMap: { go?: string; back?: string } = {}
+  goMidiMap: { go?: number; back?: number } = {}
+  learnGo: 'go' | 'back' | null = null
+  setLearnGo(which: 'go' | 'back' | null): void {
+    this.learnGo = which
+    if (which != null) {
+      this.learnFire = null
+      this.learnSfxScene = null
+      this.learnPattern = null
+      this.learnScene = null
+      this.learnFx = null
+      this.learnParam = null
+      this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
+      this.masterLearn = false
+      this.initMidi()
+    }
+    this.bump(false)
+  }
+  assignGoShortcut(which: 'go' | 'back', code: string | null, midi: number | null): void {
+    if (code != null) this.clearKeyEverywhere(code)
+    if (midi != null) this.clearMidiNoteEverywhere(midi)
+    if (code != null) this.goKeyMap[which] = code
+    if (midi != null) this.goMidiMap[which] = midi
+    this.learnGo = null
+    this.bump()
+  }
+  clearGoShortcut(which: 'go' | 'back'): void {
+    delete this.goKeyMap[which]
+    delete this.goMidiMap[which]
+    this.bump()
+  }
+  /** 次のステップへ進んで適用。末尾で止まる（ループしない）。 */
+  goNext(): void {
+    if (!this.cueSheet.length || this.cuePos >= this.cueSheet.length - 1) return
+    this.cuePos++
+    this.applyCueStep(this.cuePos)
+  }
+  /** 1つ戻って適用（押し間違い用）。先頭より前へは行かない。 */
+  goBack(): void {
+    if (!this.cueSheet.length || this.cuePos <= 0) return
+    this.cuePos--
+    this.applyCueStep(this.cuePos)
+  }
+  /** 進行位置を先頭前へ（明かりは触らない＝本番前のリセット）。 */
+  goReset(): void {
+    this.cuePos = -1
+    this.bump(false)
+  }
+  private applyCueStep(i: number): void {
+    const st = this.cueSheet[i]
+    if (!st) return
+    if (st.pattern != null && this.patterns[st.pattern]) this.applyPattern(st.pattern)
+    if (st.sfx != null && this.sfxScenes[st.sfx]) this.applySfxScene(st.sfx)
+    this.bump(false)
+  }
+  addCueStep(): void {
+    if (this.cueSheet.length >= 200) return
+    this.pushHistory()
+    this.cueSheet.push({ pattern: null, sfx: null, memo: '' })
+    this.bump()
+  }
+  removeCueStep(i: number): void {
+    if (!this.cueSheet[i]) return
+    this.pushHistory()
+    this.cueSheet.splice(i, 1)
+    // 実行位置より前（または実行中の行）を消したら位置も詰める＝次のGOが1行飛ぶ/戻る事故を防ぐ
+    if (i <= this.cuePos) this.cuePos--
+    this.bump()
+  }
+  moveCueStep(i: number, dir: -1 | 1): void {
+    const j = i + dir
+    if (!this.cueSheet[i] || !this.cueSheet[j]) return
+    this.pushHistory()
+    const t = this.cueSheet[i]
+    this.cueSheet[i] = this.cueSheet[j]
+    this.cueSheet[j] = t
+    // 実行位置は「実行した行」に追従＝並べ替えてもハイライトと次のGOがズレない
+    if (this.cuePos === i) this.cuePos = j
+    else if (this.cuePos === j) this.cuePos = i
+    this.bump()
+  }
+  updateCueStep(i: number, patch: Partial<CueStep>): void {
+    const st = this.cueSheet[i]
+    if (!st) return
+    this.pushHistory()
+    Object.assign(st, patch)
     this.bump()
   }
 
@@ -1144,7 +1256,10 @@ export class ImageLightEngine {
       sfxChaseMs: this.sfxChaseMs,
       sfxScenes: this.sfxScenes.map((sc) => (sc ? { ...sc, ids: sc.ids.slice() } : null)),
       sfxArmedIds: this.sfxArmedIds ? [...this.sfxArmedIds] : null,
-      activeSfxScene: this.activeSfxScene
+      activeSfxScene: this.activeSfxScene,
+      cueSheet: this.cueSheet.map((st) => ({ ...st })),
+      goKeyMap: { ...this.goKeyMap },
+      goMidiMap: { ...this.goMidiMap }
     }
   }
   private restore(s: Snap): void {
@@ -1181,6 +1296,13 @@ export class ImageLightEngine {
     this.sfxArmedIds = s.sfxArmedIds ? new Set(s.sfxArmedIds) : null
     this.activeSfxScene =
       s.activeSfxScene >= 0 && this.sfxScenes[s.activeSfxScene] ? s.activeSfxScene : -1
+    // GO進行表（古いSnapには無い＝現状維持）。実行位置はクランプだけ（本番の意思なので巻き戻さない）
+    if (s.cueSheet) {
+      this.cueSheet = s.cueSheet.map((st) => ({ ...st }))
+      this.goKeyMap = { ...(s.goKeyMap ?? {}) }
+      this.goMidiMap = { ...(s.goMidiMap ?? {}) }
+      if (this.cuePos >= this.cueSheet.length) this.cuePos = this.cueSheet.length - 1
+    }
     if (this.learnSfxScene != null && !this.sfxScenes[this.learnSfxScene]) this.learnSfxScene = null
     const ai = s.activeScene >= 0 && s.activeScene < this.scenes.length ? s.activeScene : -1
     // 動画: 表示中だけ再生・他は停止
@@ -2976,6 +3098,7 @@ export class ImageLightEngine {
     this.sfxScenes.forEach((s) => {
       if (s && s.key === code) s.key = null
     })
+    for (const k of ['go', 'back'] as const) if (this.goKeyMap[k] === code) delete this.goKeyMap[k]
   }
   /** 同じ MIDI ノートを持つ他カテゴリ(strobe/FX/color/pattern/scene)から外す＝「1ノート1役」。 */
   private clearMidiNoteEverywhere(note: number): void {
@@ -2994,6 +3117,7 @@ export class ImageLightEngine {
     this.sfxScenes.forEach((s) => {
       if (s && s.midi === note) s.midi = null
     })
+    for (const k of ['go', 'back'] as const) if (this.goMidiMap[k] === note) delete this.goMidiMap[k]
   }
   /** 本番シーン切替の方式（cut/fade）と時間(ms)を設定。 */
   setSceneFadeMode(mode: 'cut' | 'fade'): void {
@@ -3797,6 +3921,9 @@ export class ImageLightEngine {
     if (n <= 9 || this.patterns[n - 1] !== null) return
     this.pushHistory()
     this.patterns.pop()
+    // GO進行表が消えた枠を指したままだと「GOを押しても何も起きない行」が残る＝nullへ落とす
+    for (const st of this.cueSheet)
+      if (st.pattern != null && st.pattern >= this.patterns.length) st.pattern = null
     this.bump()
   }
   /** PLAY/BUILD どちらからでも: armed中なら保存、そうでなければ呼び出し。 */
@@ -3950,6 +4077,7 @@ export class ImageLightEngine {
       this.learnStrobe = false
       this.learnMotifChase = false
       this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
       this.learnSfxScene = null
     }
     this.bump(false)
@@ -3988,6 +4116,7 @@ export class ImageLightEngine {
       this.learnStrobe = false
       this.learnMotifChase = false
       this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
       this.learnSfxScene = null
     }
     this.bump(false)
@@ -4455,6 +4584,7 @@ export class ImageLightEngine {
       this.learnStrobe = false
       this.learnMotifChase = false
       this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
       this.learnSfxScene = null
       this.initMidi()
     }
@@ -4470,6 +4600,7 @@ export class ImageLightEngine {
       this.learnStrobe = false
       this.learnMotifChase = false
       this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
       this.learnSfxScene = null
       this.initMidi()
     }
@@ -4487,6 +4618,7 @@ export class ImageLightEngine {
       this.learnStrobe = false
       this.learnMotifChase = false
       this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
       this.learnSfxScene = null
       this.initMidi()
     }
@@ -4533,6 +4665,7 @@ export class ImageLightEngine {
       this.learnScene = null
       this.learnMotifChase = false
       this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
       this.learnSfxScene = null
     }
     this.bump(false)
@@ -4553,6 +4686,7 @@ export class ImageLightEngine {
       this.learnScene = null
       this.learnStrobe = false
       this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
       this.learnSfxScene = null
     }
     this.bump(false)
@@ -4574,6 +4708,7 @@ export class ImageLightEngine {
       // ノートON：LEARN中なら割当、そうでなければ割当済みを発火
       if (this.learnFx != null) this.assignFxShortcut(this.learnFx, null, note)
       else if (this.learnFire != null) this.assignFireShortcut(this.learnFire, null, note)
+      else if (this.learnGo != null) this.assignGoShortcut(this.learnGo, null, note)
       else if (this.learnSfxScene != null) this.assignSfxSceneShortcut(this.learnSfxScene, null, note)
       else if (this.learnPattern != null) this.assignShortcut(this.learnPattern, null, note)
       else if (this.learnScene != null) this.assignSceneMidi(this.learnScene, note)
@@ -4599,6 +4734,8 @@ export class ImageLightEngine {
         if (fk) this.fxToggle(fk)
         else if (ck) this.setColor(hexToRgb(ck))
         else if (fireK) this.toggleFire(fireK)
+        else if (this.goMidiMap.go === note) this.goNext()
+        else if (this.goMidiMap.back === note) this.goBack()
         else if (sxi >= 0) this.applySfxScene(sxi)
         else {
           const pi = this.patterns.findIndex((p) => p && p.midi === note)
@@ -4823,6 +4960,11 @@ export class ImageLightEngine {
         activeScene: this.activeSfxScene,
         fireKeyMap: { ...this.fireKeyMap },
         fireMidiMap: { ...this.fireMidiMap }
+      },
+      go: {
+        steps: this.cueSheet.map((st) => ({ ...st })),
+        keys: { ...this.goKeyMap },
+        midi: { ...this.goMidiMap }
       }
     }
     return { json: JSON.stringify(show, null, 2), media }
@@ -4987,6 +5129,28 @@ export class ImageLightEngine {
       this.activeSfxScene = -1
       this.fireKeyMap = {}
       this.fireMidiMap = {}
+    }
+    // GO進行表を復元（無い古い保存＝空へ）。実行位置は必ず先頭前から＝前のショーの位置を引きずらない。
+    {
+      const go = (show as { go?: { steps?: CueStep[]; keys?: { go?: string; back?: string }; midi?: { go?: number; back?: number } } }).go
+      this.cueSheet = Array.isArray(go?.steps)
+        ? go.steps.map((st) => ({
+            // 範囲外（壊れた保存・枠を減らした後）はnull＝「変えない」へ落とす
+            pattern:
+              typeof st?.pattern === 'number' && st.pattern >= 0 && st.pattern < this.patterns.length
+                ? st.pattern
+                : null,
+            sfx:
+              typeof st?.sfx === 'number' && st.sfx >= 0 && st.sfx < this.sfxScenes.length
+                ? st.sfx
+                : null,
+            memo: typeof st?.memo === 'string' ? st.memo : ''
+          }))
+        : []
+      this.goKeyMap = { ...(go?.keys ?? {}) }
+      this.goMidiMap = { ...(go?.midi ?? {}) }
+      this.cuePos = -1
+      this.learnGo = null
     }
     // 見え方（色ノリ・ベース明るさ）を復元。無い古いファイルは 0＝従来の見た目。
     this.colorWash = typeof show.colorWash === 'number' ? Math.max(0, Math.min(0.4, show.colorWash)) : 0

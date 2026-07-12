@@ -441,6 +441,16 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     if (t === 'decor') return !!b.motif && b.motif !== 'flame' && b.motif !== 'sparkler'
     return !b.motif
   }
+  /** GOボタンに出す「次のステップ」の説明（位置＋メモ＋CUE/SFX番号）。 */
+  const goNextLabel = (): string => {
+    const n = engine.cueSheet[engine.cuePos + 1]
+    if (!n) return 'おわり（RESETで先頭へ）'
+    const parts: string[] = []
+    if (n.memo) parts.push(n.memo)
+    if (n.pattern != null) parts.push('CUE' + (n.pattern + 1))
+    if (n.sfx != null) parts.push('SFX' + (n.sfx + 1))
+    return `${engine.cuePos + 2}/${engine.cueSheet.length}｜${parts.join('・') || '（空の行）'}`
+  }
   /** そのタブで触れる灯体が全部選ばれているか（ALLボタンの点灯判定）。 */
   const isTabAllSelected = (): boolean => {
     const idx = engine.beams.map((b, i) => (tabAllows(b) ? i : -1)).filter((i) => i >= 0)
@@ -770,6 +780,19 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
+      // GO/BACK LEARN 待機中：Esc で中止、それ以外のキーで割当
+      if (engine.learnGo != null) {
+        if (e.key === 'Escape') {
+          engine.setLearnGo(null)
+          e.preventDefault()
+          return
+        }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignGoShortcut(engine.learnGo, lc, null)
+        e.preventDefault()
+        return
+      }
       // 発射ボタン LEARN 待機中：Esc で中止、それ以外のキーで割当
       if (engine.learnFire != null) {
         if (e.key === 'Escape') {
@@ -891,6 +914,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const sxi = code ? engine.sfxScenes.findIndex((s) => s && s.key === code) : -1
       if (sxi >= 0) {
         engine.applySfxScene(sxi)
+        e.preventDefault()
+        return
+      }
+      // 割り当て済みのキーで GO / BACK（押しっぱなしのリピートは無視＝連打誤進行防止）
+      const goW = code ? (['go', 'back'] as const).find((w) => engine.goKeyMap[w] === code) : undefined
+      if (goW) {
+        if (!e.repeat) (goW === 'go' ? engine.goNext() : engine.goBack())
         e.preventDefault()
         return
       }
@@ -1817,6 +1847,17 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             )}
               </>
             )}
+            {!lightingOnly && engine.cueSheet.length > 0 && (
+              <button
+                className="il-livebtn big"
+                style={{ width: '100%', minHeight: 64, marginBottom: 6 }}
+                disabled={engine.cuePos >= engine.cueSheet.length - 1}
+                onClick={() => engine.goNext()}
+                title="次のステップへ（進行表の順に明かりと特効を呼ぶ）"
+              >
+                GO　{goNextLabel()}
+              </button>
+            )}
             {!lightingOnly && (
             <div className="il-playpats">
               {engine.patterns.map((p, i) => (
@@ -2190,6 +2231,95 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     {editLock ? 'LOCKED' : 'LOCK'}
                   </button>
                 </div>
+                {/* GO進行: 曲順の進行表に沿ってワンボタンで次へ（編集は下の表・実行はGO/BACK） */}
+                <div className="il-lbl">GO進行（曲順に並べて、本番はGOだけ）</div>
+                <div className="il2-act" style={{ gap: 4, alignItems: 'stretch' }}>
+                  <button
+                    className={'il-livebtn big' + (engine.cueSheet.length && engine.cuePos < engine.cueSheet.length - 1 ? '' : ' dim')}
+                    style={{ flex: '1 1 auto', minHeight: 52 }}
+                    disabled={!engine.cueSheet.length || engine.cuePos >= engine.cueSheet.length - 1}
+                    onClick={() => engine.goNext()}
+                    title="次のステップへ（進行表の順に明かりと特効を呼ぶ）"
+                  >
+                    GO　{engine.cueSheet.length ? goNextLabel() : '（進行表が空＝下の＋で作る）'}
+                  </button>
+                  <button className="il-mini" disabled={engine.cuePos <= 0} onClick={() => engine.goBack()} title="1つ戻って適用（押し間違い用）">
+                    BACK
+                  </button>
+                  <button
+                    className={'il-ic' + (engine.learnGo === 'back' ? ' learnon' : (engine.goKeyMap.back || engine.goMidiMap.back != null) ? ' assigned' : '')}
+                    disabled={editLock}
+                    title={engine.learnGo === 'back' ? '割当待ち（キーかMIDIを押す・もう一度で中止）' : 'LEARN — BACKを押すキー/MIDIを覚えさせる'}
+                    onClick={() => engine.setLearnGo(engine.learnGo === 'back' ? null : 'back')}
+                  >
+                    {engine.learnGo === 'back'
+                      ? '◎'
+                      : engine.goKeyMap.back || engine.goMidiMap.back != null
+                        ? [codeLabel(engine.goKeyMap.back ?? null), engine.goMidiMap.back != null ? 'N' + engine.goMidiMap.back : ''].filter(Boolean).join(' ')
+                        : '○'}
+                  </button>
+                  <button className="il-mini" disabled={engine.cuePos < 0} onClick={() => engine.goReset()} title="進行位置を先頭前へ（明かりは変えない）">
+                    RESET
+                  </button>
+                  <button
+                    className={'il-ic' + (engine.learnGo === 'go' ? ' learnon' : (engine.goKeyMap.go || engine.goMidiMap.go != null) ? ' assigned' : '')}
+                    disabled={editLock}
+                    title={engine.learnGo === 'go' ? '割当待ち（キーかMIDIを押す・もう一度で中止）' : 'LEARN — GOを押すキー/MIDIを覚えさせる'}
+                    onClick={() => engine.setLearnGo(engine.learnGo === 'go' ? null : 'go')}
+                  >
+                    {engine.learnGo === 'go'
+                      ? '◎'
+                      : engine.goKeyMap.go || engine.goMidiMap.go != null
+                        ? [codeLabel(engine.goKeyMap.go ?? null), engine.goMidiMap.go != null ? 'N' + engine.goMidiMap.go : ''].filter(Boolean).join(' ')
+                        : '○'}
+                  </button>
+                </div>
+                <div className="il-buildpats" style={{ marginTop: 4 }}>
+                  {engine.cueSheet.map((st, i) => (
+                    <div key={i} className={'il-patrow' + (engine.cuePos === i ? ' on' : '')}>
+                      <span className="pn">{i + 1}</span>
+                      <select
+                        disabled={editLock}
+                        value={st.pattern ?? -1}
+                        onChange={(e) => engine.updateCueStep(i, { pattern: +e.target.value < 0 ? null : +e.target.value })}
+                        title="このステップで呼ぶ明かり（シーン）"
+                        style={{ maxWidth: 88 }}
+                      >
+                        <option value={-1}>明かり—</option>
+                        {engine.patterns.map((p, pi) => (
+                          <option key={pi} value={pi}>{'CUE' + (pi + 1) + (p?.name ? ' ' + p.name : '')}</option>
+                        ))}
+                      </select>
+                      <select
+                        disabled={editLock}
+                        value={st.sfx ?? -1}
+                        onChange={(e) => engine.updateCueStep(i, { sfx: +e.target.value < 0 ? null : +e.target.value })}
+                        title="このステップで撃つ特効シーン"
+                        style={{ maxWidth: 78 }}
+                      >
+                        <option value={-1}>特効—</option>
+                        {engine.sfxScenes.map((s, si) => (
+                          <option key={si} value={si}>{'SFX' + (si + 1) + (s?.name ? ' ' + s.name : '')}</option>
+                        ))}
+                      </select>
+                      <input
+                        key={i + ':' + st.memo}
+                        disabled={editLock}
+                        defaultValue={st.memo}
+                        placeholder="メモ（曲名など）"
+                        style={{ flex: 1, minWidth: 40 }}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        onBlur={(e) => { if (e.target.value !== st.memo) engine.updateCueStep(i, { memo: e.target.value }) }}
+                      />
+                      <button className="il-ic" disabled={editLock || i === 0} title="上へ" onClick={() => engine.moveCueStep(i, -1)}>↑</button>
+                      <button className="il-ic" disabled={editLock || i === engine.cueSheet.length - 1} title="下へ" onClick={() => engine.moveCueStep(i, 1)}>↓</button>
+                      <button className="il-ic" disabled={editLock} title="この行を消す（⌘Zで戻せる）" onClick={() => engine.removeCueStep(i)}>×</button>
+                    </div>
+                  ))}
+                </div>
+                <button className="il-mini" disabled={editLock} style={{ marginTop: 4 }} onClick={() => engine.addCueStep()}>
+                  ＋ 行を追加
+                </button>
                 <div className="il-playpats">
                   {engine.patterns.map((p, i) => (
                     <button
