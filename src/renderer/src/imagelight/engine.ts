@@ -7,7 +7,7 @@
  * （screen混色・アルベド乗算・色比保持トーン・パン非対称・Smoke連動）。
  */
 import { WHITE, COLORS, sameRgb, hexToRgb, type RGB3 } from './colors'
-import { fixtureColor, beamPose, shutterGate, channelCount } from '../dmx/channel-math'
+import { fixtureColor, beamPose, shutterGate, shutterStable, channelCount } from '../dmx/channel-math'
 import { FlameFX, type FlameParams } from './flame'
 import { SparklerFX, type SparklerParams } from './sparkler'
 import { RainFX, type RainParams } from './rain'
@@ -158,6 +158,7 @@ export interface Beam {
   motifReverse?: boolean // マーキー逆方向チェイス
   motifSeed?: number // 星の散布レイアウトを固定（移動しても再シャッフルしない）
   motifStarSize?: number // 星1粒の大きさ（0.5〜30・stars専用・未設定は既定3）
+  gaugeStable?: number // 卓駆動時の「ストロボの明滅を除いた明るさ」。シーン保存が暗相0を拾わないため
   // フロント灯体：前から当たる丸い光（プール）。下からの円錐ビーム(drawWallBeam)の代わりに
   //  光マップへ丸いプールを描く＝写真が照らされて「通った所だけセットが浮かぶ」。プール半径は motifDiam を流用。
   front?: boolean
@@ -1716,6 +1717,9 @@ export class ImageLightEngine {
       }
       b.color = hue
       b.gauge = m * gate
+      // シーン保存用: ストロボの明滅(gate 0/1)を除いた明るさ。保存が点滅の暗相の瞬間を拾って
+      // gauge=0 で保存される運まかせを防ぐ（閉0〜7は0のまま＝卓が消している意思は保存も暗）。
+      b.gaugeStable = m * (p.mode === 'beam8' || p.mode === 'beam9' ? shutterStable(fx, data) : 1)
     }
   }
 
@@ -3738,7 +3742,8 @@ export class ImageLightEngine {
       },
       fxp: JSON.parse(JSON.stringify(this.fxp)),
       lights: this.beams.map((b) => ({
-        gauge: b.gauge,
+        // 卓駆動中はストロボの明滅を除いた明るさで保存（暗相の瞬間に押しても0にならない）
+        gauge: b.dmx && this.dmxFrame ? (b.gaugeStable ?? b.gauge) : b.gauge,
         color: b.color.slice() as RGB3,
         pan: b.pan,
         tilt: b.tilt,
@@ -4300,19 +4305,73 @@ export class ImageLightEngine {
     this.panicSeq++
     this.panicGain = 1
     this.panicActive = false
+    this.preBlackout = null // CUE適用/全点灯で明かりが戻った＝暗転トグルの復帰先は破棄
     this.snapSceneFade() // フェード中の割込み＝目標へ即ジャンプで完了（中途半端な明かりで残さない）
   }
+  /** 暗転トグルの復帰先（暗転直前の look）。blackout で退避・wake/panicFade/復帰で破棄。 */
+  private preBlackout: Look | null = null
+  private preBlackoutPattern = -1
+  /** 暗転中（トグルで戻れる状態）か。暗転ボタンの点灯表示用。 */
+  get blackedOut(): boolean {
+    return this.panicGain === 0 && this.preBlackout != null
+  }
+  /** キー'0'/暗転ボタン: 暗転⇄直前の明かりへ復帰のトグル。 */
+  blackoutToggle(): void {
+    if (this.panicGain === 0 && this.preBlackout) this.restoreFromBlackout()
+    else this.blackout()
+  }
   blackout(): void {
+    // フェード中の暗転＝先に目標へ即ジャンプ。これを退避より先にやらないと、フェード途中の
+    // 中間ブレンドの明かりが復帰先として保存される（戻した時にどのシーンでもない絵になる）。
+    this.snapSceneFade()
+    // 暗転直前の look と表示中CUEを退避（stopAllFx の前）＝もう一度 0 で元の明かりへ戻れる。
+    this.preBlackout = this.currentLook()
+    this.preBlackoutPattern = this.activePattern
     // 暗転の直前の look（FX・明るさ）を履歴へ積む → ⌘Z で直前へ戻せる。stopAllFx は
     // 内部呼びなので二重に積まない（pushHist=false）。
     this.pushHistory()
     this.panicSeq++
     this.panicGain = 0
     this.panicActive = false
-    this.snapSceneFade() // フェード中の暗転＝目標へ即ジャンプしてから真っ黒（戻した時に正しいシーンの明かり）
     this.stopAllFx(false)
     this.activePattern = -1
     this.bump(false)
+  }
+  /** 暗転から直前の明かりへ復帰。FX・表示中CUEも戻し、panicGain を 0→1 へフェード
+   *  （カット設定なら即）。CUEのフェード時間(sceneFadeMs)を流用。 */
+  private restoreFromBlackout(): void {
+    const L = this.preBlackout
+    this.preBlackout = null
+    if (!L) return
+    this.pushHistory()
+    this.applyLook(L) // FX・チェイスも復活（画面は panicGain=0 のままなのでまだ黒）
+    this.activePattern = this.preBlackoutPattern
+    this.preBlackoutPattern = -1
+    if (this.sceneFadeMode === 'cut') {
+      this.panicSeq++
+      this.panicGain = 1
+      this.panicActive = false
+      this.bump(false)
+      return
+    }
+    const my = ++this.panicSeq
+    const t1 = performance.now()
+    const dur = Math.max(120, this.sceneFadeMs)
+    this.panicActive = true // 描画ループに「フェード中＝描き続けて」と知らせる
+    const step = (now: number): void => {
+      if (this.panicSeq !== my) {
+        this.panicActive = false
+        return
+      }
+      const k = Math.min(1, (now - t1) / dur)
+      this.panicGain = k
+      if (k < 1) requestAnimationFrame(step)
+      else {
+        this.panicActive = false
+        this.bump(false)
+      }
+    }
+    requestAnimationFrame(step)
   }
   fullOn(): void {
     this.pushHistory()
@@ -4324,6 +4383,7 @@ export class ImageLightEngine {
   panicFade(): void {
     // パニック開始時に直前の look（FX・明るさ）を履歴へ積む → フェード完了後でも ⌘Z で一発で
     // 直前へ戻せる。完了時の stopAllFx は内部呼びなので二重に積まない（pushHist=false）。
+    this.preBlackout = null // パニックは暗転トグルと別系統＝古い退避で誤復帰しない
     this.pushHistory()
     const my = ++this.panicSeq
     const t1 = performance.now()
@@ -4954,6 +5014,10 @@ export class ImageLightEngine {
     // タブ制限を通る最初の灯体を選ぶ（先頭が炎/飾りだと「触れないものが選ばれて始まる」ため）
     const fi = this.beams.findIndex((b) => this.selAllowed(b))
     this.selected = fi >= 0 ? [fi] : []
+    // 暗転トグルの復帰先は破棄（前のショーの look を新しいショーへ誤適用しない）。
+    // 暗転状態(panicGain)自体は維持＝暗転したまま読み込んでも画面は暗いまま（本番の意思を尊重）。
+    this.preBlackout = null
+    this.preBlackoutPattern = -1
     this.selectScene(this.scenes.length ? 0 : -1)
     this.bump()
     return true

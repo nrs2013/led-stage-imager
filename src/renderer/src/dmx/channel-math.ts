@@ -139,3 +139,11 @@ export function shutterGate(fx: Fixture, data: Uint8Array, nowMs?: number): numb
   const hz = 1 + t * 14 // 8=約1Hz 〜 245=約15Hz
   return ((nowMs * hz) / 1000) % 1 < 0.5 ? 1 : 0
 }
+
+/** Shutter の「安定した開度」: ストロボ(8〜245)は点滅の瞬間ではなく「点いている扱い」=1。
+ *  閉(0〜7)=0・開(246〜255)=1。シーン保存が卓ストロボの暗相(0)を運まかせで拾うのを防ぐ用。 */
+export function shutterStable(fx: Fixture, data: Uint8Array): number {
+  if (fx.mode !== 'beam8' && fx.mode !== 'beam9') return 1
+  const v = data[fx.start - 1 + 3] ?? 0
+  return v <= 7 ? 0 : 1
+}

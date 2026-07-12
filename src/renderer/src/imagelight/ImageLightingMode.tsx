@@ -303,6 +303,21 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const [renaming, setRenaming] = useState<{ i: number; value: string } | null>(null)
   // SFXシーン（CUEタブの特効の段）: 保存待ち＋名前変更中
   const [sfxArm, setSfxArm] = useState(false)
+  // 本番中の上書きロック: ONの間はシーン/SFXシーンの保存・名前変更・削除・LEARNを封じる（呼び出しと発射はそのまま）。
+  // 保存しない＝再起動で解除。ONにした瞬間、進行中の保存アームやLEARN待ちも解除する。
+  const [editLock, setEditLock] = useState(false)
+  const toggleEditLock = (): void => {
+    const next = !editLock
+    setEditLock(next)
+    if (next) {
+      if (engine.armedSave) engine.toggleArmSave()
+      setSfxArm(false)
+      setRenamingSfx(null)
+      setRenaming(null)
+      engine.setLearnPattern(null)
+      engine.setLearnSfxScene(null)
+    }
+  }
   const [renamingSfx, setRenamingSfx] = useState<{ i: number; value: string } | null>(null)
 
   // ---- 表示ズーム（画面の見た目だけ拡大・縮小。Syphon/NDI出力には一切影響しない）
@@ -880,7 +895,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         return
       }
       if (e.key === 'Escape') engine.panicFade()
-      else if (e.code === 'Digit0' || e.code === 'Numpad0') engine.blackout()
+      // e.repeat 除外＝押しっぱなしのOSリピートで暗転⇄復帰が高速反転（ストロボ化）するのを防ぐ
+      else if ((e.code === 'Digit0' || e.code === 'Numpad0') && !e.repeat) engine.blackoutToggle()
       else if (e.code === 'KeyF') engine.fullOn()
       else if (e.code === 'ArrowUp') {
         engine.setMaster(engine.st.master + 0.05)
@@ -1715,8 +1731,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             </div>
             <div className="il-livebtns">
               <button
-                className="il-livebtn blackout"
-                onClick={() => engine.blackout()}
+                className={'il-livebtn blackout' + (engine.blackedOut ? ' on' : '')}
+                onClick={() => engine.blackoutToggle()}
                 title="即座に暗転（キー: 0）"
               >
                 暗転
@@ -2165,6 +2181,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 <div className="il2-eb">
                   <span className="il2-kind">本番</span>
                   <b>CUE</b>
+                  <button
+                    className={'il-mini' + (editLock ? ' learnon' : '')}
+                    style={{ marginLeft: 'auto' }}
+                    title="本番ロック — ONの間は保存・名前変更・削除・LEARNを押せない（シーン呼び出しと発射はそのまま）"
+                    onClick={toggleEditLock}
+                  >
+                    {editLock ? 'LOCKED' : 'LOCK'}
+                  </button>
                 </div>
                 <div className="il-playpats">
                   {engine.patterns.map((p, i) => (
@@ -2295,6 +2319,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <button
                       className={'il-mini' + (sfxArm ? ' learnon' : '')}
                       style={{ width: '100%', textAlign: 'center', marginBottom: 6 }}
+                      disabled={editLock}
                       onClick={() => setSfxArm(!sfxArm)}
                       title="撃ちたい炎/火花マークをキャンバスで選んでから押し、保存する番号をクリック（何も選んでいなければ置いてある全部を記憶）"
                     >
@@ -2343,7 +2368,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                             style={{ cursor: s ? 'text' : 'default' }}
                             onDoubleClick={(e) => {
                               e.stopPropagation()
-                              if (s) setRenamingSfx({ i, value: s.name })
+                              if (s && !editLock) setRenamingSfx({ i, value: s.name })
                             }}
                           >
                             {s ? s.name + '（' + s.ids.length + '発）' : '（空き）'}
@@ -2361,6 +2386,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                             ? '割当待ち（キーかMIDIを押す・もう一度で中止）'
                             : 'LEARN — このシーンを呼ぶキー/MIDIを覚えさせる'
                         }
+                        disabled={editLock}
                         onClick={(e) => {
                           e.stopPropagation()
                           if (!s) return
@@ -2376,6 +2402,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       <button
                         className="il-ic"
                         title="このシーンを消す"
+                        disabled={editLock}
                         onClick={(e) => {
                           e.stopPropagation()
                           engine.removeSfxScene(i)
@@ -3652,6 +3679,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 borderColor: engine.armedSave ? 'var(--il-amber)' : '',
                 color: engine.armedSave ? 'var(--il-amber)' : ''
               }}
+              disabled={editLock}
               onClick={() => engine.toggleArmSave()}
             >
               {engine.armedSave
@@ -3698,7 +3726,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                         style={{ cursor: p ? 'text' : 'default' }}
                         onDoubleClick={(e) => {
                           e.stopPropagation()
-                          if (p) setRenaming({ i, value: p.name })
+                          if (p && !editLock) setRenaming({ i, value: p.name })
                         }}
                       >
                         {p ? p.name : '（空き）'}
@@ -3727,6 +3755,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                           ? '割当済み（クリックで再割当）'
                           : 'LEARN — このシーンを呼ぶキー/MIDIを覚えさせる'
                     }
+                    disabled={editLock}
                     onClick={(e) => {
                       e.stopPropagation()
                       if (!p) return
@@ -3743,6 +3772,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   </button>
                   <button
                     className="il-ic"
+                    disabled={editLock}
                     onClick={(e) => {
                       e.stopPropagation()
                       if (p) setRenaming({ i, value: p.name })
@@ -3754,6 +3784,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <button
                       className="il-ic del"
                       title="この明かりを消す（⌘Zで戻せる）"
+                      disabled={editLock}
                       onClick={(e) => {
                         e.stopPropagation()
                         if (window.confirm(`番号 ${i + 1} の明かりを消しますか？（⌘Zで戻せます）`))
@@ -3767,12 +3798,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               ))}
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-              <button className="il-mini" onClick={() => engine.addSceneSlot()}>
+              <button className="il-mini" disabled={editLock} onClick={() => engine.addSceneSlot()}>
                 ＋ シーンを追加
               </button>
               {engine.patterns.length > 9 &&
                 engine.patterns[engine.patterns.length - 1] === null && (
-                  <button className="il-mini" onClick={() => engine.removeLastSceneSlot()}>
+                  <button className="il-mini" disabled={editLock} onClick={() => engine.removeLastSceneSlot()}>
                     − 空きを減らす
                   </button>
                 )}
@@ -3799,9 +3830,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               )}
               <div className="il-livebtns">
                 <button
-                  className="il-livebtn blackout"
-                  onClick={() => engine.blackout()}
-                  title="即座に暗転（キー: 0）"
+                  className={'il-livebtn blackout' + (engine.blackedOut ? ' on' : '')}
+                  onClick={() => engine.blackoutToggle()}
+                  title="即座に暗転・もう一度で直前の明かりへ復帰（キー: 0）"
                 >
                   暗転
                 </button>
@@ -4664,6 +4695,7 @@ const IL_CSS = `
 .il-mini{background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-dim);padding:6px 11px;border-radius:5px;cursor:pointer;font-size:10.5px;font-family:inherit;}
 .il-mini:hover{border-color:var(--il-dim);color:var(--il-txt);}
 .il-mini:disabled{opacity:0.4;cursor:default;}
+.il-ic:disabled{opacity:0.35;cursor:default;}
 .il-mini.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
 /* 整列の絵アイコンボタン（揃った形を描画）。横一列に均等配置＝はみ出さず1行に収める。 */
 .il-alignrow{align-items:stretch;}
@@ -4751,6 +4783,7 @@ const IL_CSS = `
 .il-livebtn{background:rgba(255,255,255,0.02);border:0.5px solid var(--il-line);color:var(--il-txt);border-radius:7px;padding:13px 4px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:0.06em;min-height:46px;}
 .il-livebtn:hover{border-color:var(--il-dim);}
 .il-livebtn.blackout:hover{border-color:var(--il-amber);color:var(--il-amber);}
+.il-livebtn.blackout.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,.10);box-shadow:0 0 0 1px rgba(251,191,36,.35) inset;}
 .il-livebtn.panic:hover{border-color:var(--il-red);color:var(--il-red);}
 .il-livebtn.full:hover{border-color:var(--il-dim);color:var(--il-dim);}
 .il-livebtn.undo:hover{border-color:var(--il-dim);color:var(--il-dim);}
