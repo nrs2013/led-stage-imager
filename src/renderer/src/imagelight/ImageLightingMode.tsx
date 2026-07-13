@@ -549,6 +549,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     const api = getApi()
     let raf = 0
     let lastPublish = 0
+    // 送出1回の実測コスト(ms・移動平均)。読み出し(getImageData)は1コマごとに大きな配列を作る＝
+    // 速いマシン/低解像度では60fps、重い環境では自動で間引いてメモリのゴミ生成とGC詰まりを防ぐ。
+    let publishCost = 0
     let lastRender = 0
     let lastDmxRev = -1 // 前回描いた時の卓リビジョン。変わっていたら間引きを外して即描画する。
     // 出力(Syphon/NDI)の重い読み出し(getImageData)は、連続アニメ中は最大このfpsに間引く。
@@ -653,10 +656,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更・卓の値変化は即送る）。
       // フェイルオープン：未接続が確証できる時だけ省く。
       if (syphonReadyRef.current && api?.publishFrame) {
-        // 描画と同じく -4ms の揺らぎ許容＋「+1コマ」進行＝平均60fpsを正確に保つ（超えない）
-        if (!animating || dmxDirty || now - lastPublish >= PUBLISH_MIN_MS - 4) {
-          lastPublish = animating ? Math.max(lastPublish + PUBLISH_MIN_MS, now - PUBLISH_MIN_MS) : now
+        // 送出間隔は「60fps上限」かつ「送出コストの2倍以上」＝重い環境（高精細出力・遅いマシン）では
+        // 自動で間引き、描画60fpsと応答性を死守する。速い環境ではそのまま60fps送出。
+        // -4ms は rAF の揺らぎ許容・「+1コマ」進行で平均を正確に保つ（60を超えない）。
+        const pubMin = Math.max(PUBLISH_MIN_MS, publishCost * 2)
+        if (!animating || dmxDirty || now - lastPublish >= pubMin - 4) {
+          lastPublish = animating ? Math.max(lastPublish + pubMin, now - pubMin) : now
+          const t0 = performance.now()
           api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
+          publishCost = publishCost * 0.8 + (performance.now() - t0) * 0.2
         }
       }
     }
