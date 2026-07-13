@@ -25,6 +25,15 @@ import {
   resolveNdiLibPath
 } from './output/ndi-direct'
 import { startMidiInput, stopMidiInput, getMidiPorts } from './midi/midi-input'
+import {
+  startGpuChartOutput,
+  stopGpuOutput,
+  setGpuOutputPaused,
+  isGpuOutputActive,
+  isGpuOutputPaused,
+  resizeGpuOutput,
+  sendToGpuOutput
+} from './output/gpu-output'
 
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
@@ -33,6 +42,7 @@ const publisher = new OutputPublisher()
 let mainWindow: BrowserWindow | null = null
 let previewWindow: BrowserWindow | null = null
 let lastChart: unknown = null
+let lastManual: unknown = null // TESTフェーダー状態（GPU出力窓へ初期同期するため保持）
 let midiInputs: string[] = [] // renderer が検出した MIDI 入力ポート名（ステータスバー表示用）
 let currentChartPath: string | null = null // 今開いている .ledimager のパス（⌘Sの上書き先）
 // .ledshow の上書き先は renderer（実際に開けた公演を知っている側）が保存のたびに渡してくる。
@@ -143,6 +153,7 @@ function startEngine(): void {
 }
 
 function stopEngine(): void {
+  stopGpuOutput() // publisher より先に（破棄後の publish を出さない）
   receiver.stop()
   publisher.stop()
   stopNdiBridge()
@@ -365,6 +376,11 @@ function createWindow(): void {
     void confirmAndClose('window')
   })
 
+  // 画像照明モード中に編集ウィンドウが閉じた/落ちた時、paused が残留すると
+  // 生きている GPU 出力窓まで黙り続ける（レビュー指摘）＝ここで必ず解除する。
+  mainWindow.on('closed', () => setGpuOutputPaused(false))
+  mainWindow.webContents.on('render-process-gone', () => setGpuOutputPaused(false))
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
@@ -385,6 +401,8 @@ function createWindow(): void {
     // 起動直後に起きた受信機のエラー（ポート使用中など）は画面が無い時に飛んで消えるので、
     // 画面ができたここで送り直す＝「無言のNo Signal」をなくす。
     if (lastArtnetStatus) mainWindow?.webContents.send('artnet:status', lastArtnetStatus)
+    // 編集画面がリロードされたら画像照明ゲートを一旦解除（照明モードなら mount 時に再送される）
+    setGpuOutputPaused(false)
   })
 }
 
@@ -469,6 +487,10 @@ app.whenReady().then(() => {
   ipcMain.on(
     'syphon:frame',
     (_e, payload: { width: number; height: number; buffer: Uint8Array | Uint8ClampedArray }) => {
+      // GPU直結出力が生きている間、編集側からの迷いフレーム（マウント直後に gpuActive の
+      // 取得が間に合わず1コマ出るケース等）は捨てる＝二重出力の点滅防止（レビュー指摘）。
+      // 画像照明モード中（paused）は CPU 経路が正なのでそのまま通す。
+      if (isGpuOutputActive() && !isGpuOutputPaused()) return
       publisher.publishRGBA(payload.width, payload.height, payload.buffer) // Mac: Syphon（Winはno-op）
       // Windows 等: 同じ RGBA を直接 NDI 送信（Mac は Syphon→ブリッジ経路を使うので送らない）
       if (process.platform !== 'darwin') {
@@ -492,7 +514,18 @@ app.whenReady().then(() => {
     // まだ非nullの瞬間がある。破棄済みへ send すると本番中に例外が飛ぶので二重ガード。
     if (previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed())
       previewWindow.webContents.send('chart:update', chart)
+    sendToGpuOutput('chart:update', chart)
   })
+  // TESTフェーダー状態（GPU出力窓が編集側と同じ絵を出すため）
+  ipcMain.on('manual:sync', (_e, m) => {
+    lastManual = m
+    sendToGpuOutput('manual:update', m)
+  })
+  // 画像照明モード中は編集側がCPU経路でILの絵を出す＝GPU出力窓のチャートは黙る（二重出力防止）
+  ipcMain.on('imagelight:active', (_e, on: boolean) => setGpuOutputPaused(!!on))
+  // GPU出力窓（見えない出力専用窓）: 状態問い合わせ＋出力解像度の変更要求
+  ipcMain.handle('gpu-output:status', () => isGpuOutputActive())
+  ipcMain.on('gpu-output:resize', (_e, w: number, h: number) => resizeGpuOutput(w, h))
 
   // Network interface list + receiver re-bind + engine status (for the status lamps).
   ipcMain.handle('net:interfaces', () => {
@@ -871,9 +904,20 @@ app.whenReady().then(() => {
 
   createWindow()
   startEngine()
+  // GPU直結出力（Mac + Syphon 可の時だけ動く）。窓の準備ができたら最新状態を流し込み、
+  // 生死は全画面へ通知＝editor 側の互換経路(use-chart-output)が自動で止まる/再開する。
+  startGpuChartOutput(publisher, {
+    onReady: (wc) => {
+      if (lastChart) wc.send('chart:update', lastChart)
+      if (lastManual) wc.send('manual:update', lastManual)
+    },
+    onActive: (active) => broadcast('gpu-output:active', active)
+  })
 
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    // 🔴 getAllWindows() は見えないGPU出力窓も数える＝0個判定だと Dock クリックで
+    // 編集ウィンドウが二度と出ない。編集ウィンドウの有無で判定する。
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow()
   })
 })
 

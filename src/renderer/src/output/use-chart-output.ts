@@ -5,6 +5,8 @@ import { effectiveDmxByUniverse } from '../dmx/resolve'
 
 interface DecorApi {
   publishFrame?: (width: number, height: number, buffer: Uint8ClampedArray) => void
+  gpuOutputStatus?: () => Promise<boolean>
+  onGpuOutputActive?: (cb: (active: boolean) => void) => (() => void) | void
 }
 
 const FPS = 30
@@ -21,6 +23,15 @@ export function useChartOutput(): void {
     const renderer = new OutputRenderer(canvas)
     const api = (window as unknown as { api?: DecorApi }).api
     if (!api?.publishFrame) return // ブラウザ(UI確認用)では何もしない
+    // GPU直結出力（見えない出力専用窓）が生きている間はこちらのCPU読み出し経路を止める。
+    // GPU側が死んだら通知が来て自動再開＝互換フォールバック（2026-07-14 GPU出力設計）。
+    let gpuActive = false
+    void api.gpuOutputStatus?.().then((v) => {
+      gpuActive = !!v
+    })
+    const offGpu = api.onGpuOutputActive?.((v) => {
+      gpuActive = v
+    })
     let lastErrLog = 0
     let lastTickAt = 0 // 直近の描画時刻＝下の即描画のレート上限に使う
     const tick = (): void => {
@@ -28,6 +39,7 @@ export function useChartOutput(): void {
       // 1フレームの例外で出力が本番中ずっと固まらないよう、毎フレーム握って次へ進む。
       try {
         const st = useStore.getState()
+        if (gpuActive) return // GPU直結出力が publish 中＝二重出力しない
         if (st.imageLight) return // 画像照明モードが publish 中＝二重出力しない
         const { chart, dmxByUniverse } = st
         if (chart.canvas.w <= 0 || chart.canvas.h <= 0) return // 退化フレームはスキップ
@@ -62,6 +74,7 @@ export function useChartOutput(): void {
     return () => {
       clearInterval(iv)
       unsub()
+      offGpu?.()
     }
   }, [])
 }

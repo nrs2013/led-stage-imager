@@ -52,6 +52,7 @@ interface DecorApi {
     file: string
   ) => Promise<{ json: string; media: Record<string, string> } | null>
   onMidiMessage?: (cb: (msg: [number, number, number]) => void) => (() => void) | void
+  sendImageLightActive?: (on: boolean) => void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 // パスからファイル名だけ取り出す（Mac は / ・Windows は \ 区切りどちらも）
@@ -539,6 +540,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     poll()
     const iv = setInterval(poll, 1000)
     return () => clearInterval(iv)
+  }, [])
+
+  // 画像照明モードの間は main へ知らせる＝GPU出力窓のチャート送出を黙らせる（二重出力防止）。
+  useEffect(() => {
+    getApi()?.sendImageLightActive?.(true)
+    return () => getApi()?.sendImageLightActive?.(false)
   }, [])
 
   // ---- 30fps: 描画 → Syphon publish → 画面へ転写（＋BUILDだけマーカー）

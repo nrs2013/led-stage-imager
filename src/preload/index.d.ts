@@ -17,6 +17,20 @@ export interface DecorApi {
   sendChart: (chart: unknown) => void
   /** Receive chart updates (preview window). Returns an unsubscribe. */
   onChartUpdate: (cb: (chart: unknown) => void) => () => void
+  /** GPU直結出力窓が生きているか。 */
+  gpuOutputStatus: () => Promise<boolean>
+  /** GPU直結出力窓の生死通知。Returns an unsubscribe. */
+  onGpuOutputActive: (cb: (active: boolean) => void) => () => void
+  /** 出力窓→main: 窓サイズ＝出力解像度の変更要求。 */
+  gpuOutputResize: (w: number, h: number) => void
+  /** TESTフェーダー状態を出力窓へ同期。 */
+  sendManual: (m: unknown) => void
+  /** TESTフェーダー状態を受け取る（出力窓側）。Returns an unsubscribe. */
+  onManualUpdate: (cb: (m: unknown) => void) => () => void
+  /** 画像照明モードの入退場を main へ通知。 */
+  sendImageLightActive: (on: boolean) => void
+  /** 出力窓（?syphon-output）が受ける一時停止通知。Returns an unsubscribe. */
+  onOutputPause: (cb: (paused: boolean) => void) => () => void
   /** List bindable IPv4 network interfaces. */
   listInterfaces: () => Promise<{ name: string; address: string }[]>
   /** Re-bind the Art-Net receiver to a NIC address. */

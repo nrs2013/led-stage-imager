@@ -27,6 +27,31 @@ const api = {
     ipcRenderer.on('chart:update', h)
     return () => ipcRenderer.removeListener('chart:update', h)
   },
+  // ---- GPU直結出力（見えない出力専用窓・2026-07-14）
+  // 窓が生きているか（生きている間は editor の CPU 読み出し経路が黙る）
+  gpuOutputStatus: (): Promise<boolean> => ipcRenderer.invoke('gpu-output:status'),
+  onGpuOutputActive: (cb: (active: boolean) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, v: boolean): void => cb(v)
+    ipcRenderer.on('gpu-output:active', h)
+    return () => ipcRenderer.removeListener('gpu-output:active', h)
+  },
+  // 出力窓（?syphon-output）→ main: 窓サイズ＝出力解像度の変更要求
+  gpuOutputResize: (w: number, h: number): void => ipcRenderer.send('gpu-output:resize', w, h),
+  // TESTフェーダー状態の同期（editor → main → 出力窓）
+  sendManual: (m: unknown): void => ipcRenderer.send('manual:sync', m),
+  onManualUpdate: (cb: (m: unknown) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, m: unknown): void => cb(m)
+    ipcRenderer.on('manual:update', h)
+    return () => ipcRenderer.removeListener('manual:update', h)
+  },
+  // 画像照明モードの入退場を main へ（GPU出力窓のチャート送出を黙らせる/再開する）
+  sendImageLightActive: (on: boolean): void => ipcRenderer.send('imagelight:active', on),
+  // 出力窓（?syphon-output）が受ける一時停止通知（画像照明モード中は描画も止める）
+  onOutputPause: (cb: (paused: boolean) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, v: boolean): void => cb(v)
+    ipcRenderer.on('output:pause', h)
+    return () => ipcRenderer.removeListener('output:pause', h)
+  },
   // Art-Net 受信機の生死通知（bind失敗＝ポート使用中など。今まで無言で死んでいた）
   onArtnetStatus: (cb: (st: { ok: boolean; detail: string }) => void): (() => void) => {
     const h = (_e: IpcRendererEvent, st: { ok: boolean; detail: string }): void => cb(st)
