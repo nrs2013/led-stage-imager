@@ -126,8 +126,9 @@ export function beamPose(fx: Fixture, data: Uint8Array): BeamPose {
 /** Shutter ゲート（beam8/beam9 の +3ch）。現場の照明チームのプロファイル実測に合わせた値マップ
  *  （2026-07-07 卓接続チェック当日に確定）:
  *    0〜7   = 閉（強制消灯）
- *    8〜245 = ストロボ（値が大きいほど速い・約1〜15Hz・50%デューティ。描画30fpsのため上限15Hz）
+ *    8〜245 = ストロボ（値が大きいほど速い・約1〜25Hz・50%デューティ）
  *    246〜255 = 開（常時点灯）
+ *  上限は描画30fps時代は15Hzだったが、60fps化（2026-07-13）でROBE実機の20〜25Hzに追随して25Hzへ。
  *  nowMs はストロボの時計（renderFrame の現在時刻）。省略時は開閉のみ（互換用・開扱い）。 */
 export function shutterGate(fx: Fixture, data: Uint8Array, nowMs?: number): number {
   if (fx.mode !== 'beam8' && fx.mode !== 'beam9') return 1
@@ -136,7 +137,7 @@ export function shutterGate(fx: Fixture, data: Uint8Array, nowMs?: number): numb
   if (v >= 246) return 1
   if (nowMs == null) return 1 // 時計が無い呼び出しでは「開」扱い（従来互換）
   const t = (v - 8) / (245 - 8)
-  const hz = 1 + t * 14 // 8=約1Hz 〜 245=約15Hz
+  const hz = 1 + t * 24 // 8=約1Hz 〜 245=約25Hz
   return ((nowMs * hz) / 1000) % 1 < 0.5 ? 1 : 0
 }
 

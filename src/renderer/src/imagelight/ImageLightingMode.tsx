@@ -546,10 +546,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     let lastRender = 0
     let lastDmxRev = -1 // 前回描いた時の卓リビジョン。変わっていたら間引きを外して即描画する。
     // 出力(Syphon/NDI)の重い読み出し(getImageData)は、連続アニメ中は最大このfpsに間引く。
-    const PUBLISH_MIN_MS = 1000 / 30
-    // 描画(renderFrame)もアニメ中は上限fpsに間引く。灯体ごとの重い処理を半分にしてカクつき防止。
-    // 出力は元々30fpsなので体感は変わらず、操作プレビューだけ60→30になるが十分滑らか。
-    const RENDER_MIN_MS = 1000 / 30
+    // 60fps＝ストロボ(ROBE実機20〜25Hz)がLED出力でもカクつかないため（2026-07-13・30fpsだと15Hz上限）。
+    // 読み出しが重いマシンでは rAF が自然に遅くなるだけ（スパイラルしない）。
+    const PUBLISH_MIN_MS = 1000 / 60
+    // 描画(renderFrame)のアニメ中上限。旧30fps間引きはストロボが15Hz上限＋33ms刻みでカクつく
+    // 原因だった（2026-07-08診断）。60fpsに上げ、重いシーンでは rAF が自然に落ちる設計のまま。
+    const RENDER_MIN_MS = 1000 / 60
     // 画面キャンバスへの貼り直し（描画済みの engine.frame を今の view で貼るだけ＝軽い）。
     const blit = (): void => {
       const { scale, ox, oy } = viewRef.current

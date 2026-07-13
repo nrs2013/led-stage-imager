@@ -108,7 +108,7 @@ export const FX_PARAMS: Record<FxKey, FxParamDef[]> = {
     {
       lbl: 'SPEED',
       min: 1,
-      max: 15,
+      max: 25, // 描画60fps化(2026-07-13)に合わせ15→25Hz（ROBE実機の20〜25Hzに追随）
       get: (e) => e.fxp.strobe.speed,
       set: (e, v) => e.setFxp('strobe', 'speed', v),
       fmt: (v) => v + 'Hz'
