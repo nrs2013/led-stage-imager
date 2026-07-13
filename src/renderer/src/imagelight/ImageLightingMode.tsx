@@ -317,6 +317,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       setRenaming(null)
       engine.setLearnPattern(null)
       engine.setLearnSfxScene(null)
+      engine.setLearnGo(null) // GO/BACKのLEARN待ちも解除（残るとLOCK中の初キーが割当に化ける）
+      engine.setLearnFire(null)
+      engine.setLearnFx(null)
     }
   }
   const [renamingSfx, setRenamingSfx] = useState<{ i: number; value: string } | null>(null)
@@ -440,6 +443,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     const t = hudTabRef.current
     if (t === 'sfx') return b.motif === 'flame' || b.motif === 'sparkler'
     if (t === 'decor') return !!b.motif && b.motif !== 'flame' && b.motif !== 'sparkler'
+    // CUE(本番)タブは照明＋炎/火花マーク＝SFXシーンの「選んだ組だけ保存」をここで行うため
+    // （SFXタブで選んだ選択がCUEタブへ持ち越せないと、常に全マーク保存に落ちる退行になる）
+    if (t === 'cue') return !b.motif || b.motif === 'flame' || b.motif === 'sparkler'
     return !b.motif
   }
   /** GOボタンに出す「次のステップ」の説明（位置＋メモ＋CUE/SFX番号）。 */
@@ -618,8 +624,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         return
       }
       // 連続アニメ中は描画を上限fpsに間引く（単発変更・強制描画・卓の値変化は即描く）。
-      if (animating && !forceRenderRef.current && !dmxDirty && now - lastRender < RENDER_MIN_MS) return
-      lastRender = now
+      // -4ms の余裕＝しきい値が1コマぴったりだと rAF の揺らぎで拍がぶつかりコマ落ち（実測40fps）。
+      // lastRender は「+1コマ」で進める＝平均はきっちり60fps（144Hz等の高リフレッシュでも60を超えない）。
+      if (animating && !forceRenderRef.current && !dmxDirty && now - lastRender < RENDER_MIN_MS - 4) return
+      lastRender = animating ? Math.max(lastRender + RENDER_MIN_MS, now - RENDER_MIN_MS) : now
       lastDmxRev = dmxRev
       forceRenderRef.current = false
       displayDirtyRef.current = false // 本描画に含まれるので消しておく
@@ -645,8 +653,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更・卓の値変化は即送る）。
       // フェイルオープン：未接続が確証できる時だけ省く。
       if (syphonReadyRef.current && api?.publishFrame) {
-        if (!animating || dmxDirty || now - lastPublish >= PUBLISH_MIN_MS) {
-          lastPublish = now
+        // 描画と同じく -4ms の揺らぎ許容＋「+1コマ」進行＝平均60fpsを正確に保つ（超えない）
+        if (!animating || dmxDirty || now - lastPublish >= PUBLISH_MIN_MS - 4) {
+          lastPublish = animating ? Math.max(lastPublish + PUBLISH_MIN_MS, now - PUBLISH_MIN_MS) : now
           api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
         }
       }
@@ -845,12 +854,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         return
       }
       // BUILD: Delete / Backspace で選択中の灯体を削除（PLAY中・全選択(ALL)時は無効＝誤爆防止）
-      // 全選択の判定はタブ連動（isTabAllSelected）＝⌘A/ALLがタブ絞りになった今も「ALL→Deleteの一括消滅」を防ぐ
+      // 全選択の判定はタブ連動（isTabAllSelected）＝⌘A/ALLがタブ絞りになった今も「ALL→Deleteの一括消滅」を防ぐ。
+      // ただし1個だけの選択は「全選択」でも消せる（最後の1個の炎/飾りがどこでも消せなくなる袋小路を防ぐ）
       if (
         (e.code === 'Delete' || e.code === 'Backspace') &&
         uiModeRef.current === 'build' &&
         engine.selected.length > 0 &&
-        !isTabAllSelected()
+        !(isTabAllSelected() && engine.selected.length > 1)
       ) {
         engine.removeSelected()
         e.preventDefault()
@@ -2320,7 +2330,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     </div>
                   ))}
                 </div>
-                <button className="il-mini" disabled={editLock} style={{ marginTop: 4 }} onClick={() => engine.addCueStep()}>
+                <button
+                  className="il-mini"
+                  disabled={editLock || engine.cueSheet.length >= 200}
+                  title={engine.cueSheet.length >= 200 ? '進行表は最大200行' : ''}
+                  style={{ marginTop: 4 }}
+                  onClick={() => engine.addCueStep()}
+                >
                   ＋ 行を追加
                 </button>
                 <div className="il-playpats">
@@ -3618,54 +3634,55 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       />
                       <div className="il-val big">{Math.round(ref.frontAmp ?? 320)}px</div>
                     </div>
-                    <div className="il-lbl">ゴボ（光の柄）</div>
-                    <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
-                      <button
-                        className={'il-mini' + (!ref.gobo ? ' learnon' : '')}
-                        onClick={() => engine.setGobo(null)}
-                        title="柄なし（今までどおりの丸い光）"
-                      >
-                        なし
-                      </button>
-                      {GOBO_KINDS.map((gk) => (
-                        <button
-                          key={gk.kind}
-                          className={'il-mini' + (ref.gobo === gk.kind ? ' learnon' : '')}
-                          onClick={() => engine.setGobo(gk.kind)}
-                          title={gk.title}
-                        >
-                          {gk.label}
-                        </button>
-                      ))}
+                  </>
+                )}
+                {/* ゴボは「動き」と無関係に描かれるので、UIも動きの条件の外に置く（止でも設定/解除できる） */}
+                <div className="il-lbl">ゴボ（光の柄）</div>
+                <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                  <button
+                    className={'il-mini' + (!ref.gobo ? ' learnon' : '')}
+                    onClick={() => engine.setGobo(null)}
+                    title="柄なし（今までどおりの丸い光）"
+                  >
+                    なし
+                  </button>
+                  {GOBO_KINDS.map((gk) => (
+                    <button
+                      key={gk.kind}
+                      className={'il-mini' + (ref.gobo === gk.kind ? ' learnon' : '')}
+                      onClick={() => engine.setGobo(gk.kind)}
+                      title={gk.title}
+                    >
+                      {gk.label}
+                    </button>
+                  ))}
+                </div>
+                {ref.gobo && (
+                  <>
+                    <div className="il-lbl">柄のくっきり度</div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={ref.goboSharp ?? 0.65}
+                        onChange={(e) => engine.setGoboSharp(+e.target.value)}
+                      />
+                      <div className="il-val big">{(ref.goboSharp ?? 0.65).toFixed(2)}</div>
                     </div>
-                    {ref.gobo && (
-                      <>
-                        <div className="il-lbl">柄のくっきり度</div>
-                        <div className="il-frow">
-                          <input
-                            type="range"
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            value={ref.goboSharp ?? 0.65}
-                            onChange={(e) => engine.setGoboSharp(+e.target.value)}
-                          />
-                          <div className="il-val big">{(ref.goboSharp ?? 0.65).toFixed(2)}</div>
-                        </div>
-                        <div className="il-lbl">柄の回転（速さ）</div>
-                        <div className="il-frow">
-                          <input
-                            type="range"
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            value={ref.goboSpd ?? 0.3}
-                            onChange={(e) => engine.setGoboSpd(+e.target.value)}
-                          />
-                          <div className="il-val big">{(ref.goboSpd ?? 0.3).toFixed(2)}</div>
-                        </div>
-                      </>
-                    )}
+                    <div className="il-lbl">柄の回転（速さ）</div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={ref.goboSpd ?? 0.3}
+                        onChange={(e) => engine.setGoboSpd(+e.target.value)}
+                      />
+                      <div className="il-val big">{(ref.goboSpd ?? 0.3).toFixed(2)}</div>
+                    </div>
                   </>
                 )}
               </>

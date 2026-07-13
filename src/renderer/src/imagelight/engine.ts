@@ -1443,6 +1443,7 @@ export class ImageLightEngine {
     this.sfxSeqPlaying ||
     this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars') ||
     this.beams.some((b) => b.front && (b.frontPat ?? 'off') !== 'off') || // フロント灯体のサーチ（8の字/丸/横/ランダム）
+    this.beams.some((b) => b.front && !!b.gobo && (b.goboSpd ?? 0.3) > 0) || // ゴボの回転（静止シーンでも柄が回り続ける）
     this.hasDmxPatched()
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
@@ -3065,7 +3066,8 @@ export class ImageLightEngine {
       })
       newIdx.push(this.beams.length - 1)
     }
-    if (newIdx.length) this.selected = newIdx
+    // タブ制限（selGuard）を通す＝今のタブで触れない灯体が選択状態にならない
+    if (newIdx.length) this.selected = newIdx.filter((i) => this.selAllowed(this.beams[i]))
     this.bump()
   }
 
@@ -3087,7 +3089,8 @@ export class ImageLightEngine {
       })
       newIdx.push(this.beams.length - 1)
     }
-    if (newIdx.length) this.selected = newIdx
+    // タブ制限（selGuard）を通す＝今のタブで触れない灯体が選択状態にならない
+    if (newIdx.length) this.selected = newIdx.filter((i) => this.selAllowed(this.beams[i]))
     this.bump()
   }
 
@@ -5014,12 +5017,21 @@ export class ImageLightEngine {
       version: 1,
       rig: this.rigData(),
       // 灯体配置を丸ごと保存（runtime 専用の _tn/_cn/_zp は復元時に再計算されるので含めてOK）。
-      beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined })),
+      // gauge は卓ストロボの明滅（暗相=0）の瞬間を拾わないよう、卓駆動中は安定値で保存
+      // （currentLook と同じ流儀。卓を繋がず開いた時に灯体が消えたまま復元されるのを防ぐ）。
+      beams: this.beams.map((b) => ({
+        ...b,
+        gauge: b.dmx && this.dmxFrame ? (b.gaugeStable ?? b.gauge) : b.gauge,
+        color: b.color.slice() as RGB3,
+        sp: { ...b.sp },
+        dmx: b.dmx ? { ...b.dmx } : undefined
+      })),
       scenes: scenesMeta,
       mask: maskMeta,
       colorWash: this.colorWash,
       baseLift: this.baseLift,
       viewScene: this.activeScene, // 保存時に表示していた写真＝開いた時に同じ所から
+      // ※beams の gauge は下の beams マップで「卓ストロボの暗相を除いた値」に差し替える
 
       decor: {
         ...this.decor,
@@ -5266,7 +5278,10 @@ export class ImageLightEngine {
     // 保存時に表示していた写真から開く（無い古い保存・範囲外＝1枚目）。媒体の読込失敗で
     // 枚数が減った場合も範囲チェックで安全側（1枚目）へ落ちる。
     const vs =
-      typeof show.viewScene === 'number' && show.viewScene >= 0 && show.viewScene < this.scenes.length
+      typeof show.viewScene === 'number' &&
+      Number.isInteger(show.viewScene) && // 壊れた保存の小数(1.5等)は selectScene が無視して真っ黒になるため弾く
+      show.viewScene >= 0 &&
+      show.viewScene < this.scenes.length
         ? show.viewScene
         : this.scenes.length
           ? 0
