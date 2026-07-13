@@ -7,7 +7,6 @@ import type { Chart } from '../model/types'
 interface DecorApi {
   onChartUpdate?: (cb: (chart: unknown) => void) => (() => void) | void
   onManualUpdate?: (cb: (m: unknown) => void) => (() => void) | void
-  onOutputPause?: (cb: (paused: boolean) => void) => (() => void) | void
   gpuOutputResize?: (w: number, h: number) => void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
@@ -51,10 +50,7 @@ export function GpuOutputView(): React.JSX.Element {
     let lastTickAt = 0
     let lastW = 0
     let lastH = 0
-    // 画像照明モード中は main が publish を止める＝描くだけ無駄なのでこちらも止める（レビュー指摘）
-    let paused = false
     const tick = (): void => {
-      if (paused) return
       lastTickAt = performance.now()
       // 1フレームの例外で出力が本番中ずっと固まらないよう、毎フレーム握って次へ進む。
       try {
@@ -92,15 +88,10 @@ export function GpuOutputView(): React.JSX.Element {
     const unsub = useStore.subscribe((s, prev) => {
       if (s.dmxRev !== prev.dmxRev && performance.now() - lastTickAt >= 1000 / 60 - 4) tick()
     })
-    const offPause = getApi()?.onOutputPause?.((v) => {
-      paused = v
-      if (!v) tick() // 再開の瞬間に最新の絵を即出す
-    })
     tick()
     return () => {
       clearInterval(iv)
       unsub()
-      offPause?.()
     }
   }, [])
 

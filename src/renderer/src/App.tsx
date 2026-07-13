@@ -8,6 +8,7 @@ import { LayersPanel } from './editor/LayersPanel'
 import { PatchTable } from './editor/PatchTable'
 import { LiveView } from './output/LiveView'
 import { GpuOutputView } from './output/GpuOutputView'
+import { GpuILOutputView } from './output/GpuILOutputView'
 import { useChartOutput } from './output/use-chart-output'
 import { StatusBar } from './ui/StatusBar'
 import { StartScreen } from './ui/StartScreen'
@@ -139,12 +140,27 @@ function OutputApp(): React.JSX.Element {
   )
 }
 
-/** GPU直結出力の見えない窓（?syphon-output）。DMXは自分で受け、チャート/TESTフェーダーは
- *  編集ウィンドウから IPC で届く。絵は GpuOutputView が 1:1 で描き、main が paint を
+/** GPU直結出力の見えない窓（?syphon-output）。DMXは自分で受け、チャート/TESTフェーダー/
+ *  画像照明の状態は編集ウィンドウから IPC で届く。絵は mode に応じて GpuOutputView（電飾
+ *  チャート・自走）か GpuILOutputView（画像照明・編集側駆動）が 1:1 で描き、main が paint を
  *  ゼロコピーで Syphon へ出す。 */
 function GpuOutputApp(): React.JSX.Element {
   useDmxBridge()
-  return <GpuOutputView />
+  const [mode, setMode] = useState<'chart' | 'imagelight'>('chart')
+  useEffect(() => {
+    const a = getApi() as
+      | {
+          onOutputMode?: (cb: (m: 'chart' | 'imagelight') => void) => (() => void) | void
+          gpuOutputHello?: () => Promise<'chart' | 'imagelight'>
+        }
+      | undefined
+    const off = a?.onOutputMode?.((m) => setMode(m))
+    // pull型ハンドシェイク: リスナー登録が済んだ「後」に現在モードを聞く＝ロード中に
+    // 届いて消えたモード切替を取り戻す（push だけだと空チャートのまま固まる・実測）
+    void a?.gpuOutputHello?.().then((m) => setMode(m))
+    return () => off?.()
+  }, [])
+  return mode === 'imagelight' ? <GpuILOutputView /> : <GpuOutputView />
 }
 
 /** Cmd+Z / Shift+Cmd+Z arrive via the app menu (the default menu would swallow them).
@@ -285,6 +301,19 @@ function EditorApp(): React.JSX.Element {
   useOpenFile()
   useOpenShowFile()
   useChartOutput() // 電飾の Syphon/NDI 出力は常時（Live廃止・照明モードと同じ作法）
+  // 出力方式（SETUPのトグル・localStorage永続）。互換を選んでいたら起動時に main へ伝えて
+  // GPU出力窓を止める（既定は高速(GPU)＝何も送らなくても main が起動している）。
+  useEffect(() => {
+    if (localStorage.getItem('gpu-output-method') === 'compat')
+      (getApi() as { setGpuOutputMethod?: (m: string) => void } | undefined)?.setGpuOutputMethod?.(
+        'compat'
+      )
+  }, [])
+  // 開発用フラグ: ?iltest で照明モードへ直行（性能実測用・通常起動では無効）
+  useEffect(() => {
+    if (window.location.search.includes('iltest')) setImageLight(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // 画像照明モード: エディタ/Liveに代えて全画面表示（自前でSyphonへpublish）。
   // hooks は全てこの分岐より前で呼ぶこと（条件付きreturnの後にhookは置けない）。
   if (imageLight) return <ImageLightingMode onExit={() => setImageLight(false)} />

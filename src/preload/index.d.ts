@@ -29,8 +29,24 @@ export interface DecorApi {
   onManualUpdate: (cb: (m: unknown) => void) => () => void
   /** 画像照明モードの入退場を main へ通知。 */
   sendImageLightActive: (on: boolean) => void
-  /** 出力窓（?syphon-output）が受ける一時停止通知。Returns an unsubscribe. */
-  onOutputPause: (cb: (paused: boolean) => void) => () => void
+  /** 出力窓（?syphon-output）が受けるモード切替通知。Returns an unsubscribe. */
+  onOutputMode: (cb: (mode: 'chart' | 'imagelight') => void) => () => void
+  /** 出力窓の準備完了ハンドシェイク（現在モードが返る）。 */
+  gpuOutputHello: () => Promise<'chart' | 'imagelight'>
+  /** 画像照明: 公演まるごと同期（media=null は前回のメディア使い回し）。 */
+  ilSyncShow: (json: string, media: { file: string; dataUrl: string }[] | null) => void
+  /** 画像照明: 毎フレームの軽い動的状態を送る。 */
+  ilSyncFrame: (frame: unknown) => void
+  /** 画像照明: 公演同期を受ける（出力窓側）。Returns an unsubscribe. */
+  onIlSyncShow: (
+    cb: (p: { json: string; media: { file: string; dataUrl: string }[] | null }) => void
+  ) => () => void
+  /** 画像照明: 毎フレーム同期を受ける（出力窓側）。Returns an unsubscribe. */
+  onIlSyncFrame: (cb: (f: unknown) => void) => () => void
+  /** 公演の再送依頼を受ける（編集側）。Returns an unsubscribe. */
+  onIlResync: (cb: () => void) => () => void
+  /** 出力方式: fast=GPU直結（既定）／compat=従来のCPU経路。 */
+  setGpuOutputMethod: (m: 'fast' | 'compat') => void
   /** List bindable IPv4 network interfaces. */
   listInterfaces: () => Promise<{ name: string; address: string }[]>
   /** Re-bind the Art-Net receiver to a NIC address. */

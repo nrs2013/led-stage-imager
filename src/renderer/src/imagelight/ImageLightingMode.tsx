@@ -53,6 +53,13 @@ interface DecorApi {
   ) => Promise<{ json: string; media: Record<string, string> } | null>
   onMidiMessage?: (cb: (msg: [number, number, number]) => void) => (() => void) | void
   sendImageLightActive?: (on: boolean) => void
+  // GPU直結出力（見えない出力専用窓）との同期
+  gpuOutputStatus?: () => Promise<boolean>
+  onGpuOutputActive?: (cb: (active: boolean) => void) => (() => void) | void
+  ilSyncShow?: (json: string, media: { file: string; dataUrl: string }[] | null) => void
+  ilSyncFrame?: (frame: unknown) => void
+  onIlResync?: (cb: () => void) => (() => void) | void
+  setGpuOutputMethod?: (m: 'fast' | 'compat') => void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 // パスからファイル名だけ取り出す（Mac は / ・Windows は \ 区切りどちらも）
@@ -181,6 +188,22 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   useEffect(() => {
     autoRestoredRef.current = true
   }, [])
+
+  // 開発用フラグ: DECOR_QUERY='iltest&cap3840&strobe' 等で起動すると照明モードへ直行し
+  //   前回データを開いて指定の負荷を掛ける（GPU出力の性能実測用・通常起動では無効）。
+  useEffect(() => {
+    const q = window.location.search
+    if (!q.includes('iltest')) return
+    void (async () => {
+      const d = await getApi()?.autosaveImageLightRead?.()
+      if (d) await engine.restoreShow(d.json, d.media)
+      if (q.includes('cap1920')) engine.setOutCap(1920)
+      if (q.includes('cap3840')) engine.setOutCap(3840)
+      if (q.includes('strobe')) engine.st.strobe = 'rnd'
+      console.log('[iltest] ready', { outCap: engine.outCap, strobe: engine.st.strobe })
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine])
 
   // ダブルクリックで開かれた .ledshow を取り込んで復元（App が pendingShowFile に積む）。
   // 既に照明モードに居る時に別ファイルを開いても効くよう、pendingShowFile を購読する。
@@ -414,6 +437,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const [dmxLamp, setDmxLamp] = useState<{ on: boolean; note: string }>({ on: false, note: 'DMX受信なし' })
   const [showKeys, setShowKeys] = useState(false) // 操作キー一覧オーバーレイ
   const [presetOpen, setPresetOpen] = useState(false) // 設定コンソールの「設定（解像度/落ち込み）」を開くか
+  // 出力方式（高速GPU/互換）。localStorage 永続＝次回起動時は App.tsx が main へ伝える
+  const [outMethod, setOutMethod] = useState<'fast' | 'compat'>(() =>
+    localStorage.getItem('gpu-output-method') === 'compat' ? 'compat' : 'fast'
+  )
   const showKeysRef = useRef(showKeys)
   useEffect(() => {
     showKeysRef.current = showKeys
@@ -542,11 +569,63 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     return () => clearInterval(iv)
   }, [])
 
-  // 画像照明モードの間は main へ知らせる＝GPU出力窓のチャート送出を黙らせる（二重出力防止）。
+  // 画像照明モードの間は main へ知らせる＝GPU出力窓の描き手を imagelight に切替。
   useEffect(() => {
     getApi()?.sendImageLightActive?.(true)
     return () => getApi()?.sendImageLightActive?.(false)
   }, [])
+
+  // ---- GPU直結出力への状態同期（設計書 2026-07-14-gpu-output-design.md フェーズ2）
+  // gpuActiveRef: 出力窓が生きているか（生きている間はCPUのpublishFrameを止め、こちらを流す）
+  const gpuActiveRef = useRef(false)
+  const lastSyncFrameAtRef = useRef(0) // 静止中でも2Hzで心拍を送る（見張り番の誤発火防止）
+  // 性能診断（?iltest 起動時のみ有効・console に5秒ごと）
+  const perfRef = useRef({ on: window.location.search.includes('iltest'), n: 0, render: 0, at: 0 })
+  useEffect(() => {
+    const api = getApi()
+    // 公演まるごと同期: メディア署名が変わった時だけ media 込み、それ以外は送らない
+    // （灯体・FX等の軽い状態は毎フレームの LiveFrame が全部運ぶ）。
+    let lastSig = ''
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let inflight = false
+    const sendShow = (force: boolean): void => {
+      if (!gpuActiveRef.current || inflight) return
+      const sig = engine.mediaSignature()
+      if (!force && sig === lastSig) return
+      inflight = true
+      void engine
+        .serializeShow()
+        .then(({ json, media }) => {
+          lastSig = sig
+          api?.ilSyncShow?.(json, media)
+        })
+        .catch((err) => console.error('[il-sync] show sync failed', err))
+        .finally(() => {
+          inflight = false
+        })
+    }
+    // 編集(bump)のたびに署名を見て、変わっていたら1秒後にまとめて送る（ドラッグ連射の合体）
+    const offVer = engine.subscribe(() => {
+      if (!gpuActiveRef.current) return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => sendShow(false), 1000)
+    })
+    const onActive = (v: boolean): void => {
+      gpuActiveRef.current = v
+      engine.recordLiveEvents = v // 単発発射（炎）を出力窓へも流す
+      if (v) sendShow(true)
+    }
+    void api?.gpuOutputStatus?.().then((v) => onActive(!!v))
+    const offGpu = api?.onGpuOutputActive?.(onActive)
+    const offResync = api?.onIlResync?.(() => sendShow(true)) // 出力窓の再起動＝全量再送
+    return () => {
+      offVer()
+      offGpu?.()
+      offResync?.()
+      if (timer) clearTimeout(timer)
+      engine.recordLiveEvents = false
+    }
+  }, [engine])
 
   // ---- 30fps: 描画 → Syphon publish → 画面へ転写（＋BUILDだけマーカー）
   useEffect(() => {
@@ -631,6 +710,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           displayDirtyRef.current = false
           blit()
         }
+        // GPU出力窓には静止中も2Hzで心拍（状態だけ・描き直しなし）＝出力窓側が同じ絵を保ち、
+        // mainの見張り番（paint 6秒監視）が静止シーンで誤発火しない。
+        if (gpuActiveRef.current && now - lastSyncFrameAtRef.current > 500) {
+          lastSyncFrameAtRef.current = now
+          api?.ilSyncFrame?.(engine.getLiveFrame(now))
+        }
         return
       }
       // 連続アニメ中は描画を上限fpsに間引く（単発変更・強制描画・卓の値変化は即描く）。
@@ -657,12 +742,37 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           st.chart.settings.gamma ?? false
         )
       }
+      // GPU出力窓が担当中は出力合成(composeOutput・3840で重い)を編集側から省く。
+      // 互換へ落ちた瞬間に false ＝次のコマから自前で合成再開（フェイルセーフ）。
+      engine.skipCompose = gpuActiveRef.current
+      const perfT0 = performance.now()
       engine.renderFrame(now)
+      const perfT1 = performance.now()
       // まず画面へ（軽い・毎フレーム）。重い出力読み出しは後で間引いて行う。
       blit()
-      // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更・卓の値変化は即送る）。
+      // GPU直結出力が生きている間: 軽い動的状態(LiveFrame・数KB)を送るだけ＝出力窓が同じ絵を
+      // 描いて main がゼロコピーで Syphon へ。重い readOutputRGBA はもう呼ばない（フェーズ2の眼目）。
+      if (gpuActiveRef.current) {
+        lastSyncFrameAtRef.current = now
+        api?.ilSyncFrame?.(engine.getLiveFrame(now))
+        // 性能診断（?iltest 起動時のみ・5秒ごと）: 描画レートと renderFrame 実コスト
+        if (perfRef.current.on) {
+          const p = perfRef.current
+          p.n++
+          p.render += perfT1 - perfT0
+          if (now - p.at > 5000) {
+            console.log(
+              `[il perf] ${(p.n / ((now - p.at) / 1000)).toFixed(1)}fps render平均${(p.render / p.n).toFixed(1)}ms`
+            )
+            p.n = 0
+            p.render = 0
+            p.at = now
+          }
+        }
+      }
+      // 互換経路（GPU出力窓が無い/死んだ時だけ）: 従来どおり読み出して publish。
       // フェイルオープン：未接続が確証できる時だけ省く。
-      if (syphonReadyRef.current && api?.publishFrame) {
+      if (!gpuActiveRef.current && syphonReadyRef.current && api?.publishFrame) {
         // 送出間隔は「60fps上限」かつ「送出コストの2倍以上」＝重い環境（高精細出力・遅いマシン）では
         // 自動で間引き、描画60fpsと応答性を死守する。速い環境ではそのまま60fps送出。
         // -4ms は rAF の揺らぎ許容・「+1コマ」進行で平均を正確に保つ（60を超えない）。
@@ -681,8 +791,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 
   // ---- デモ画像は入れない（空で始める）。素材はのむさんがドロップ／＋から読み込む
   useEffect(() => {
-    if (import.meta.env.DEV)
-      (window as unknown as { __ilEngine?: ImageLightEngine }).__ilEngine = engine
+    // デバッグの覗き窓（debug-bridge/検証）用にエンジンを常時露出（ローカルwindowのみ・無害）
+    ;(window as unknown as { __ilEngine?: ImageLightEngine }).__ilEngine = engine
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -3141,6 +3251,30 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                             className={'il2-segbtn' + (engine.falloffPow === pow ? ' on' : '')}
                             onClick={() => engine.setFalloff(pow)}
                             title="ビームの落ち込みの強さ（手前を明るく・奥を暗く）"
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="il2-segrow">
+                      <span className="il2-seglbl">OUTPUT</span>
+                      <div className="il2-seg">
+                        {(
+                          [
+                            { label: '高速(GPU)', m: 'fast' },
+                            { label: '互換', m: 'compat' }
+                          ] as const
+                        ).map(({ label, m }) => (
+                          <button
+                            key={m}
+                            className={'il2-segbtn' + (outMethod === m ? ' on' : '')}
+                            onClick={() => {
+                              setOutMethod(m)
+                              localStorage.setItem('gpu-output-method', m)
+                              getApi()?.setGpuOutputMethod?.(m)
+                            }}
+                            title="出力(Syphon/NDI)の方式。高速(GPU)=コピーなしの新方式・高精細でも60コマ（既定）／互換=従来方式（出力の見た目がおかしい時の避難先）"
                           >
                             {label}
                           </button>

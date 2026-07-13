@@ -205,6 +205,57 @@ export interface St extends FxFlags {
   smoke: number
 }
 
+// ---------- GPU直結出力の同期用（LiveFrame＝毎フレーム送る軽い動的状態） ----------
+/** 単発イベント（炎の発射等）。状態でなく「呼び出し」なので LiveFrame の別枠で運ぶ。 */
+export type LiveEvent =
+  | { k: 'flameFire'; fx: number; fy: number }
+  | { k: 'flameFireRow' }
+  | { k: 'flameFireAll' }
+  | { k: 'flameHoldStart'; fx: number; fy: number }
+  | { k: 'flameHoldAllStart' }
+  | { k: 'flameHoldRelease' }
+
+/** LiveFrame の灯体＝Beam から重い imageSrc と描画一時値(_tn/_cn/_zp)を除いたもの。 */
+export type LiveBeam = Omit<Beam, 'imageSrc' | '_tn' | '_cn' | '_zp'>
+
+/** 出力専用ウィンドウへ毎フレーム送る軽い動的状態（数KB）。
+ *  重い状態（写真/動画/マスク/切り抜き/画像灯体の絵）は serializeShow/restoreShow で別送。 */
+export interface LiveFrame {
+  ms: number // 送信側の now−t0。受信側は自分の t0 に写す＝時刻依存の絵が両窓で一致
+  st: St
+  fxp: FxParams
+  panicGain: number
+  strobeOverride: boolean
+  strobeRate: number
+  lightOnly: boolean
+  colorWash: number
+  baseLift: number
+  falloffPow: number
+  outCap: number
+  viewScene: number
+  decorClock: number
+  decor: DecorPattern
+  sfx: {
+    flame: FlameParams
+    sparkler: SparklerParams
+    rain: RainParams & { on: boolean }
+    lowSmoke: LowSmokeParams & { on: boolean }
+    fireFlame: boolean
+    fireSparkler: boolean
+    chaseMode: 'all' | 'random' | 'inout' | 'outin'
+    chaseMs: number
+    seqSteps: number[][]
+    seqMs: number
+    seqPlaying: boolean
+    seqIndex: number
+    armedIds: number[] | null
+    activeScene: number
+  }
+  beams: LiveBeam[]
+  dmx: { frames: Record<number, Uint8Array>; gamma: boolean } | null
+  events: LiveEvent[]
+}
+
 export interface Look {
   fxst: FxFlags
   fxp: FxParams
@@ -544,8 +595,21 @@ function makeSearchParams(rnd: () => number): SearchParams {
 export class ImageLightEngine {
   /** 編集画面の表示用フレーム（写真＋余白・マーカー無し）。 */
   readonly frame = mk(IW, IH)
-  /** Syphon出力用（写真の部分だけ・写真の解像度・余白なし）。編集画面は frame、出力は outCv。 */
-  readonly outCv = mk(16, 9, true)
+  /** Syphon出力用（写真の部分だけ・写真の解像度・余白なし）。編集画面は frame、出力は outCv。
+   *  コンテキストは octx() 経由で取得＝役割で描画方式が変わる（下の outReadback 参照）。 */
+  readonly outCv = mk(16, 9)
+  /** true=編集側（readOutputRGBA で吸い出す＝CPUキャンバス）。false=GPU出力窓（吸い出さない＝
+   *  GPUキャンバスにして 3840 の合成をGPUに任せる。CPUだと3840は1コマ30-45ms＝22fps上限・実測）。 */
+  outReadback = true
+  private octx(): CanvasRenderingContext2D {
+    return this.outCv.getContext(
+      '2d',
+      this.outReadback ? { willReadFrequently: true } : undefined
+    )!
+  }
+  /** true=GPU出力窓が publish を担っている間、編集側は出力合成(composeOutput)を丸ごと省く。
+   *  3840 の合成コストが編集ループから消える＝編集画面の60fpsを守る。互換へ落ちたら false。 */
+  skipCompose = false
   outW = 16
   outH = 9
   private outBlurCv = mk(16, 9)
@@ -924,6 +988,7 @@ export class ImageLightEngine {
    *  SFXシーンで絞り込み中は「標準4本」へのフォールバックもしない（外したはずの炎が出る事故防止）。 */
   flameFireAll(): void {
     if (!this.flameFireGate) return
+    this.pushLiveEvent({ k: 'flameFireAll' }) // GPU出力窓でも同じ発射を再生する
     if (this.flamePoints.length) this.flamePoints.forEach((p) => this.flame.fire(p.fx, p.fy, 1, p.dir))
     else if (!this.sfxArmedIds) this.flame.fireRow()
     this.bump()
@@ -974,34 +1039,39 @@ export class ImageLightEngine {
   }
   /** 一発(単発)。fx,fy は 0..1（未指定は中央・床）。 */
   flameFire(fx = 0.5, fy = 1): void {
+    this.pushLiveEvent({ k: 'flameFire', fx, fy })
     this.flame.fire(fx, fy)
     this.bump()
   }
   /** 標準4本を時間差で一斉発射(単発)。 */
   flameFireRow(): void {
+    this.pushLiveEvent({ k: 'flameFireRow' })
     this.flame.fireRow()
     this.bump()
   }
   /** 長押し開始(サスティン)。releaseで終わる。fx,fy は 0..1。 */
   flameHoldStart(fx = 0.5, fy = 1): void {
+    this.pushLiveEvent({ k: 'flameHoldStart', fx, fy })
     this.flame.startHold(fx, fy)
     this.bump()
   }
   /** 置いた炎を全部、長押し開始（向きも反映）。 */
   flameHoldAllStart(): void {
+    this.pushLiveEvent({ k: 'flameHoldAllStart' })
     const pts = this.flamePoints
     if (pts.length) pts.forEach((p) => this.flame.startHold(p.fx, p.fy, 1, p.dir))
     else this.flame.startHold(0.5, 1)
     this.bump()
   }
   flameHoldRelease(): void {
+    this.pushLiveEvent({ k: 'flameHoldRelease' })
     this.flame.release()
     this.bump()
   }
   /** 出力(outCv)へ炎本体を重ねる（box領域→出力解像度へ写像）。glowは光マップ経由で既にcomposeOutputに入る。 */
   private drawFlameOnOutput(): void {
     if (this.lightOnly || !this.box || this.outW <= 16) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const oc = this.octx()
     const box = this.box
     const bd = this.flame.body
     const kx = bd.width / IW
@@ -1020,7 +1090,7 @@ export class ImageLightEngine {
   /** 出力(outCv)へ火花本体を重ねる（炎と同じ box→出力の写像）。glowは光マップ経由で反映済み。 */
   private drawSparklerOnOutput(): void {
     if (this.lightOnly || !this.box || this.outW <= 16) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const oc = this.octx()
     const box = this.box
     const bd = this.sparkler.body
     const kx = bd.width / IW
@@ -1057,7 +1127,7 @@ export class ImageLightEngine {
   /** vmCv(色付き受け系) を出力(outCv)へ加算合成（box領域→出力解像度）。 */
   private drawVolumetricOnOutput(alpha: number): void {
     if (this.lightOnly || !this.box || this.outW <= 16) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const oc = this.octx()
     const b = this.box
     oc.setTransform(1, 0, 0, 1, 0, 0)
     oc.globalCompositeOperation = 'lighter'
@@ -2202,7 +2272,7 @@ export class ImageLightEngine {
     this.reliefPass(this.frame, this.fc, this.reliefCv, QW, QH)
 
     // ---- Syphon出力: 写真の部分だけを写真の解像度で（余白なし・写真フル解像度）
-    this.composeOutput(maxI)
+    if (!this.skipCompose) this.composeOutput(maxI) // GPU出力窓が担当中は編集側で省く（3840対策）
     // 出力(outCv)にもモチーフを乗せる＝編集画面と同じ絵を Resolume へ送る
     // （composeOutput は写真＋光だけ。モチーフはここで box→出力の写像で重ねる）。
     this.drawMotifsOnOutput(beams, Is, ms)
@@ -2223,7 +2293,7 @@ export class ImageLightEngine {
 
     // 立体強調: 出力(Syphon/NDI)も編集画面と同じ仕上げにする（relief=0なら無処理）
     if (this.relief > 0 && this.outW > 16) {
-      const oc2 = this.outCv.getContext('2d', { willReadFrequently: true })!
+      const oc2 = this.octx()
       this.reliefPass(this.outCv, oc2, this.reliefOutCv, this.outW, this.outH)
     }
   }
@@ -2234,7 +2304,7 @@ export class ImageLightEngine {
   private drawMotifsOnOutput(beams: Beam[], Is: number[], ms: number): void {
     if (this.lightOnly || !this.box || this.outW <= 16) return
     if (!beams.some((b) => b.motif)) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const oc = this.octx()
     const box = this.box
     const sx = this.outW / box.w
     const sy = this.outH / box.h
@@ -2340,7 +2410,7 @@ export class ImageLightEngine {
         if (this.outCv.height !== oh) this.outCv.height = oh
         this.outW = ow
         this.outH = oh
-        const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+        const oc = this.octx()
         oc.setTransform(1, 0, 0, 1, 0, 0)
         oc.globalCompositeOperation = 'source-over'
         oc.clearRect(0, 0, ow, oh)
@@ -2355,7 +2425,7 @@ export class ImageLightEngine {
       if (this.outCv.height !== oh) this.outCv.height = oh
       this.outW = ow
       this.outH = oh
-      const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+      const oc = this.octx()
       const lb = this.box
       const lbx = lb.x * Q
       const lby = lb.y * Q
@@ -2386,7 +2456,7 @@ export class ImageLightEngine {
     if (this.outCv.height !== oh) this.outCv.height = oh
     this.outW = ow
     this.outH = oh
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const oc = this.octx()
     const tone = Math.max(0, (0.5 - maxI) / 0.5) * 0.85
     const b = this.box
     const bx = b.x * Q
@@ -2462,7 +2532,7 @@ export class ImageLightEngine {
 
   /** Syphon出力用 premultiplied RGBA（outCv＝写真の部分だけ・写真解像度）。 */
   readOutputRGBA(): Uint8ClampedArray {
-    const ctx = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const ctx = this.octx()
     const d = ctx.getImageData(0, 0, this.outW, this.outH).data
     for (let i = 0; i < d.length; i += 4) {
       const a = d[i + 3]
@@ -4500,7 +4570,7 @@ export class ImageLightEngine {
     if (!this.decor.enabled || !this.decorSegs || !this.decorSegs.length) return
     const boxLW = this.getMaskBoxLW()
     if (!boxLW) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const oc = this.octx()
     const box = this.box
     const sx = this.outW / box.w
     const sy = this.outH / box.h
@@ -4968,6 +5038,157 @@ export class ImageLightEngine {
    *  状態で前回データ(il-autosave)を上書きする事故を防ぐためのガード。 */
   hasSaveableContent(): boolean {
     return this.scenes.length > 0 || !!this.maskImage || this.rigCustomized
+  }
+
+  // ---------- GPU直結出力（出力専用ウィンドウ）との状態同期 ----------
+  // 設計: docs/superpowers/specs/2026-07-14-gpu-output-design.md
+  //  - 重い状態（写真/動画/マスク/切り抜き/画像灯体）: serializeShow を「メディア署名が変わった時だけ」送る
+  //  - 軽い動的状態: LiveFrame を毎フレーム送る（灯体の生値・FX・時刻ms・DMX・単発発射イベント）
+  //  - 時刻: 送信側の ms(=now-t0) を受信側が自分の t0 に写す＝ストロボ位相/ゴボ回転/星の瞬きが一致
+
+  /** 単発イベント（炎の発射等）。状態でなく「呼び出し」なので別枠で運ぶ。 */
+  recordLiveEvents = false // 編集側で GPU 出力が生きている間だけ true（無駄な蓄積を防ぐ）
+  private liveEvents: LiveEvent[] = []
+  private pushLiveEvent(e: LiveEvent): void {
+    if (!this.recordLiveEvents) return
+    if (this.liveEvents.length < 64) this.liveEvents.push(e) // 取りこぼしより溢れ防止を優先
+  }
+
+  /** 重い状態（メディア類）が変わったかの署名。変わった時だけ serializeShow を送る。
+   *  dataURL の中身は舐めず参照だけ＝毎 bump 呼んでも安い。 */
+  mediaSignature(): string {
+    const parts: string[] = []
+    for (const sc of this.scenes) {
+      parts.push(sc.kind, sc.src ? String(sc.src.length) : (sc.objectUrl ?? ''))
+      if (sc.warpBox) parts.push(JSON.stringify(sc.warpBox))
+      if (sc.pieces) for (const p of sc.pieces) parts.push(p.id, JSON.stringify(p.corners), String(p.src.x), String(p.src.y), String(p.src.w), String(p.src.h))
+    }
+    parts.push(this.maskSrc ? String(this.maskSrc.length) : '')
+    // 画像灯体の絵は LiveFrame に載せない（重い）＝ここで検知して公演チャネルで送る
+    for (const b of this.beams) if (b.imageSrc) parts.push(String(b.imageSrc.length))
+    parts.push(String(this.beams.length))
+    return parts.join('|')
+  }
+
+  /** 編集側: 今の動的状態を1コマ分吸い出す（出力専用ウィンドウへ送る用）。 */
+  getLiveFrame(now: number): LiveFrame {
+    const events = this.liveEvents
+    this.liveEvents = []
+    return {
+      ms: now - this.t0,
+      st: { ...this.st },
+      fxp: JSON.parse(JSON.stringify(this.fxp)) as FxParams,
+      panicGain: this.panicGain,
+      strobeOverride: this.strobeOverride,
+      strobeRate: this.strobeRate,
+      lightOnly: this.lightOnly,
+      colorWash: this.colorWash,
+      baseLift: this.baseLift,
+      falloffPow: this.falloffPow,
+      outCap: this.outCap,
+      viewScene: this.activeScene,
+      decorClock: this.decorClock,
+      decor: JSON.parse(JSON.stringify(this.decor)) as DecorPattern,
+      sfx: {
+        flame: { ...this.flame.params },
+        sparkler: { ...this.sparkler.params },
+        rain: { ...this.rain.params, on: this.rain.on },
+        lowSmoke: { ...this.lowSmoke.params, on: this.lowSmoke.on },
+        fireFlame: this.flameFireGate,
+        fireSparkler: this.sparklerFireGate,
+        chaseMode: this.sfxChaseMode,
+        chaseMs: this.sfxChaseMs,
+        seqSteps: this.sfxSeqSteps.map((s) => s.slice()),
+        seqMs: this.sfxSeqMs,
+        seqPlaying: this.sfxSeqPlaying,
+        seqIndex: this.sfxSeqIndex,
+        armedIds: this.sfxArmedIds ? [...this.sfxArmedIds] : null,
+        activeScene: this.activeSfxScene
+      },
+      // 灯体は「imageSrc（重い画像）と描画一時値を除いた全量」＝BUILD中の配置編集も即時に出力へ映る
+      beams: this.beams.map((b) => {
+        const { imageSrc: _i, _tn: _t, _cn: _c, _zp: _z, ...rest } = b
+        return { ...rest, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined }
+      }),
+      dmx: this.dmxFrame ? { frames: this.dmxFrame, gamma: this.dmxGamma } : null,
+      events
+    }
+  }
+
+  /** 出力専用ウィンドウ側: LiveFrame を反映して1コマ描く。
+   *  時刻は「自分の now − 送信側 ms」を t0 に写す＝位相一致かつ SFX パーティクルには単調増加の
+   *  now が渡る（編集側の t0 リセットにも自然に追従）。 */
+  applyLiveFrame(f: LiveFrame): void {
+    if (this.restoring) return // 公演の復元中はスキップ（次のコマで追いつく）
+    const now = performance.now()
+    this.t0 = now - f.ms
+    this.st = { ...f.st }
+    this.fxp = f.fxp
+    this.panicGain = f.panicGain
+    this.strobeOverride = f.strobeOverride
+    this.strobeRate = f.strobeRate
+    this.lightOnly = f.lightOnly
+    this.colorWash = f.colorWash
+    this.baseLift = f.baseLift
+    this.falloffPow = f.falloffPow
+    this.outCap = f.outCap
+    this.decorClock = f.decorClock
+    this.decorLastNow = now // 自前で進めない（毎コマ送信側の値で上書き＝チェイス位相一致）
+    this.decor = f.decor
+    this.flame.params = { ...this.flame.params, ...f.sfx.flame }
+    this.sparkler.params = { ...this.sparkler.params, ...f.sfx.sparkler }
+    {
+      const { on: rainOn, ...rp } = f.sfx.rain
+      this.rain.params = { ...this.rain.params, ...rp }
+      this.rain.on = !!rainOn
+      const { on: smokeOn, ...sp2 } = f.sfx.lowSmoke
+      this.lowSmoke.params = { ...this.lowSmoke.params, ...sp2 }
+      this.lowSmoke.on = !!smokeOn
+    }
+    this.flameFireGate = f.sfx.fireFlame
+    this.sparklerFireGate = f.sfx.fireSparkler
+    this.sfxChaseMode = f.sfx.chaseMode
+    this.sfxChaseMs = f.sfx.chaseMs
+    this.sfxSeqSteps = f.sfx.seqSteps
+    this.sfxSeqMs = f.sfx.seqMs
+    this.sfxSeqPlaying = f.sfx.seqPlaying
+    this.sfxSeqIndex = f.sfx.seqIndex
+    this.sfxSeqLast = now // 自前でステップを進めない（送信側の seqIndex が正）
+    this.sfxArmedIds = f.sfx.armedIds ? new Set(f.sfx.armedIds) : null
+    this.activeSfxScene = f.sfx.activeScene
+    // シーン（写真/動画）の表示切替。restoreShow 済みの scenes を前提に selectScene を流用
+    if (f.viewScene >= 0 && f.viewScene !== this.activeScene && this.scenes[f.viewScene]) {
+      this.selectScene(f.viewScene)
+    } else if (f.viewScene < 0 && this.activeScene >= 0) {
+      this.activeScene = -1
+      this.mat = null
+      this.box = null
+    }
+    // 灯体: 件数が同じなら imageSrc（重い画像・公演チャネル担当）だけ残して全量上書き。
+    // 件数が変わった（BUILDで追加/削除）ら作り直し＝画像灯体の絵は公演チャネル到着まで空。
+    if (f.beams.length === this.beams.length) {
+      for (let i = 0; i < f.beams.length; i++) {
+        const keep = this.beams[i].imageSrc
+        this.beams[i] = { ...f.beams[i], imageSrc: keep } as Beam
+      }
+    } else {
+      this.beams = f.beams.map((b) => ({ ...b }) as Beam)
+    }
+    for (const e of f.events) this.applyLiveEvent(e)
+    if (f.dmx) this.setDmxFrame(f.dmx.frames, f.dmx.gamma)
+    else this.dmxFrame = null
+    this.renderFrame(now)
+  }
+
+  private applyLiveEvent(e: LiveEvent): void {
+    switch (e.k) {
+      case 'flameFire': this.flameFire(e.fx, e.fy); break
+      case 'flameFireRow': this.flameFireRow(); break
+      case 'flameFireAll': this.flameFireAll(); break
+      case 'flameHoldStart': this.flameHoldStart(e.fx, e.fy); break
+      case 'flameHoldAllStart': this.flameHoldAllStart(); break
+      case 'flameHoldRelease': this.flameHoldRelease(); break
+    }
   }
 
   /** 公演まるごとの書き出し材料を作る（リグ＋シーン一覧＋メディアのファイル）。

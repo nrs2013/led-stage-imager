@@ -28,9 +28,9 @@ import { startMidiInput, stopMidiInput, getMidiPorts } from './midi/midi-input'
 import {
   startGpuChartOutput,
   stopGpuOutput,
-  setGpuOutputPaused,
+  setGpuOutputMode,
+  getGpuOutputMode,
   isGpuOutputActive,
-  isGpuOutputPaused,
   resizeGpuOutput,
   sendToGpuOutput
 } from './output/gpu-output'
@@ -159,6 +159,21 @@ function stopEngine(): void {
   stopNdiBridge()
   stopNdiDirect()
   stopMidiInput()
+}
+
+/** GPU直結出力を開始（Mac + Syphon 可の時だけ動く）。窓の準備ができたら最新状態を流し込み、
+ *  生死は全画面へ通知＝editor 側の互換経路が自動で止まる/再開する。 */
+function startGpu(): void {
+  startGpuChartOutput(publisher, {
+    onReady: (wc) => {
+      if (lastChart) wc.send('chart:update', lastChart)
+      if (lastManual) wc.send('manual:update', lastManual)
+      // 画像照明モード中に出力窓が（再）起動した＝公演の再送を編集側へ頼む
+      if (getGpuOutputMode() === 'imagelight' && mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('il:resync')
+    },
+    onActive: (active) => broadcast('gpu-output:active', active)
+  })
 }
 
 /** Fullscreen output preview on a second display (mirrors the editor's chart, no re-publish). */
@@ -376,10 +391,10 @@ function createWindow(): void {
     void confirmAndClose('window')
   })
 
-  // 画像照明モード中に編集ウィンドウが閉じた/落ちた時、paused が残留すると
-  // 生きている GPU 出力窓まで黙り続ける（レビュー指摘）＝ここで必ず解除する。
-  mainWindow.on('closed', () => setGpuOutputPaused(false))
-  mainWindow.webContents.on('render-process-gone', () => setGpuOutputPaused(false))
+  // 画像照明モード中に編集ウィンドウが閉じた/落ちた時、IL モードが残留すると
+  // 出力窓の IL 描画が凍る（駆動役の編集側が居ない）＝チャート（自走）へ必ず戻す。
+  mainWindow.on('closed', () => setGpuOutputMode('chart'))
+  mainWindow.webContents.on('render-process-gone', () => setGpuOutputMode('chart'))
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -401,9 +416,12 @@ function createWindow(): void {
     // 起動直後に起きた受信機のエラー（ポート使用中など）は画面が無い時に飛んで消えるので、
     // 画面ができたここで送り直す＝「無言のNo Signal」をなくす。
     if (lastArtnetStatus) mainWindow?.webContents.send('artnet:status', lastArtnetStatus)
-    // 編集画面がリロードされたら画像照明ゲートを一旦解除（照明モードなら mount 時に再送される）
-    setGpuOutputPaused(false)
   })
+  // 編集画面のリロード＝残留した照明モードを一旦チャートへ戻す。
+  // 🔴 did-finish-load でやってはいけない: onload は React の起動より遅く、先に照明モードへ
+  // 入った直後の imagelight を chart に巻き戻す（実測でモード切替が消えた）。did-navigate は
+  // 新しいページの実行前に必ず来る＝レースしない。
+  mainWindow.webContents.on('did-navigate', () => setGpuOutputMode('chart'))
 }
 
 /** App menu: Cmd+Z/Shift+Cmd+Z go to the app's own chart undo (the default Electron
@@ -487,10 +505,10 @@ app.whenReady().then(() => {
   ipcMain.on(
     'syphon:frame',
     (_e, payload: { width: number; height: number; buffer: Uint8Array | Uint8ClampedArray }) => {
-      // GPU直結出力が生きている間、編集側からの迷いフレーム（マウント直後に gpuActive の
-      // 取得が間に合わず1コマ出るケース等）は捨てる＝二重出力の点滅防止（レビュー指摘）。
-      // 画像照明モード中（paused）は CPU 経路が正なのでそのまま通す。
-      if (isGpuOutputActive() && !isGpuOutputPaused()) return
+      // GPU直結出力が生きている間、編集側からのCPUフレーム（マウント直後に gpuActive の
+      // 取得が間に合わず出る迷いコマ等）は捨てる＝二重出力の点滅防止（レビュー指摘）。
+      // フェーズ2からは画像照明も出力窓が描く＝GPUが生きていれば全部そちらが正。
+      if (isGpuOutputActive()) return
       publisher.publishRGBA(payload.width, payload.height, payload.buffer) // Mac: Syphon（Winはno-op）
       // Windows 等: 同じ RGBA を直接 NDI 送信（Mac は Syphon→ブリッジ経路を使うので送らない）
       if (process.platform !== 'darwin') {
@@ -521,11 +539,32 @@ app.whenReady().then(() => {
     lastManual = m
     sendToGpuOutput('manual:update', m)
   })
-  // 画像照明モード中は編集側がCPU経路でILの絵を出す＝GPU出力窓のチャートは黙る（二重出力防止）
-  ipcMain.on('imagelight:active', (_e, on: boolean) => setGpuOutputPaused(!!on))
+  // 画像照明モードの入退場＝GPU出力窓の描き手を切替（chart⇄imagelight）
+  ipcMain.on('imagelight:active', (_e, on: boolean) =>
+    setGpuOutputMode(on ? 'imagelight' : 'chart')
+  )
+  // 画像照明の状態同期を出力窓へ中継（重い公演データはキャッシュしない＝素通し）
+  ipcMain.on('il:sync-show', (_e, p) => sendToGpuOutput('il:sync-show', p))
+  ipcMain.on('il:sync-frame', (_e, f) => sendToGpuOutput('il:sync-frame', f))
+  // 出力方式（SETUPのトグル）。compat=GPU出力窓を止めて従来のCPU経路に戻す。
+  ipcMain.on('gpu-output:method', (_e, m: string) => {
+    if (m === 'compat') stopGpuOutput()
+    else startGpu()
+  })
   // GPU出力窓（見えない出力専用窓）: 状態問い合わせ＋出力解像度の変更要求
   ipcMain.handle('gpu-output:status', () => isGpuOutputActive())
   ipcMain.on('gpu-output:resize', (_e, w: number, h: number) => resizeGpuOutput(w, h))
+  // 出力窓の React が聞き耳を立て終えた合図（pull型ハンドシェイク）。
+  // push だけだと「ロード完了→リスナー登録」の隙間に届いたモード切替/チャートが消える
+  // （実測: 照明モードに切り替わらず空チャートを出し続けた）。ここで現在の全状態を返し直す。
+  ipcMain.handle('gpu-output:hello', () => {
+    if (lastChart) sendToGpuOutput('chart:update', lastChart)
+    if (lastManual) sendToGpuOutput('manual:update', lastManual)
+    // 照明モード中なら編集側へ公演の再送を依頼（メディアは編集側しか持っていない）
+    if (getGpuOutputMode() === 'imagelight' && mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send('il:resync')
+    return getGpuOutputMode()
+  })
 
   // Network interface list + receiver re-bind + engine status (for the status lamps).
   ipcMain.handle('net:interfaces', () => {
@@ -904,15 +943,7 @@ app.whenReady().then(() => {
 
   createWindow()
   startEngine()
-  // GPU直結出力（Mac + Syphon 可の時だけ動く）。窓の準備ができたら最新状態を流し込み、
-  // 生死は全画面へ通知＝editor 側の互換経路(use-chart-output)が自動で止まる/再開する。
-  startGpuChartOutput(publisher, {
-    onReady: (wc) => {
-      if (lastChart) wc.send('chart:update', lastChart)
-      if (lastManual) wc.send('manual:update', lastManual)
-    },
-    onActive: (active) => broadcast('gpu-output:active', active)
-  })
+  startGpu()
 
   app.on('activate', function () {
     // 🔴 getAllWindows() は見えないGPU出力窓も数える＝0個判定だと Dock クリックで

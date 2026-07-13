@@ -9,7 +9,9 @@ import { is } from '@electron-toolkit/utils'
 import type { OutputPublisher, PaintTextureInfo } from './syphon-publisher'
 
 let win: BrowserWindow | null = null
-let paused = false // 画像照明モード中＝編集側がCPU経路でILを出すのでチャートは黙る
+// 出力窓が今どちらの絵を描くか。chart=電飾チャート（自走）／imagelight=画像照明（編集側が
+// il:sync-frame で駆動）。フェーズ2で「IL中はチャートを黙らせる(paused)」から置き換え。
+let mode: 'chart' | 'imagelight' = 'chart'
 let active = false
 let onActiveChange: ((active: boolean) => void) | null = null
 let publishErrors = 0 // 連続失敗カウント。ネイティブ側の異常で無限にログを吐かないため
@@ -40,17 +42,16 @@ export function isGpuOutputActive(): boolean {
   return active
 }
 
-export function isGpuOutputPaused(): boolean {
-  return paused
+export function getGpuOutputMode(): 'chart' | 'imagelight' {
+  return mode
 }
 
-export function setGpuOutputPaused(v: boolean): void {
-  if (paused === v) return
-  paused = v
-  // 一時停止中は出力窓の描画も止める（画像照明モード中にチャートを裏で60fps描いて
-  // 本丸と資源を奪い合わない・レビュー指摘）。解除時は窓側が即1コマ描き直す。
-  sendToGpuOutput('output:pause', v)
-  // 一時停止中は paint が止まるのが正常＝見張り番の起点をリセットして誤発火を防ぐ
+export function setGpuOutputMode(m: 'chart' | 'imagelight'): void {
+  if (mode === m) return
+  mode = m
+  // 窓側はモードに応じて描き手を切替（チャート描画とIL描画を同時に走らせない＝資源の奪い合い防止）
+  sendToGpuOutput('output:mode', m)
+  // 切替直後の paint 空白は正常＝見張り番の起点をリセットして誤発火を防ぐ
   lastPaintAt = Date.now()
 }
 
@@ -120,11 +121,9 @@ export function startGpuChartOutput(
           `[gpu-output] paint ${info.codedSize.width}x${info.codedSize.height} ${fmt} (窓 ${w}x${h})`
         )
       }
-      if (!paused) {
-        // 奇数サイズ等で絵が desired より +1px 大きい時は desired に切って出す（レビュー指摘）
-        publisher.publishSurface(info, desiredW, desiredH)
-        publishErrors = 0
-      }
+      // 奇数サイズ等で絵が desired より +1px 大きい時は desired に切って出す（レビュー指摘）
+      publisher.publishSurface(info, desiredW, desiredH)
+      publishErrors = 0
     } catch (err) {
       if (++publishErrors <= 3) console.error('[gpu-output] publish 失敗:', err)
       if (publishErrors >= 10) fallback('publishSurfaceHandle が連続失敗')
@@ -133,18 +132,18 @@ export function startGpuChartOutput(
     }
   })
   // 見張り番: 生きているはずなのに paint が来ない＝出力が黙って凍る故障（レビュー指摘・
-  // 設計書の「paintが来なくなったら互換へ」）。出力窓は静止中も30fpsで描き直すので、
-  // 健全なら paint は流れ続ける（一時停止中だけ止まるのが正常＝pausedでは見ない）。
+  // 設計書の「paintが来なくなったら互換へ」）。チャートは30fps自走・画像照明は編集側の
+  // 毎フレーム駆動＋静止中2Hz心拍＝健全なら paint は必ず流れ続ける（静止16.9fps実測）。
   lastPaintAt = Date.now()
   watchdog = setInterval(() => {
-    if (!win || win.isDestroyed() || paused || !active) return
+    if (!win || win.isDestroyed() || !active) return
     if (Date.now() - lastPaintAt > 6000) fallback('paint が6秒来ない（出力凍結の疑い）')
   }, 2000)
   wc.on('render-process-gone', (_e, d) => fallback('描画プロセス消滅: ' + d.reason))
   wc.on('did-fail-load', (_e, code, desc) => fallback(`読み込み失敗: ${code} ${desc}`))
   wc.on('did-finish-load', () => {
     applySize() // ズームはロードごとにリセットされるのでここで掛ける
-    wc.send('output:pause', paused) // ロード中に届いた一時停止を取りこぼさない
+    wc.send('output:mode', mode) // ロード中に届いたモード切替を取りこぼさない
     lastPaintAt = Date.now() // ロード直後の猶予（見張り番の誤発火防止）
     setActive(true)
     opts.onReady(wc)

@@ -44,14 +44,45 @@ const api = {
     ipcRenderer.on('manual:update', h)
     return () => ipcRenderer.removeListener('manual:update', h)
   },
-  // 画像照明モードの入退場を main へ（GPU出力窓のチャート送出を黙らせる/再開する）
+  // 画像照明モードの入退場を main へ（GPU出力窓の描き手を chart⇄imagelight に切替）
   sendImageLightActive: (on: boolean): void => ipcRenderer.send('imagelight:active', on),
-  // 出力窓（?syphon-output）が受ける一時停止通知（画像照明モード中は描画も止める）
-  onOutputPause: (cb: (paused: boolean) => void): (() => void) => {
-    const h = (_e: IpcRendererEvent, v: boolean): void => cb(v)
-    ipcRenderer.on('output:pause', h)
-    return () => ipcRenderer.removeListener('output:pause', h)
+  // 出力窓（?syphon-output）が受けるモード切替通知
+  onOutputMode: (cb: (mode: 'chart' | 'imagelight') => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, v: 'chart' | 'imagelight'): void => cb(v)
+    ipcRenderer.on('output:mode', h)
+    return () => ipcRenderer.removeListener('output:mode', h)
   },
+  // 出力窓の準備完了ハンドシェイク: 現在モードが返り、main が最新状態を送り直す
+  gpuOutputHello: (): Promise<'chart' | 'imagelight'> => ipcRenderer.invoke('gpu-output:hello'),
+  // ---- 画像照明の状態同期（編集 → main → 出力窓）
+  // 公演まるごと（重い・メディアが変わった時だけ。media=null は「前回のメディアを使い回す」）
+  ilSyncShow: (json: string, media: { file: string; dataUrl: string }[] | null): void =>
+    ipcRenderer.send('il:sync-show', { json, media }),
+  // 毎フレームの軽い動的状態
+  ilSyncFrame: (frame: unknown): void => ipcRenderer.send('il:sync-frame', frame),
+  onIlSyncShow: (
+    cb: (p: { json: string; media: { file: string; dataUrl: string }[] | null }) => void
+  ): (() => void) => {
+    const h = (
+      _e: IpcRendererEvent,
+      p: { json: string; media: { file: string; dataUrl: string }[] | null }
+    ): void => cb(p)
+    ipcRenderer.on('il:sync-show', h)
+    return () => ipcRenderer.removeListener('il:sync-show', h)
+  },
+  onIlSyncFrame: (cb: (f: unknown) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, f: unknown): void => cb(f)
+    ipcRenderer.on('il:sync-frame', h)
+    return () => ipcRenderer.removeListener('il:sync-frame', h)
+  },
+  // 出力窓が（再）起動した時に main から届く「公演を再送して」の合図（編集側が受ける）
+  onIlResync: (cb: () => void): (() => void) => {
+    const h = (): void => cb()
+    ipcRenderer.on('il:resync', h)
+    return () => ipcRenderer.removeListener('il:resync', h)
+  },
+  // 出力方式（SETUPのトグル）: fast=GPU直結（既定）／compat=従来のCPU経路
+  setGpuOutputMethod: (m: 'fast' | 'compat'): void => ipcRenderer.send('gpu-output:method', m),
   // Art-Net 受信機の生死通知（bind失敗＝ポート使用中など。今まで無言で死んでいた）
   onArtnetStatus: (cb: (st: { ok: boolean; detail: string }) => void): (() => void) => {
     const h = (_e: IpcRendererEvent, st: { ok: boolean; detail: string }): void => cb(st)
