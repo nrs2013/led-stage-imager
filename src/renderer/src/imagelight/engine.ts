@@ -461,6 +461,8 @@ export interface ShowFile {
   }
   /** 見え方: 色ノリ（光の色を写真に乗せる量 0..0.4）。無い＝0（従来）。 */
   colorWash?: number
+  /** 保存時に表示していた写真(シーン)番号。無い古い保存＝1枚目から。 */
+  viewScene?: number
   /** 見え方: ベース明るさ（暗部の底上げ 0..0.3）。無い＝0（従来）。 */
   baseLift?: number
 }
@@ -5017,6 +5019,8 @@ export class ImageLightEngine {
       mask: maskMeta,
       colorWash: this.colorWash,
       baseLift: this.baseLift,
+      viewScene: this.activeScene, // 保存時に表示していた写真＝開いた時に同じ所から
+
       decor: {
         ...this.decor,
         color1: this.decor.color1.slice() as RGB3,
@@ -5259,7 +5263,15 @@ export class ImageLightEngine {
     // 暗転状態(panicGain)自体は維持＝暗転したまま読み込んでも画面は暗いまま（本番の意思を尊重）。
     this.preBlackout = null
     this.preBlackoutPattern = -1
-    this.selectScene(this.scenes.length ? 0 : -1)
+    // 保存時に表示していた写真から開く（無い古い保存・範囲外＝1枚目）。媒体の読込失敗で
+    // 枚数が減った場合も範囲チェックで安全側（1枚目）へ落ちる。
+    const vs =
+      typeof show.viewScene === 'number' && show.viewScene >= 0 && show.viewScene < this.scenes.length
+        ? show.viewScene
+        : this.scenes.length
+          ? 0
+          : -1
+    this.selectScene(vs)
     this.bump()
     return true
   }
