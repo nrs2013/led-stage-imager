@@ -441,10 +441,19 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const [showKeys, setShowKeys] = useState(false) // 操作キー一覧オーバーレイ
   const [presetOpen, setPresetOpen] = useState(false) // 設定コンソールの「設定（解像度/落ち込み）」を開くか
   const [batchUniv, setBatchUniv] = useState(1) // 「全灯体のユニバースをまとめて」の入力値（1始まり表示）
-  // 出力方式（高速GPU/互換）。localStorage 永続＝次回起動時は App.tsx が main へ伝える
-  const [outMethod, setOutMethod] = useState<'fast' | 'compat'>(() =>
-    localStorage.getItem('gpu-output-method') === 'compat' ? 'compat' : 'fast'
-  )
+  // 出力方式（高速GPU/互換）。localStorage 永続。
+  // 既定: Mac=高速(GPU/Syphonで実績あり)・Windows/Linux=互換。Windowsの高速(GPU/NDI)経路は
+  // まだ不安定で「出力の光が凍る(ストロボが出ない)」事故があるため、既定を安全側の互換にする。
+  const [outMethod, setOutMethod] = useState<'fast' | 'compat'>(() => {
+    const saved = localStorage.getItem('gpu-output-method')
+    if (saved === 'compat' || saved === 'fast') return saved
+    return /Mac/i.test(navigator.userAgent) ? 'fast' : 'compat'
+  })
+  // 起動時に現在の方式を main へ伝える＝互換なら GPU 出力窓を確実に止める（トグルを押さなくても効く）
+  useEffect(() => {
+    getApi()?.setGpuOutputMethod?.(outMethod)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const showKeysRef = useRef(showKeys)
   useEffect(() => {
     showKeysRef.current = showKeys
