@@ -440,6 +440,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const [dmxLamp, setDmxLamp] = useState<{ on: boolean; note: string }>({ on: false, note: 'DMX受信なし' })
   const [showKeys, setShowKeys] = useState(false) // 操作キー一覧オーバーレイ
   const [presetOpen, setPresetOpen] = useState(false) // 設定コンソールの「設定（解像度/落ち込み）」を開くか
+  const [batchUniv, setBatchUniv] = useState(1) // 「全灯体のユニバースをまとめて」の入力値（1始まり表示）
   // 出力方式（高速GPU/互換）。localStorage 永続＝次回起動時は App.tsx が main へ伝える
   const [outMethod, setOutMethod] = useState<'fast' | 'compat'>(() =>
     localStorage.getItem('gpu-output-method') === 'compat' ? 'compat' : 'fast'
@@ -3680,6 +3681,47 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   >
                     全灯体に一括で割り当てる（DMX）
                   </button>
+                  <div className="il-lbl" style={{ marginTop: 8 }}>全灯体のモードをまとめて</div>
+                  <div className="il2-act" style={{ gap: 4 }}>
+                    <button
+                      className="il-mini"
+                      style={{ flex: 1 }}
+                      onClick={() => engine.setAllPatchedMode('beam8')}
+                      title="置いてある全灯体の DMX モードを beam8（8ch: P/T/Dim/Sh/RGB/Zoom）にします。この後で上の「一括で割り当てる」を押すと、アドレスが 8ch ずつ（1・9・17…）に並び直ります。⌘Z で戻せる。"
+                    >
+                      全部 beam8
+                    </button>
+                    <button
+                      className="il-mini"
+                      style={{ flex: 1 }}
+                      onClick={() => engine.setAllPatchedMode('beam9')}
+                      title="置いてある全灯体の DMX モードを beam9（9ch: 白入り）にします。この後で上の「一括で割り当てる」を押すと、アドレスが 9ch ずつ（1・10・19…）に並び直ります。⌘Z で戻せる。"
+                    >
+                      全部 beam9
+                    </button>
+                  </div>
+                  <div className="il-lbl" style={{ marginTop: 8 }}>全灯体のユニバースをまとめて</div>
+                  <div className="il2-act" style={{ gap: 4 }}>
+                    <input
+                      className="il2-dmxnum"
+                      type="number"
+                      min={1}
+                      max={32768}
+                      value={batchUniv}
+                      title="1始まりで表示（卓が0始まり表示の機種では「ここの数字−1」を卓に設定）"
+                      onChange={(e) =>
+                        setBatchUniv(Math.max(1, Math.min(32768, Math.floor(+e.target.value) || 1)))
+                      }
+                    />
+                    <button
+                      className="il-mini"
+                      style={{ flex: 1 }}
+                      onClick={() => engine.setAllPatchedUniverse(batchUniv - 1)}
+                      title="置いてある全灯体を、このユニバースにまとめます（アドレス＝ADDR はそのまま）。⌘Z で戻せる。"
+                    >
+                      全部このユニバースに
+                    </button>
+                  </div>
                   {dmxClash.length > 0 && (
                     <div className="il2-dmxwarn">
                       アドレス重複：灯体 {dmxClash.join(', ')} が同じアドレスです（卓で取り合いになります）。上のボタンか各灯体の AUTO で直せます。

@@ -3371,6 +3371,28 @@ export class ImageLightEngine {
     }
     this.bump()
   }
+  /** 全パッチ灯体のモード（チャンネル数）を一括変更。アドレスは 512 に収まるようクランプするだけ＝
+   *  重ならない番地への振り直しは「全灯体に一括で割り当てる」でチャンネル数ぶんに詰め直す。⌘Z で戻せる。 */
+  setAllPatchedMode(mode: ChannelMode): void {
+    const ps = this.beams.filter((b) => b.dmx)
+    if (!ps.length) return
+    this.pushHistory('dmx')
+    for (const b of ps) {
+      const start = Math.max(1, Math.min(513 - channelCount(mode), b.dmx!.start))
+      b.dmx = { ...b.dmx!, mode, start }
+    }
+    this.bump()
+  }
+  /** 全パッチ灯体のユニバースを一括変更（アドレス＝ADDR はそのまま）。⌘Z で戻せる。
+   *  u は 0 始まりの内部値（UI は 1 始まり表示なので呼ぶ側で −1 する）。 */
+  setAllPatchedUniverse(u: number): void {
+    const ps = this.beams.filter((b) => b.dmx)
+    if (!ps.length) return
+    this.pushHistory('dmx')
+    const uni = Math.max(0, Math.min(32767, Math.floor(u)))
+    for (const b of ps) b.dmx = { ...b.dmx!, universe: uni }
+    this.bump()
+  }
   setPan(v: number): void {
     this.pushHistory('pan')
     this.targets().forEach((b) => (b.pan = v))
