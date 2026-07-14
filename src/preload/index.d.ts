@@ -45,6 +45,12 @@ export interface DecorApi {
   onIlSyncFrame: (cb: (f: unknown) => void) => () => void
   /** 公演の再送依頼を受ける（編集側）。Returns an unsubscribe. */
   onIlResync: (cb: () => void) => () => void
+  /** 出力窓→main: 実絵を1枚描いた（Syphon 送出を出力窓へ切替してよい）。 */
+  ilOutputReady: () => void
+  /** 出力窓→main: マウント直後に公演の再送を頼む（pull型ハンドシェイク）。 */
+  ilRequestShow: () => void
+  /** 編集側: 出力窓が実絵を出したか/まだかの変化を受ける。Returns an unsubscribe. */
+  onIlOutputReadyChanged: (cb: (ready: boolean) => void) => () => void
   /** 出力方式: fast=GPU直結（既定）／compat=従来のCPU経路。 */
   setGpuOutputMethod: (m: 'fast' | 'compat') => void
   /** List bindable IPv4 network interfaces. */

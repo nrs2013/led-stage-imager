@@ -7,6 +7,8 @@ interface DecorApi {
   ) => (() => void) | void
   onIlSyncFrame?: (cb: (f: unknown) => void) => (() => void) | void
   gpuOutputResize?: (w: number, h: number) => void
+  ilOutputReady?: () => void // 初回の実絵を描いた＝main へ「Syphon 送出を本番へ切替してよい」合図
+  ilRequestShow?: () => void // pull型ハンドシェイク: マウント直後に「公演をもう一度くれ」
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -33,11 +35,18 @@ export function GpuILOutputView(): React.JSX.Element {
     let mediaCache: Record<string, string> = {}
     let lastW = 0
     let lastH = 0
+    let contentReady = false // 初回の実絵を描くまで false（それまで main は CPU を本番にする）
     const blit = (): void => {
-      // 出力の絵(outCv)を窓のキャンバスへ1:1で転写（GPU間コピー・読み出しなし）
       const w = engine.outW
       const h = engine.outH
-      if (w <= 16 || h <= 16) return // 写真なし/無灯の退化フレームは窓サイズを触らない
+      if (w <= 16 || h <= 16) {
+        // 退化フレーム（暗転・写真なし・無灯）: キャンバスを透明化して paint を必ず起こす。
+        // 互換経路が 16x9 透明を publish していたのと同じ＝Resolume では何も出ない（暗転）。
+        // ここで早期 return して描かないと、暗転しても直前の明るい絵が Syphon に残り、
+        // paint も止まって main の見張り番（6秒無paint）が誤発火して GPU 経路を殺す（レビュー指摘）。
+        if (cv.width > 0 && cv.height > 0) ctx.clearRect(0, 0, cv.width, cv.height)
+        return
+      }
       if (cv.width !== w) cv.width = w
       if (cv.height !== h) cv.height = h
       if (w !== lastW || h !== lastH) {
@@ -47,18 +56,49 @@ export function GpuILOutputView(): React.JSX.Element {
       }
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.clearRect(0, 0, w, h)
-      ctx.drawImage(engine.outCv, 0, 0)
+      ctx.drawImage(engine.outCv, 0, 0) // 出力の絵(outCv)を1:1で転写（GPU間コピー・読み出しなし）
+      if (!contentReady) {
+        contentReady = true
+        api?.ilOutputReady?.() // 実絵が出た＝main は Syphon 送出を CPU からこの窓へ切替してよい
+      }
+    }
+
+    // --- 公演同期（il:sync-show）を直列化 ---
+    // restoreShow は写真/動画のデコードで数秒かかることがある。前の復元が終わる前に次が来ると
+    // 両方が scenes=[] してから交互に push＝シーン棚が壊れる（レビュー指摘）。実行中は最新1件だけ
+    // 待たせて完了後に流す。
+    let restorePending: string | null = null
+    const runRestore = (json: string): void => {
+      void engine
+        .restoreShow(json, mediaCache)
+        .catch((err) => console.error('[gpu-il-output] restore failed', err))
+        .finally(() => {
+          if (restorePending !== null) {
+            const j = restorePending
+            restorePending = null
+            runRestore(j)
+          } else {
+            blit() // 復元後の絵を出す。溜まった LiveFrame は次の着信で反映される
+            if (pending && !draining) {
+              draining = true
+              setTimeout(drain, 0)
+            }
+          }
+        })
     }
     const offShow = api?.onIlSyncShow?.((p) => {
       if (p.media) {
         mediaCache = {}
         for (const m of p.media) mediaCache[m.file] = m.dataUrl
       }
-      void engine.restoreShow(p.json, mediaCache).then(() => blit())
+      if (engine.restoring) restorePending = p.json // 進行中の復元と交錯させない
+      else runRestore(p.json)
     })
-    // 最新コマだけ描く（コアレッシング）: 着信が処理より速い時、全コマを律儀に描くと
-    // 行列が無限に伸びて遅延が増え続ける。pending に最新を上書きし、処理は常に最新1コマ＝
-    // 追いつける時は全コマ描き（60fps素通し）、追いつけない時は自然に間引く。
+
+    // --- LiveFrame: 最新1コマだけ描く（コアレッシング）。ただし events は落とさない ---
+    // 着信＞処理の時に全コマ律儀に描くと行列が伸びて遅延が増え続けるので pending を上書き。
+    // ただし単発発射イベント（炎など）は「状態」でなく「呼び出し」なので上書きで捨ててはいけない
+    //（捨てると出力の炎が上がらない/消えない）＝新旧フレームの events を連結して持ち越す。
     let pending: LiveFrame | null = null
     let draining = false
     // 常設の性能診断（5秒ごと・console.error→mainのログに出る＝現場での切り分け用）
@@ -67,6 +107,13 @@ export function GpuILOutputView(): React.JSX.Element {
     let perfMs = 0
     let perfAt = performance.now()
     const drain = (): void => {
+      draining = false
+      // 公演の復元中は applyLiveFrame が no-op（events を消す）＝適用せず、最後の絵を保持して
+      // paint だけ起こす（見張り番の誤発火防止）。events は pending に貯めたまま復元後に反映。
+      if (engine.restoring) {
+        blit()
+        return
+      }
       const f = pending
       pending = null
       if (f) {
@@ -89,21 +136,30 @@ export function GpuILOutputView(): React.JSX.Element {
           console.error('[gpu-il-output] frame apply failed', err)
         }
       }
-      // apply 中に届いた分（キュー済みIPCが先に走って pending を更新している）を続けて描く
       if (pending) setTimeout(drain, 0)
-      else draining = false
     }
-    const offFrame = api?.onIlSyncFrame?.((f) => {
+    const offFrame = api?.onIlSyncFrame?.((raw) => {
       perfIn++
-      pending = f as LiveFrame
+      const f = raw as LiveFrame
+      if (pending && pending.events.length) f.events = pending.events.concat(f.events) // events は捨てない
+      pending = f
       if (!draining) {
         draining = true
         setTimeout(drain, 0)
       }
     })
+
+    // pull型ハンドシェイク: 購読を張り終えた「後」に公演をくれと頼む＝マウントと初回同期が
+    // レースして公演データが消えても回復する（chart 側の gpuOutputHello と同型）。
+    api?.ilRequestShow?.()
+
     return () => {
       offShow?.()
       offFrame?.()
+      // 🔴 出力窓は長寿命（chart⇄imagelight の往復ごとに new される）。dispose しないと WebGL
+      //   コンテキスト(炎/煙)が溜まって上限で特効が描けなくなり、動画が裏で再生し続け、
+      //   ObjectURL が永久リークする（レビュー指摘・編集側と同じ後始末をする）。
+      engine.disposeMedia()
     }
   }, [engine])
 

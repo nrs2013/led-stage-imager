@@ -81,6 +81,16 @@ const api = {
     ipcRenderer.on('il:resync', h)
     return () => ipcRenderer.removeListener('il:resync', h)
   },
+  // 出力窓→main: 実絵を1枚描いた（ここから Syphon 送出を CPU から出力窓へ切替してよい）
+  ilOutputReady: (): void => ipcRenderer.send('il:output-ready'),
+  // 出力窓→main: マウント直後に公演の再送を頼む（pull型ハンドシェイク・レース回復）
+  ilRequestShow: (): void => ipcRenderer.send('il:request-show'),
+  // 編集側: 出力窓が実絵を出したか/まだかの変化を受ける（CPU本番を続けるか止めるか判断）
+  onIlOutputReadyChanged: (cb: (ready: boolean) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, v: boolean): void => cb(v)
+    ipcRenderer.on('il:output-ready-changed', h)
+    return () => ipcRenderer.removeListener('il:output-ready-changed', h)
+  },
   // 出力方式（SETUPのトグル）: fast=GPU直結（既定）／compat=従来のCPU経路
   setGpuOutputMethod: (m: 'fast' | 'compat'): void => ipcRenderer.send('gpu-output:method', m),
   // Art-Net 受信機の生死通知（bind失敗＝ポート使用中など。今まで無言で死んでいた）

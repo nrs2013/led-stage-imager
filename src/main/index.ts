@@ -31,6 +31,8 @@ import {
   setGpuOutputMode,
   getGpuOutputMode,
   isGpuOutputActive,
+  isGpuOutputReady,
+  markGpuOutputReady,
   resizeGpuOutput,
   sendToGpuOutput
 } from './output/gpu-output'
@@ -172,7 +174,9 @@ function startGpu(): void {
       if (getGpuOutputMode() === 'imagelight' && mainWindow && !mainWindow.isDestroyed())
         mainWindow.webContents.send('il:resync')
     },
-    onActive: (active) => broadcast('gpu-output:active', active)
+    onActive: (active) => broadcast('gpu-output:active', active),
+    // 画像照明の「実絵が出た/まだ」の変化＝編集側が CPU 本番を続けるか止めるか決める（finding14）
+    onReadyChange: (ready) => broadcast('il:output-ready-changed', ready)
   })
 }
 
@@ -505,10 +509,11 @@ app.whenReady().then(() => {
   ipcMain.on(
     'syphon:frame',
     (_e, payload: { width: number; height: number; buffer: Uint8Array | Uint8ClampedArray }) => {
-      // GPU直結出力が生きている間、編集側からのCPUフレーム（マウント直後に gpuActive の
-      // 取得が間に合わず出る迷いコマ等）は捨てる＝二重出力の点滅防止（レビュー指摘）。
-      // フェーズ2からは画像照明も出力窓が描く＝GPUが生きていれば全部そちらが正。
-      if (isGpuOutputActive()) return
+      // GPU直結出力が「本番を担っている」間だけ編集側のCPUフレームを捨てる（二重出力の点滅防止）。
+      // chart モード＝GPUが自走で即描くので active になった瞬間から担当。
+      // imagelight モード＝出力窓が実絵を1枚描くまで(ready)はCPUが本番＝モード切替/公演読込中に
+      // 出力が黒く落ちない（finding14）。
+      if (isGpuOutputActive() && (getGpuOutputMode() === 'chart' || isGpuOutputReady())) return
       publisher.publishRGBA(payload.width, payload.height, payload.buffer) // Mac: Syphon（Winはno-op）
       // Windows 等: 同じ RGBA を直接 NDI 送信（Mac は Syphon→ブリッジ経路を使うので送らない）
       if (process.platform !== 'darwin') {
@@ -546,6 +551,13 @@ app.whenReady().then(() => {
   // 画像照明の状態同期を出力窓へ中継（重い公演データはキャッシュしない＝素通し）
   ipcMain.on('il:sync-show', (_e, p) => sendToGpuOutput('il:sync-show', p))
   ipcMain.on('il:sync-frame', (_e, f) => sendToGpuOutput('il:sync-frame', f))
+  // 出力窓が実絵を1枚描いた合図＝ここから Syphon 送出を CPU から出力窓へ切替（黒落ち防止 finding14）
+  ipcMain.on('il:output-ready', () => markGpuOutputReady())
+  // 出力窓のマウント直後の pull ハンドシェイク＝編集側へ公演の全量再送を依頼（レース回復 finding18）
+  ipcMain.on('il:request-show', () => {
+    if (getGpuOutputMode() === 'imagelight' && mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send('il:resync')
+  })
   // 出力方式（SETUPのトグル）。compat=GPU出力窓を止めて従来のCPU経路に戻す。
   ipcMain.on('gpu-output:method', (_e, m: string) => {
     if (m === 'compat') stopGpuOutput()

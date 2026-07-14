@@ -13,7 +13,12 @@ let win: BrowserWindow | null = null
 // il:sync-frame で駆動）。フェーズ2で「IL中はチャートを黙らせる(paused)」から置き換え。
 let mode: 'chart' | 'imagelight' = 'chart'
 let active = false
+// 画像照明モードで出力窓が「実絵を1枚描いた」か。false の間は Syphon へ publish せず、編集側の
+// 従来(CPU)フレームを本番にする＝モード切替/公演読込中に出力が黒く落ちない（レビュー指摘 finding14）。
+// chart モードは自走で即座に絵が出るので ready 判定は使わない（常に publish）。
+let outputReady = false
 let onActiveChange: ((active: boolean) => void) | null = null
+let onReadyChange: ((ready: boolean) => void) | null = null
 let publishErrors = 0 // 連続失敗カウント。ネイティブ側の異常で無限にログを吐かないため
 let sizeLogged = false
 let desiredW = 1920 // 出力解像度＝チャートのキャンバスサイズ（renderer から追従要求が来る）
@@ -49,10 +54,26 @@ export function getGpuOutputMode(): 'chart' | 'imagelight' {
 export function setGpuOutputMode(m: 'chart' | 'imagelight'): void {
   if (mode === m) return
   mode = m
+  setReady(false) // 新モードはまだ実絵を描いていない＝readyまでCPUを本番に
   // 窓側はモードに応じて描き手を切替（チャート描画とIL描画を同時に走らせない＝資源の奪い合い防止）
   sendToGpuOutput('output:mode', m)
   // 切替直後の paint 空白は正常＝見張り番の起点をリセットして誤発火を防ぐ
   lastPaintAt = Date.now()
+}
+
+export function isGpuOutputReady(): boolean {
+  return outputReady
+}
+
+/** 出力窓が実絵を1枚描いた合図（renderer の 'il:output-ready' 経由）。 */
+export function markGpuOutputReady(): void {
+  setReady(true)
+}
+
+function setReady(v: boolean): void {
+  if (outputReady === v) return
+  outputReady = v
+  onReadyChange?.(v)
 }
 
 function setActive(v: boolean): void {
@@ -81,11 +102,15 @@ export function startGpuChartOutput(
     /** 出力窓の準備ができた時に最新状態(チャート等)を流し込む。 */
     onReady: (wc: Electron.WebContents) => void
     onActive: (active: boolean) => void
+    /** 画像照明の「実絵が出た/まだ」の変化を全画面へ通知（編集側のCPU本番切替に使う）。 */
+    onReadyChange: (ready: boolean) => void
   }
 ): void {
   if (process.platform !== 'darwin' || !publisher.available) return
   if (win && !win.isDestroyed()) return
   onActiveChange = opts.onActive
+  onReadyChange = opts.onReadyChange
+  setReady(false) // 新しい窓＝まだ実絵なし
   try {
     win = new BrowserWindow({
       show: false,
@@ -121,8 +146,13 @@ export function startGpuChartOutput(
           `[gpu-output] paint ${info.codedSize.width}x${info.codedSize.height} ${fmt} (窓 ${w}x${h})`
         )
       }
-      // 奇数サイズ等で絵が desired より +1px 大きい時は desired に切って出す（レビュー指摘）
-      publisher.publishSurface(info, desiredW, desiredH)
+      // 画像照明モードで「まだ実絵が出ていない」間は publish しない＝この間は編集側のCPUフレームが
+      // 本番（黒落ち防止・finding14）。ready後 or chartモードは常に publish。退化フレーム（暗転）は
+      // ready後なら透明を出す＝正しく暗転する。
+      if (mode !== 'imagelight' || outputReady) {
+        // 奇数サイズ等で絵が desired より +1px 大きい時は desired に切って出す（レビュー指摘）
+        publisher.publishSurface(info, desiredW, desiredH)
+      }
       publishErrors = 0
     } catch (err) {
       if (++publishErrors <= 3) console.error('[gpu-output] publish 失敗:', err)

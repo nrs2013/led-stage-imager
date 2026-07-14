@@ -230,6 +230,8 @@ export interface LiveFrame {
   lightOnly: boolean
   colorWash: number
   baseLift: number
+  relief: number // 立体強調（contrast/saturate 仕上げ）。出力側 reliefPass に必須
+  lumReliefStrength: number // 光の向きの陰影（写真ごとの lumRelief の乗せ量）
   falloffPow: number
   outCap: number
   viewScene: number
@@ -2445,7 +2447,10 @@ export class ImageLightEngine {
       }
       this.outW = this.outCv.width
       this.outH = this.outCv.height
-      this.outCv.getContext('2d')!.clearRect(0, 0, this.outCv.width, this.outCv.height)
+      // 🔴 octx() 経由（素の getContext ではない）＝outCv のコンテキスト属性を octx が意図した
+      //   willReadFrequency で確定させる。ここで素に呼ぶと（照明モード突入直後の暗い初回描画で
+      //   毎回通る）互換経路の readOutputRGBA が GPU 読み戻しに落ちる（レビュー指摘）。
+      this.octx().clearRect(0, 0, this.outCv.width, this.outCv.height)
       return
     }
     const mw = this.mat.width
@@ -5053,20 +5058,39 @@ export class ImageLightEngine {
     if (!this.recordLiveEvents) return
     if (this.liveEvents.length < 64) this.liveEvents.push(e) // 取りこぼしより溢れ防止を優先
   }
+  /** GPU出力の生死で ON/OFF する。OFF→ON の切替時に古い発射イベントを捨てる
+   *  （残っていると再有効化の瞬間に「幻の炎」が出る・レビュー指摘）。 */
+  setRecordLiveEvents(v: boolean): void {
+    if (this.recordLiveEvents === v) return
+    this.recordLiveEvents = v
+    this.liveEvents = []
+  }
 
-  /** 重い状態（メディア類）が変わったかの署名。変わった時だけ serializeShow を送る。
-   *  dataURL の中身は舐めず参照だけ＝毎 bump 呼んでも安い。 */
+  /** メディア本体（写真/動画/マスク/画像灯体の絵）が変わったかの署名。
+   *  これが変わった時だけ blob を再送する（変わっていなければ受信側のキャッシュを使い回す）。
+   *  dataURL の中身は舐めず長さ・参照だけ＝毎 bump 呼んでも安い。 */
   mediaSignature(): string {
     const parts: string[] = []
-    for (const sc of this.scenes) {
-      parts.push(sc.kind, sc.src ? String(sc.src.length) : (sc.objectUrl ?? ''))
-      if (sc.warpBox) parts.push(JSON.stringify(sc.warpBox))
-      if (sc.pieces) for (const p of sc.pieces) parts.push(p.id, JSON.stringify(p.corners), String(p.src.x), String(p.src.y), String(p.src.w), String(p.src.h))
-    }
+    for (const sc of this.scenes) parts.push(sc.kind, sc.src ? String(sc.src.length) : (sc.objectUrl ?? ''))
     parts.push(this.maskSrc ? String(this.maskSrc.length) : '')
-    // 画像灯体の絵は LiveFrame に載せない（重い）＝ここで検知して公演チャネルで送る
     for (const b of this.beams) if (b.imageSrc) parts.push(String(b.imageSrc.length))
-    parts.push(String(this.beams.length))
+    return parts.join('|')
+  }
+
+  /** 公演 json の再送が要る変化か（メディア本体＋シーン構造＋ワープ/切り抜き＋画像灯体の位置＋灯体件数）。
+   *  灯体の gauge/色/PTZ/mute 等は LiveFrame が毎コマ運ぶのでここには含めない＝灯体移動では再送しない。
+   *  画像灯体は「位置(index)」まで見る＝並べ替え(renumberByPosition)で imageSrc が別灯体に付く事故を検知。 */
+  showSignature(): string {
+    const parts: string[] = [this.mediaSignature(), 'n' + this.beams.length]
+    this.scenes.forEach((sc, i) => {
+      if (sc.warpBox) parts.push(i + 'w' + JSON.stringify(sc.warpBox))
+      if (sc.pieces)
+        for (const p of sc.pieces)
+          parts.push(i + 'p' + p.id + JSON.stringify(p.corners) + [p.src.x, p.src.y, p.src.w, p.src.h].join(','))
+    })
+    this.beams.forEach((b, i) => {
+      if (b.imageSrc) parts.push('img' + i)
+    })
     return parts.join('|')
   }
 
@@ -5084,6 +5108,8 @@ export class ImageLightEngine {
       lightOnly: this.lightOnly,
       colorWash: this.colorWash,
       baseLift: this.baseLift,
+      relief: this.relief,
+      lumReliefStrength: this.lumReliefStrength,
       falloffPow: this.falloffPow,
       outCap: this.outCap,
       viewScene: this.activeScene,
@@ -5130,6 +5156,8 @@ export class ImageLightEngine {
     this.lightOnly = f.lightOnly
     this.colorWash = f.colorWash
     this.baseLift = f.baseLift
+    this.relief = f.relief
+    this.lumReliefStrength = f.lumReliefStrength
     this.falloffPow = f.falloffPow
     this.outCap = f.outCap
     this.decorClock = f.decorClock
@@ -5191,9 +5219,20 @@ export class ImageLightEngine {
     }
   }
 
+  // GPU出力への軽量再送用: 直近のフル書き出しで割り当てた media ファイル名を覚えておく。
+  // メディア本体が変わっていない時（ワープ/切り抜き/灯体並べ替えだけ）はこれを使い回し、
+  // 動画の blob→dataURL 変換（数秒・大量メモリ）を丸ごと省く。
+  private lastMediaFiles: (string | null)[] = []
+  private lastMaskFile: string | null = null
+
   /** 公演まるごとの書き出し材料を作る（リグ＋シーン一覧＋メディアのファイル）。
-   *  写真=元dataURL／動画=blobをfetchしてdataURL化。重いので保存時だけ呼ぶ。 */
-  async serializeShow(): Promise<{ json: string; media: { file: string; dataUrl: string }[] }> {
+   *  写真=元dataURL／動画=blobをfetchしてdataURL化。重いので保存時だけ呼ぶ。
+   *  opts.media=false（GPU出力への json だけ再送）: blob 変換を省き、前回のファイル名を
+   *  使い回して media は空で返す＝受信側は自分のキャッシュを使う。 */
+  async serializeShow(
+    opts?: { media?: boolean }
+  ): Promise<{ json: string; media: { file: string; dataUrl: string }[] }> {
+    const includeMedia = opts?.media !== false
     // 表示中シーンの最新ミュート/ソロを fix に確定してから書き出す。fix はシーンを離れる時にしか
     // 同期されないので、これが無いと「今のシーンで消した灯体」が保存されず、開き直すと点いてしまう。
     if (this.activeScene >= 0) this.saveFixState(this.activeScene)
@@ -5201,11 +5240,17 @@ export class ImageLightEngine {
     const scenesMeta: ShowSceneMeta[] = []
     for (let i = 0; i < this.scenes.length; i++) {
       const sc = this.scenes[i]
-      let dataUrl: string | null = null
-      if (sc.kind === 'photo') dataUrl = sc.src ?? sc.img?.src ?? null
-      else if (sc.kind === 'video' && sc.objectUrl) dataUrl = await blobUrlToDataUrl(sc.objectUrl)
-      const file = dataUrl ? `media/${String(i + 1).padStart(3, '0')}.${extFromDataUrl(dataUrl)}` : null
-      if (dataUrl && file) media.push({ file, dataUrl })
+      let file: string | null
+      if (includeMedia) {
+        let dataUrl: string | null = null
+        if (sc.kind === 'photo') dataUrl = sc.src ?? sc.img?.src ?? null
+        else if (sc.kind === 'video' && sc.objectUrl) dataUrl = await blobUrlToDataUrl(sc.objectUrl)
+        file = dataUrl ? `media/${String(i + 1).padStart(3, '0')}.${extFromDataUrl(dataUrl)}` : null
+        if (dataUrl && file) media.push({ file, dataUrl })
+        this.lastMediaFiles[i] = file
+      } else {
+        file = this.lastMediaFiles[i] ?? null // メディア不変＝受信側キャッシュのファイル名を再利用
+      }
       scenesMeta.push({
         name: sc.name,
         kind: sc.kind,
@@ -5228,9 +5273,14 @@ export class ImageLightEngine {
     // マスク画像（あれば）も media/ に書き出して show.json から参照
     let maskMeta: { file: string } | null = null
     if (this.maskSrc) {
-      const file = `media/mask.${extFromDataUrl(this.maskSrc)}`
-      maskMeta = { file }
-      media.push({ file, dataUrl: this.maskSrc })
+      if (includeMedia) {
+        const file = `media/mask.${extFromDataUrl(this.maskSrc)}`
+        this.lastMaskFile = file
+        media.push({ file, dataUrl: this.maskSrc })
+        maskMeta = { file }
+      } else if (this.lastMaskFile) {
+        maskMeta = { file: this.lastMaskFile }
+      }
     }
     const show: ShowFile = {
       app: 'LED STAGE IMAGER',

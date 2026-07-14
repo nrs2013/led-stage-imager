@@ -56,6 +56,7 @@ interface DecorApi {
   // GPU直結出力（見えない出力専用窓）との同期
   gpuOutputStatus?: () => Promise<boolean>
   onGpuOutputActive?: (cb: (active: boolean) => void) => (() => void) | void
+  onIlOutputReadyChanged?: (cb: (ready: boolean) => void) => (() => void) | void
   ilSyncShow?: (json: string, media: { file: string; dataUrl: string }[] | null) => void
   ilSyncFrame?: (frame: unknown) => void
   onIlResync?: (cb: () => void) => (() => void) | void
@@ -200,7 +201,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       if (q.includes('cap1920')) engine.setOutCap(1920)
       if (q.includes('cap3840')) engine.setOutCap(3840)
       if (q.includes('strobe')) engine.st.strobe = 'rnd'
-      console.log('[iltest] ready', { outCap: engine.outCap, strobe: engine.st.strobe })
+      if (q.includes('relief')) engine.setRelief(0.7) // 立体強調の同期をGPU/互換一致テストで確認する用
+      if (q.includes('blackout')) engine.st.master = 0 // 暗転→出力が透明になる（凍らない）ことの確認用
+      console.log('[iltest] ready', { outCap: engine.outCap, strobe: engine.st.strobe, relief: engine.relief })
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine])
@@ -576,32 +579,47 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   }, [])
 
   // ---- GPU直結出力への状態同期（設計書 2026-07-14-gpu-output-design.md フェーズ2）
-  // gpuActiveRef: 出力窓が生きているか（生きている間はCPUのpublishFrameを止め、こちらを流す）
+  // gpuActiveRef: 出力窓が生きているか。ilReadyRef: 出力窓が実絵を1枚描いたか。
+  // 両方 true の時だけ「GPUが本番を担う」＝編集側は出力合成を省き CPU publish を止める。
+  // gpuActive だが !ilReady の間（モード切替/公演読込中）は編集側の CPU が本番＝黒落ち防止(finding14)。
   const gpuActiveRef = useRef(false)
+  const ilReadyRef = useRef(false)
   const lastSyncFrameAtRef = useRef(0) // 静止中でも2Hzで心拍を送る（見張り番の誤発火防止）
   // 性能診断（?iltest 起動時のみ有効・console に5秒ごと）
   const perfRef = useRef({ on: window.location.search.includes('iltest'), n: 0, render: 0, at: 0 })
   useEffect(() => {
     const api = getApi()
-    // 公演まるごと同期: メディア署名が変わった時だけ media 込み、それ以外は送らない
-    // （灯体・FX等の軽い状態は毎フレームの LiveFrame が全部運ぶ）。
-    let lastSig = ''
+    // 公演まるごと同期: 構造署名(showSignature=写真/動画/マスク/ワープ/切り抜き/画像灯体位置)が
+    // 変わった時だけ json を送る（灯体の gauge/色等は毎フレームの LiveFrame が運ぶ）。
+    // メディア本体署名(mediaSignature)が変わった時だけ blob を同梱＝ワープ調整では動画を再送しない。
+    let lastShowSig = ''
+    let lastMediaSig = ''
     let timer: ReturnType<typeof setTimeout> | null = null
     let inflight = false
+    let dirty = false // inflight 中に来た要求＝完了後にもう一度送る（取りこぼし防止 finding7/11/16）
     const sendShow = (force: boolean): void => {
-      if (!gpuActiveRef.current || inflight) return
-      const sig = engine.mediaSignature()
-      if (!force && sig === lastSig) return
+      if (!gpuActiveRef.current) return
+      if (inflight) {
+        dirty = true // 実行中の serialize が終わったら再送する
+        return
+      }
+      const showSig = engine.showSignature()
+      if (!force && showSig === lastShowSig) return
+      const mediaSig = engine.mediaSignature()
+      const withMedia = force || mediaSig !== lastMediaSig
       inflight = true
+      dirty = false
       void engine
-        .serializeShow()
+        .serializeShow({ media: withMedia })
         .then(({ json, media }) => {
-          lastSig = sig
-          api?.ilSyncShow?.(json, media)
+          lastShowSig = showSig
+          lastMediaSig = mediaSig
+          api?.ilSyncShow?.(json, withMedia ? media : null) // media 不変なら null＝受信側キャッシュ再利用
         })
         .catch((err) => console.error('[il-sync] show sync failed', err))
         .finally(() => {
           inflight = false
+          if (dirty) sendShow(false) // 実行中に変更が入っていた＝最新を送り直す
         })
     }
     // 編集(bump)のたびに署名を見て、変わっていたら1秒後にまとめて送る（ドラッグ連射の合体）
@@ -612,18 +630,37 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     })
     const onActive = (v: boolean): void => {
       gpuActiveRef.current = v
-      engine.recordLiveEvents = v // 単発発射（炎）を出力窓へも流す
-      if (v) sendShow(true)
+      engine.setRecordLiveEvents(v) // 単発発射（炎）を出力窓へも流す・OFF→ONで古いイベントは捨てる
+      if (v) {
+        lastShowSig = '' // 窓が(再)起動＝キャッシュ前提が崩れるので次回フル送信
+        lastMediaSig = ''
+        sendShow(true)
+      } else {
+        // GPU が死んだ/互換へ切替＝出力窓の絵が最後のコマで凍る。CPU 経路が即1コマ出せるよう
+        // 強制描画を立てる（静止シーンだと tick が描かず古い絵が残る・finding9）。
+        ilReadyRef.current = false
+        forceRenderRef.current = true
+      }
     }
     void api?.gpuOutputStatus?.().then((v) => onActive(!!v))
     const offGpu = api?.onGpuOutputActive?.(onActive)
-    const offResync = api?.onIlResync?.(() => sendShow(true)) // 出力窓の再起動＝全量再送
+    // 出力窓が実絵を出した/まだ の通知＝GPUが本番を担えるかの判定に使う
+    const offReady = api?.onIlOutputReadyChanged?.((ready) => {
+      ilReadyRef.current = ready
+      if (!ready) forceRenderRef.current = true // 本番がCPUへ戻る＝即1コマ出す
+    })
+    const offResync = api?.onIlResync?.(() => {
+      lastShowSig = '' // 出力窓の再起動＝全量再送
+      lastMediaSig = ''
+      sendShow(true)
+    })
     return () => {
       offVer()
       offGpu?.()
+      offReady?.()
       offResync?.()
       if (timer) clearTimeout(timer)
-      engine.recordLiveEvents = false
+      engine.setRecordLiveEvents(false)
     }
   }, [engine])
 
@@ -700,10 +737,14 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         engine.isAnimating() ||
         rubberRef.current != null ||
         pieceCreateRef.current != null
+      // GPUが「本番を担っている」＝出力窓が生きて実絵も出した時だけ。gpuActiveだが実絵前（bridge）は
+      // まだCPUが本番なので、静止でも描画+CPU publish を続ける（handoff中の黒落ち/停止防止 finding14）。
+      const gpuAuthoritative = gpuActiveRef.current && ilReadyRef.current
+      const bridge = gpuActiveRef.current && !ilReadyRef.current
       // 卓の値が変わったフレームは間引きを外して即描画（DMXパッチ灯体がある時だけ意味を持つ）。
       const dmxRev = useStore.getState().dmxRev
       const dmxDirty = engine.hasDmxPatched() && dmxRev !== lastDmxRev
-      if (!animating && v === lastVRef.current && !forceRenderRef.current) {
+      if (!animating && v === lastVRef.current && !forceRenderRef.current && !bridge) {
         // 表示ズーム/パンだけの変化＝前回の絵を今の view で貼り直すだけ。
         // エンジン再計算も出力(Syphon/NDI)送信もしない＝本番出力へ負荷ゼロ。
         if (displayDirtyRef.current) {
@@ -742,9 +783,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           st.chart.settings.gamma ?? false
         )
       }
-      // GPU出力窓が担当中は出力合成(composeOutput・3840で重い)を編集側から省く。
-      // 互換へ落ちた瞬間に false ＝次のコマから自前で合成再開（フェイルセーフ）。
-      engine.skipCompose = gpuActiveRef.current
+      // GPUが本番を担っている間だけ出力合成(composeOutput・3840で重い)を編集側から省く。
+      // 互換 or bridge（実絵前）はCPU publish のため合成が要る＝ここでは省かない（finding14）。
+      engine.skipCompose = gpuAuthoritative
       const perfT0 = performance.now()
       engine.renderFrame(now)
       const perfT1 = performance.now()
@@ -770,9 +811,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           }
         }
       }
-      // 互換経路（GPU出力窓が無い/死んだ時だけ）: 従来どおり読み出して publish。
+      // CPU経路: GPUが本番を担っていない時（互換 or 出力窓の実絵前 bridge or 死亡）は従来どおり
+      // 読み出して publish＝main 側で本番として採用される（黒落ち防止 finding14）。
       // フェイルオープン：未接続が確証できる時だけ省く。
-      if (!gpuActiveRef.current && syphonReadyRef.current && api?.publishFrame) {
+      if (!gpuAuthoritative && syphonReadyRef.current && api?.publishFrame) {
         // 送出間隔は「60fps上限」かつ「送出コストの2倍以上」＝重い環境（高精細出力・遅いマシン）では
         // 自動で間引き、描画60fpsと応答性を死守する。速い環境ではそのまま60fps送出。
         // -4ms は rAF の揺らぎ許容・「+1コマ」進行で平均を正確に保つ（60を超えない）。
@@ -791,8 +833,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 
   // ---- デモ画像は入れない（空で始める）。素材はのむさんがドロップ／＋から読み込む
   useEffect(() => {
-    // デバッグの覗き窓（debug-bridge/検証）用にエンジンを常時露出（ローカルwindowのみ・無害）
-    ;(window as unknown as { __ilEngine?: ImageLightEngine }).__ilEngine = engine
+    // デバッグの覗き窓（debug-bridge/検証）用にエンジンを常時露出（ローカルwindowのみ・無害）。
+    // 退出時は必ず外す＝チャートモードだけで運用中に「最後の公演の全写真dataURL＋各キャンバス」を
+    // グローバル参照でGC不能のままピン留めしない（レビュー指摘 finding17）。
+    ;(window as unknown as { __ilEngine?: ImageLightEngine | null }).__ilEngine = engine
+    return () => {
+      ;(window as unknown as { __ilEngine?: ImageLightEngine | null }).__ilEngine = null
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

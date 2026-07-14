@@ -58,13 +58,58 @@
 
 ## フェーズ（一つずつ・各フェーズで実測）
 
-1. **配管の証明（チャートで最小構成)**: offscreen窓＋paint→publishSurfaceHandle を
-   チャート描画（chart:update購読・LiveView流用）で疎通。本番.app＋Syphon Recorderで60fps実測。
-   use-chart-output の readRGBA はこのフェーズで置き換わる（＝電飾60fps化の相乗り）。
-2. **画像照明（本丸）**: `?syphon-output` レンダラ＋il:sync-show/il:sync-frame。
-   なめらか(1920)→高精細(3840)の順で実測60fps。ピクセル一致確認（静止・ストロボ・ゴボ・星）。
-3. **Windows NDI**: software OSR→sendNdiFrame(BGRA)。build:win が通ってNDIが出るまで。
-4. **トグル＆自動フォールバック＋30分連続運転**（RSS横ばい確認）。
+1. **配管の証明（チャートで最小構成)**: ✅完了（2026-07-14・a656f4d）。58.9fps・ピクセル完全一致・
+   フォールバック実地確認・敵対レビュー21体の確定指摘7件修正込み。
+2. **画像照明（本丸）**: ✅実装完了（2026-07-14・67dc716）。実公演で絵の同等性確認済み
+   （GPU/互換の差分1.4%＝撮影時刻ズレのアニメ画素と丸めのみ）。
+   **60fpsの最終実測だけ未了**＝深夜検証環境の制約（下の「フェーズ2で学んだこと」参照）。
+3. **Windows NDI**: 未着手。software OSR→sendNdiFrame(BGRA)。build:win が通ってNDIが出るまで。
+4. **トグル**: ✅前倒しで実装済み（SETUPのOUTPUT行・localStorage永続）。30分連続運転は実施済み
+   （結果は変更メモ/引き継ぎ参照）。
+
+## フェーズ2 敵対レビュー（26エージェント）→ 確定16件を修正（2026-07-14）
+
+本番影響の大きい順（すべて実コードで裏取り済み）:
+- 🔴 **暗転/写真なし/復元中に paint が止まり見張り番が誤発火→GPU経路が本番中に静かに死ぬ**
+  ＋暗転しても直前の明るい絵が残る → 出力窓の blit を「退化フレーム(outW≤16)は透明化して必ず
+  paint を起こす」に変更。復元中も最後の絵を保持して paint 継続。実測: 暗転で60fps・透明16x9・
+  フォールバック誤発火0（互換が publish していた 16x9 透明と一致）。
+- 🔴 **relief(立体強調)/lumReliefStrength が同期経路に無く GPU出力だけ立体感ゼロ** →
+  LiveFrame に追加。実測: relief=0.7 で GPU/互換の差 0.02%（丸め誤差のみ・輝度ほぼ一致）。
+- 🔴 **炎の単発発射イベントがコアレッシング/復元で消える(flameHoldRelease 消失=炎が消えない)** →
+  受信側で events を捨てず連結、復元中は pending に温存。
+- 🔴 **出力窓エンジンが unmount で後始末されず WebGL枯渇/動画再生継続/ObjectURLリーク** →
+  cleanup で disposeMedia。
+- **モード切替/互換→高速トグル/公演読込中に出力が黒落ち** → pull型ハンドシェイク
+  (il:request-show)＋「出力窓が実絵を1枚描くまで(il:output-ready)は編集側CPUが本番」に。
+- **公演同期の inflight 握り潰し** → 完了後に再送(dirtyフラグ)。**restoreShow の交錯** → 直列化。
+- **ワープ/切り抜き調整で全動画を再送** → 署名を media(本体)と show(構造)に分離、
+  構造だけ変化時は json のみ送り blob はキャッシュ再利用。
+- **画像灯体の並べ替えで出力の絵が別灯体に残る** → showSignature に画像灯体の位置を含める。
+- **GPU死亡/互換切替で静止シーンだと古い絵が凍る** → onActive(false) で強制再描画+publish。
+- **outCv の willReadFrequently が退化パスで失われ互換経路が GPU読み戻しに落ちる** → octx() に統一。
+- **__ilEngine 常時露出が退出後も公演をピン留め** → 退出時に null。
+- **幻の炎(recordLiveEvents OFF/ONで残留イベント再生)** → setRecordLiveEvents で切替時クリア。
+
+## フェーズ2で学んだこと（2026-07-14）
+
+- 🔴 **22fps天井の正体は読み出しだけではなかった**: 3840 の出力合成(composeOutput)は
+  willReadFrequently のCPUキャンバスで1コマ30-45ms（--disable-frame-rate-limit で実コストが
+  露出・通常測定では非同期エンキューで4-5msに見える罠）。対策2本:
+  ①出力窓は outCv をGPUキャンバス化（engine.outReadback=false・33ms→9.5ms実測）
+  ②編集側は GPU出力中 composeOutput を丸ごとスキップ（engine.skipCompose）
+- **出力窓は「最新コマだけ描く」**（コアレッシング）: 着信＞処理の時に行列が無限に伸びて
+  遅延が増え続けるのを防ぐ。追いつける時は全コマ素通し。
+- 🔴 **初期化レース2件**（実測で発見）:
+  ①出力窓のReactリスナー登録前に届いたIPCは消える → pull型ハンドシェイク(gpu-output:hello)
+  ②編集窓の did-finish-load(onload) は React の起動より遅い → モードのリセットに使うと
+    先に立った imagelight を chart に巻き戻す → did-navigate で行う
+- **深夜の headless 検証は rAF が25-30Hzに縛られる**（画面スリープ）＝送り手(編集rAF)を
+  60Hzで回せない。60fps最終実測は画面が起きている環境で行うこと。
+  --disable-frame-rate-limit 起動は能力測定に使える（1920で編集55fps実証済み）が、
+  非同期描画コストが同期化されて見えるので数字の解釈に注意。
+- 開発用フラグ: `DECOR_QUERY='iltest&cap3840&strobe'` で照明モード直行＋前回データ復元＋
+  負荷。性能診断ログ（編集側=iltest時のみ[il perf]・出力窓=常時[gpu-il perf]・5秒毎）。
 
 ## リスク（先に知っておく）→ フェーズ1で実測・確定済み（2026-07-14）
 
