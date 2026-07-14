@@ -1,12 +1,21 @@
 // GPU直結出力（2026-07-14 設計書: docs/superpowers/specs/2026-07-14-gpu-output-design.md）。
-// 見えない offscreen ウィンドウ(?syphon-output)が出力の絵だけを描き、Chromium の paint が渡す
-// IOSurface をコピーなしで Syphon へ publish する。従来の「毎コマ getImageData→IPC」の
-// CPUコピー(3840で毎秒約2GB)が消える＝高精細でも60fpsが物理的に可能になる。
-// Mac + Syphon が使える時だけ動く。死んだら自動で従来(互換)経路へ戻る（use-chart-output が再開）。
+// 見えない offscreen ウィンドウ(?syphon-output)が出力の絵だけを描き、Chromium の paint が渡すフレームを
+// 従来の「毎コマ getImageData→IPC」のCPUコピー(3840で毎秒約2GB)なしで送る＝高精細でも高fpsが可能。
+//  - Mac: useSharedTexture=true＝IOSurface をゼロコピーで Syphon へ（最速）。
+//  - Windows/Linux: NDI は CPU の BGRA が要る＝useSharedTexture=false（ソフトOSR）で paint の
+//    NativeImage(toBitmap=BGRA)を sendNdiFrame へ。隠し窓はpaintを間引くので invalidate で毎コマ促す。
+//    実測(Mac代理): 3840で56fps・toBitmap 4ms＝従来Windows経路(3840で約22fps)を大きく上回る。
+// 死んだら自動で従来(互換)経路へ戻る（editor が publishFrame を再開する）。
 import { BrowserWindow, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import type { OutputPublisher, PaintTextureInfo } from './syphon-publisher'
+import { sendNdiFrame, getNdiDirectStatus } from './ndi-direct'
+
+// ソフトウェアOSR経路を使うか。Mac は Syphon ゼロコピー、それ以外(Windows/Linux)は NDI へCPU送出。
+// GPU_OSR_SOFT=1 で Mac でも強制（代理実測用）。
+const SOFT_OSR = process.platform !== 'darwin' || process.env.GPU_OSR_SOFT === '1'
+let softInvalidate: ReturnType<typeof setInterval> | null = null // ソフトOSRの paint 強制発火タイマー
 
 let win: BrowserWindow | null = null
 // 出力窓が今どちらの絵を描くか。chart=電飾チャート（自走）／imagelight=画像照明（編集側が
@@ -91,11 +100,15 @@ function fallback(reason: string): void {
     clearInterval(watchdog)
     watchdog = null
   }
+  if (softInvalidate) {
+    clearInterval(softInvalidate)
+    softInvalidate = null
+  }
   setActive(false)
   if (w && !w.isDestroyed()) w.destroy()
 }
 
-/** チャートの GPU 直結出力を開始する。Mac + Syphon 利用可の時だけ実際に動く。 */
+/** GPU 直結出力を開始する。Mac は Syphon 利用可の時、Windows/Linux は NDI 送信機がある時に動く。 */
 export function startGpuChartOutput(
   publisher: OutputPublisher,
   opts: {
@@ -106,7 +119,11 @@ export function startGpuChartOutput(
     onReadyChange: (ready: boolean) => void
   }
 ): void {
-  if (process.platform !== 'darwin' || !publisher.available) return
+  // Mac=Syphon が使えること。Windows/Linux=NDI 送信機が立っていること（無ければ出力窓を作らず
+  // 従来の editor→publishFrame→sendNdiFrame 経路に任せる）。
+  const macSyphon = process.platform === 'darwin' && publisher.available
+  const softNdi = process.platform !== 'darwin' && getNdiDirectStatus().active
+  if (!macSyphon && !softNdi) return
   if (win && !win.isDestroyed()) return
   onActiveChange = opts.onActive
   onReadyChange = opts.onReadyChange
@@ -122,7 +139,7 @@ export function startGpuChartOutput(
         preload: join(__dirname, '../preload/index.js'),
         sandbox: false,
         backgroundThrottling: false,
-        offscreen: { useSharedTexture: true }
+        offscreen: SOFT_OSR ? { useSharedTexture: false } : { useSharedTexture: true }
       }
     })
   } catch (e) {
@@ -131,36 +148,71 @@ export function startGpuChartOutput(
   }
   const wc = win.webContents
   wc.setFrameRate(60)
-  wc.on('paint', (e) => {
-    const tex = (e as { texture?: Electron.OffscreenSharedTexture }).texture
-    if (!tex) return
-    lastPaintAt = Date.now()
-    try {
-      const info = tex.textureInfo as unknown as PaintTextureInfo
-      if (!sizeLogged) {
-        // Retina倍率の罠チェック: OSR が窓サイズと違う大きさで描いていないか一度だけ記録
-        sizeLogged = true
-        const [w, h] = win && !win.isDestroyed() ? win.getContentSize() : [0, 0]
-        const fmt = (info as unknown as { pixelFormat?: string }).pixelFormat ?? '?'
-        console.log(
-          `[gpu-output] paint ${info.codedSize.width}x${info.codedSize.height} ${fmt} (窓 ${w}x${h})`
-        )
+  if (SOFT_OSR) {
+    // ソフトOSR: paint が CPU ビットマップ(NativeImage・BGRA)を渡す＝そのまま NDI へ（並べ替え不要）。
+    // Windows/Linux の本番経路。Mac では GPU_OSR_SOFT=1 の代理実測でのみここに来る。
+    let pn = 0
+    let pfps = Date.now()
+    wc.on('paint', (_e, _dirty, image) => {
+      lastPaintAt = Date.now()
+      try {
+        // 画像照明モードは実絵が出るまで（!ready）は編集側CPUが本番＝ここでは送らない（黒落ち防止）。
+        if (mode !== 'imagelight' || outputReady) {
+          const s = image.getSize()
+          // desired と食い違う退化/過渡フレームは送らない（受け手の解像度が暴れないよう）。
+          if (s.width === desiredW && s.height === desiredH) {
+            sendNdiFrame(s.width, s.height, image.toBitmap(), true) // true=BGRA
+          }
+        }
+        publishErrors = 0
+      } catch (err) {
+        if (++publishErrors <= 3) console.error('[gpu-output] NDI送出失敗:', err)
+        if (publishErrors >= 10) fallback('NDI送出が連続失敗')
       }
-      // 画像照明モードで「まだ実絵が出ていない」間は publish しない＝この間は編集側のCPUフレームが
-      // 本番（黒落ち防止・finding14）。ready後 or chartモードは常に publish。退化フレーム（暗転）は
-      // ready後なら透明を出す＝正しく暗転する。
-      if (mode !== 'imagelight' || outputReady) {
-        // 奇数サイズ等で絵が desired より +1px 大きい時は desired に切って出す（レビュー指摘）
-        publisher.publishSurface(info, desiredW, desiredH)
+      if (Date.now() - pfps > 5000) {
+        console.log(`[gpu-output] NDI ${(pn / ((Date.now() - pfps) / 1000)).toFixed(1)}fps @${desiredW}x${desiredH}`)
+        pn = 0
+        pfps = Date.now()
       }
-      publishErrors = 0
-    } catch (err) {
-      if (++publishErrors <= 3) console.error('[gpu-output] publish 失敗:', err)
-      if (publishErrors >= 10) fallback('publishSurfaceHandle が連続失敗')
-    } finally {
-      tex.release() // 🔴 同時に持てる枚数に上限あり＝必ず即返す
-    }
-  })
+      pn++
+    })
+    // 隠し(show:false)のソフトOSRは damage があっても paint を大幅に間引く（実測1fps）。
+    // invalidate() で毎コマ強制発火させて 60fps を引き出す（実測: これで 3840=56fps）。
+    softInvalidate = setInterval(() => {
+      if (win && !win.isDestroyed()) win.webContents.invalidate()
+    }, 1000 / 60)
+  } else {
+    wc.on('paint', (e) => {
+      const tex = (e as { texture?: Electron.OffscreenSharedTexture }).texture
+      if (!tex) return
+      lastPaintAt = Date.now()
+      try {
+        const info = tex.textureInfo as unknown as PaintTextureInfo
+        if (!sizeLogged) {
+          // Retina倍率の罠チェック: OSR が窓サイズと違う大きさで描いていないか一度だけ記録
+          sizeLogged = true
+          const [w, h] = win && !win.isDestroyed() ? win.getContentSize() : [0, 0]
+          const fmt = (info as unknown as { pixelFormat?: string }).pixelFormat ?? '?'
+          console.log(
+            `[gpu-output] paint ${info.codedSize.width}x${info.codedSize.height} ${fmt} (窓 ${w}x${h})`
+          )
+        }
+        // 画像照明モードで「まだ実絵が出ていない」間は publish しない＝この間は編集側のCPUフレームが
+        // 本番（黒落ち防止・finding14）。ready後 or chartモードは常に publish。退化フレーム（暗転）は
+        // ready後なら透明を出す＝正しく暗転する。
+        if (mode !== 'imagelight' || outputReady) {
+          // 奇数サイズ等で絵が desired より +1px 大きい時は desired に切って出す（レビュー指摘）
+          publisher.publishSurface(info, desiredW, desiredH)
+        }
+        publishErrors = 0
+      } catch (err) {
+        if (++publishErrors <= 3) console.error('[gpu-output] publish 失敗:', err)
+        if (publishErrors >= 10) fallback('publishSurfaceHandle が連続失敗')
+      } finally {
+        tex.release() // 🔴 同時に持てる枚数に上限あり＝必ず即返す
+      }
+    })
+  }
   // 見張り番: 生きているはずなのに paint が来ない＝出力が黙って凍る故障（レビュー指摘・
   // 設計書の「paintが来なくなったら互換へ」）。チャートは30fps自走・画像照明は編集側の
   // 毎フレーム駆動＋静止中2Hz心拍＝健全なら paint は必ず流れ続ける（静止16.9fps実測）。
@@ -215,6 +267,10 @@ export function stopGpuOutput(): void {
   if (watchdog) {
     clearInterval(watchdog)
     watchdog = null
+  }
+  if (softInvalidate) {
+    clearInterval(softInvalidate)
+    softInvalidate = null
   }
   setActive(false)
   if (w && !w.isDestroyed()) w.destroy()

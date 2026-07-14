@@ -43,11 +43,17 @@ let rxCount = 0
 let connTimer: NodeJS.Timeout | null = null
 let structsReady = false
 
-// RGBA のFourCC（バイト並び R,G,B,A）。レンダラの getImageData は RGBA 並び。
+// RGBA のFourCC（バイト並び R,G,B,A）。レンダラの getImageData は RGBA 並び（従来のCPU経路）。
 const FOURCC_RGBA =
   'R'.charCodeAt(0) |
   ('G'.charCodeAt(0) << 8) |
   ('B'.charCodeAt(0) << 16) |
+  ('A'.charCodeAt(0) << 24)
+// BGRA のFourCC。GPU出力窓の paint(NativeImage.toBitmap) は BGRA 並び＝並べ替え不要でそのまま送れる。
+const FOURCC_BGRA =
+  'B'.charCodeAt(0) |
+  ('G'.charCodeAt(0) << 8) |
+  ('R'.charCodeAt(0) << 16) |
   ('A'.charCodeAt(0) << 24)
 
 // 毎フレーム作り直さず再利用する送信フレーム（中身だけ書き換える）。
@@ -144,18 +150,21 @@ export function startNdiDirect(name: string, libPath: string): boolean {
   }
 }
 
-/** RGBA フレーム（width*height*4 の連続バイト）を 1 枚送る。active でなければ無視。 */
+/** フレーム（width*height*4 の連続バイト）を 1 枚送る。active でなければ無視。
+ *  bgra=true は GPU出力窓の paint(BGRA)をそのまま送る用（並べ替え不要）。false=従来のRGBA(CPU経路)。 */
 export function sendNdiFrame(
   width: number,
   height: number,
-  rgba: Uint8Array | Uint8ClampedArray | Buffer
+  data: Uint8Array | Uint8ClampedArray | Buffer,
+  bgra = false
 ): void {
   if (!sender || !sendVideo || width <= 0 || height <= 0) return
-  const buf = Buffer.isBuffer(rgba)
-    ? rgba
-    : Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength)
+  const buf = Buffer.isBuffer(data)
+    ? data
+    : Buffer.from(data.buffer, data.byteOffset, data.byteLength)
   frame.xres = width
   frame.yres = height
+  frame.FourCC = bgra ? FOURCC_BGRA : FOURCC_RGBA
   frame.p_data = buf
   frame.line_stride_in_bytes = width * 4
   try {

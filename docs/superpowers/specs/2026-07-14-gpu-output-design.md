@@ -63,7 +63,7 @@
 2. **画像照明（本丸）**: ✅実装完了（2026-07-14・67dc716）。実公演で絵の同等性確認済み
    （GPU/互換の差分1.4%＝撮影時刻ズレのアニメ画素と丸めのみ）。
    **60fpsの最終実測だけ未了**＝深夜検証環境の制約（下の「フェーズ2で学んだこと」参照）。
-3. **Windows NDI**: 未着手。software OSR→sendNdiFrame(BGRA)。build:win が通ってNDIが出るまで。
+3. **Windows NDI**: ✅実装完了（2026-07-14）。下の「フェーズ3」節参照。
 4. **トグル**: ✅前倒しで実装済み（SETUPのOUTPUT行・localStorage永続）。30分連続運転は実施済み
    （結果は変更メモ/引き継ぎ参照）。
 
@@ -90,6 +90,28 @@
 - **outCv の willReadFrequently が退化パスで失われ互換経路が GPU読み戻しに落ちる** → octx() に統一。
 - **__ilEngine 常時露出が退出後も公演をピン留め** → 退出時に null。
 - **幻の炎(recordLiveEvents OFF/ONで残留イベント再生)** → setRecordLiveEvents で切替時クリア。
+
+## フェーズ3: Windows NDI（2026-07-14 実装完了）
+
+Windows/Linux は Syphon が無く NDI 出力＝CPU の BGRA バッファが要る。IOSurface ゼロコピーは
+使えないので、**ソフトウェアOSR**（`offscreen: { useSharedTexture: false }`）で同じ「見えない
+出力窓」を動かし、paint の NativeImage(`toBitmap()`=BGRA)を `sendNdiFrame(...,bgra=true)` へ。
+
+- 🔴 **決定的な罠**: 隠し窓(show:false)のソフトOSRは damage があっても paint を激しく間引く
+  （Mac代理実測で **1fps**）。`webContents.invalidate()` を 60Hz で叩いて強制発火させると解消。
+  実測: **invalidate ありで 3840=56fps・toBitmap 4ms**（研究の悲観予想30-45fpsより良い）。
+  従来Windows経路（editor CPU compose+getImageData で3840=約22fps）を大きく上回る。
+- `toBitmap()` は Mac/Windows とも BGRA（Skia の kN32）＝NDI の BGRA FourCC でそのまま送れる
+  （FOURCC_BGRA を ndi-direct に追加・並べ替え不要）。
+- 選択: `SOFT_OSR = platform!=='darwin' || GPU_OSR_SOFT==='1'`。startGpuChartOutput の起動条件も
+  「Mac=Syphon可 / それ以外=NDI送信機あり」に拡張。編集側のCPU経路ゲート(isGpuOutputActive)・
+  ready ハンドシェイク・見張り番・モード切替は Mac とそのまま共用。SETUPの「高速/互換」トグルが
+  Windows でも意味を持つ（高速=ソフトOSR→NDI / 互換=従来 editor→publishFrame→sendNdiFrame）。
+- 🔴 **未検証**: 実機 Windows での NDI 受信（このMacにWindowsが無い）。Mac代理で
+  「レンダリング＝shared-texture経路とピクセル一致・paint 56fps・toBitmap=BGRA 33MB」までは実証。
+  残る不確実性は「Windowsのソフトウェアン OSR paint レート（Mac固有の間引きが invalidate で解けたが
+  Windowsで同様か）」と「NDI BGRA の色が受け手で正しいか」の2点＝実機Windowsで要確認。
+  互換トグルがあるので万一おかしくても従来経路へ即避難できる。
 
 ## フェーズ2で学んだこと（2026-07-14）
 
