@@ -119,10 +119,15 @@ export function startGpuChartOutput(
     onReadyChange: (ready: boolean) => void
   }
 ): void {
-  // Mac=Syphon が使えること。Windows/Linux=NDI 送信機が立っていること（無ければ出力窓を作らず
-  // 従来の editor→publishFrame→sendNdiFrame 経路に任せる）。
+  // Mac=Syphon が使えれば自動で使う（Mac実機で検証済み）。
+  // 🔴 Windows/Linux のソフトOSR経路は「実機で未検証」かつ現場で起動時フリーズを確認したため、
+  //    既定では動かさない＝Windows は従来の editor→publishFrame→sendNdiFrame（動作実績あり）に任せる。
+  //    実機Windowsで検証する時だけ環境変数 GPU_OSR_SOFT=1 で明示的に有効化する（既定オフ＝安全）。
   const macSyphon = process.platform === 'darwin' && publisher.available
-  const softNdi = process.platform !== 'darwin' && getNdiDirectStatus().active
+  const softNdi =
+    process.platform !== 'darwin' &&
+    process.env.GPU_OSR_SOFT === '1' &&
+    getNdiDirectStatus().active
   if (!macSyphon && !softNdi) return
   if (win && !win.isDestroyed()) return
   onActiveChange = opts.onActive
