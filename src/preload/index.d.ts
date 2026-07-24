@@ -69,6 +69,8 @@ export interface DecorApi {
   autosaveRead: () => Promise<string | null>
   /** Rename (restart) the Syphon source. */
   renameSyphon: (name: string) => Promise<boolean>
+  /** renderer 準備完了を main へ通知し、保留中の開くファイルを配送させる。 */
+  notifyReadyForOpen: () => void
 }
 
 declare global {

@@ -45,6 +45,7 @@ interface DecorApi {
   onOpenChartPath?: (cb: (json: string, path?: string) => void) => (() => void) | void
   chartOpened?: (path: string) => void
   onOpenShowPath?: (cb: (p: { bytes: Uint8Array; path: string }) => void) => (() => void) | void
+  notifyReadyForOpen?: () => void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
@@ -268,6 +269,7 @@ function useOpenShowFile(): void {
       })
       st.setImageLight(true)
     })
+    getApi()?.notifyReadyForOpen?.()
     return () => off?.()
   }, [])
 }

@@ -157,6 +157,8 @@ const api = {
     ipcRenderer.on('imagelight:open-path', h)
     return () => ipcRenderer.removeListener('imagelight:open-path', h)
   },
+  // 出力窓（renderer）マウント完了 → main に保留中の開くファイルを配送させる
+  notifyReadyForOpen: (): void => ipcRenderer.send('open-file:renderer-ready'),
   autosaveWrite: (json: string): Promise<boolean> =>
     ipcRenderer.invoke('chart:autosave-write', json),
   autosaveRead: (): Promise<string | null> => ipcRenderer.invoke('chart:autosave-read'),

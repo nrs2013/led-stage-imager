@@ -194,7 +194,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   //   前回データを開いて指定の負荷を掛ける（GPU出力の性能実測用・通常起動では無効）。
   useEffect(() => {
     const q = window.location.search
-    if (!q.includes('iltest')) return
+    if (useStore.getState().pendingShowFile) return
     void (async () => {
       const d = await getApi()?.autosaveImageLightRead?.()
       if (d) await engine.restoreShow(d.json, d.media)
@@ -909,7 +909,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     const onKey = (e: KeyboardEvent): void => {
       if (e.defaultPrevented) return // 先に処理済み（psheet/入力欄など）のキーを二重処理しない
       const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      const isTextTarget = !!t && ((t.tagName === 'INPUT' && !/^(range|checkbox|radio|button|submit|reset|color|file)$/i.test((t as HTMLInputElement).type || 'text')) || t.tagName === 'TEXTAREA' || t.isContentEditable)
       // ⌘+S（Ctrl+S）＝上書き保存／⇧⌘S＝別名保存。どのモードでも効く（ブラウザ既定の保存は止める）。
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
@@ -1013,6 +1013,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
+      if (isTextTarget) return
       if (e.key === '?') {
         setShowKeys(true)
         e.preventDefault()
@@ -1086,7 +1087,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         ? (Object.keys(engine.fxKey) as FxKey[]).find((k) => engine.fxKey[k] === code)
         : undefined
       if (fk) {
-        engine.fxToggle(fk)
+        if (!e.repeat) engine.fxToggle(fk)
         e.preventDefault()
         return
       }

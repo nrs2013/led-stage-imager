@@ -1265,6 +1265,11 @@ export class ImageLightEngine {
 
   // パニック／タイミング
   private t0 = performance.now()
+  // 位置ブレンド（シーン切替時に前シーンの見た目の向き→新シーンの生きた向きを混ぜる）用の状態
+  private _aimFrom: number[] | null = null
+  private _aimT0 = 0
+  private _aimMs = 0
+  private _aimActive = false
   panicGain = 1
   private panicSeq = 0
 
@@ -1984,6 +1989,10 @@ export class ImageLightEngine {
     if (this.dmxFrame) this.applyDmx(this.dmxFrame, this.dmxGamma, now) // 卓(DMX)支配の灯体に先に焼く
     this.updateVideoFrame() // 動画シーンなら mat を今のコマへ
     const ms = now - this.t0
+    const _aimK = this._aimActive ? Math.min(1, (now - this._aimT0) / this._aimMs) : 1
+    const _aimE = _aimK < 0.5 ? 2 * _aimK * _aimK : 1 - Math.pow(-2 * _aimK + 2, 2) / 2
+    const _aimBlend = this._aimActive && this._aimFrom && _aimK < 1
+    if (this._aimActive && _aimK >= 1) this._aimActive = false
     const decorT = this.decorTime(now) // 電飾チェイス用の時計（playing 中だけ進む・1フレーム1回）
     const QW = IW
     const QH = IH
@@ -2035,7 +2044,7 @@ export class ImageLightEngine {
       beams.forEach((b, i) => {
         b._cn = this.colorNow(b, i, ms)
         if (!b.motif) {
-          b._tn = this.tiltNow(b, ms) + this.hangDeg(b) // 上吊りは180度回して真下基準
+          b._tn = (_aimBlend && this._aimFrom![i] != null ? this._aimFrom![i] + (this.tiltNow(b, ms) - this._aimFrom![i]) * _aimE : this.tiltNow(b, ms)) + this.hangDeg(b) // 上吊りは180度回して真下基準
           b._zp = this.st.zoompulse ? zoomPulseK(this.fxp.zoompulse, ms) : 1
         }
       })
@@ -4059,6 +4068,14 @@ export class ImageLightEngine {
   }
   private applyLook(L: Look): void {
     if (!L) return
+    // 位置ブレンド: 前シーンの見た目の向きをスナップ→新シーンの生きた向きへトランジション時間で混ぜる
+    {
+      const _n = performance.now()
+      this._aimFrom = this.beams.map((b) => this.tiltNow(b, _n - this.t0))
+      this._aimT0 = _n
+      this._aimMs = this.sceneFadeMs > 0 ? this.sceneFadeMs : 600
+      this._aimActive = !(this.st.search && L.fxst.search)
+    }
     const s = this.st
     // 旧シーン互換: 記録に無いFXは確実にOFF
     s.chase = s.search = s.searchRandom = s.colorChase = false
@@ -4081,7 +4098,6 @@ export class ImageLightEngine {
     })
     // 旧シーン互換: chasePalette が無ければ空（=8色ぜんぶ）に
     this.chasePalette = (L.chasePalette ?? []).map((c) => c.slice() as RGB3)
-    this.t0 = performance.now()
   }
   toggleArmSave(): void {
     this.armedSave = !this.armedSave
@@ -4142,6 +4158,14 @@ export class ImageLightEngine {
   private startSceneFade(L: Look): void {
     if (!L) return
     this.sceneFadeTo = L // 割込み(暗転/全点灯)時に目標へ即ジャンプで完了させるため覚える
+    // 位置ブレンド: 前シーンの見た目の向きをスナップ→新シーンの生きた向きへトランジション時間で混ぜる
+    {
+      const _n = performance.now()
+      this._aimFrom = this.beams.map((b) => this.tiltNow(b, _n - this.t0))
+      this._aimT0 = _n
+      this._aimMs = this.sceneFadeMs > 0 ? this.sceneFadeMs : 600
+      this._aimActive = !(this.st.search && L.fxst.search)
+    }
     // 復元データが壊れていても落ちないよう lights を検証して使う。
     const lights = Array.isArray(L.lights) ? L.lights : []
     const from = this.beams.map((b) => ({
@@ -4167,7 +4191,6 @@ export class ImageLightEngine {
         b.solo = !!t.solo
       }
     })
-    this.t0 = performance.now()
     const dur = this.sceneFadeMs
     const seq = this.sceneFadeSeq
     const t0 = performance.now()
@@ -4189,7 +4212,7 @@ export class ImageLightEngine {
         ] as RGB3
         b.pan = lerp(f.pan, t.pan, e)
         // 灯体は±110で止める（applyLookと同じ。古いシーンの±180が居座らないように）。Lookは書き換えない。
-        b.tilt = b.motif ? lerp(f.tilt, t.tilt, e) : clampTilt(lerp(f.tilt, t.tilt, e))
+        b.tilt = b.motif ? t.tilt : clampTilt(t.tilt)
         b.zoom = lerp(f.zoom, t.zoom, e)
       })
       this.bump(false)

@@ -242,9 +242,9 @@ function broadcast(channel: string, ...args: unknown[]): void {
   }
 }
 
-function deliverOpenFile(p: string): void {
+function deliverOpenFile(p: string, force?: boolean): void {
   const w = mainWindow
-  const ready = w && !w.isDestroyed() && !w.webContents.isLoading()
+  const ready = w && !w.isDestroyed() && (force || !w.webContents.isLoading())
   const isShow = p.toLowerCase().endsWith('.ledshow')
   // チャートの ⌘S 上書き先(currentChartPath)はここで eager に覚えない。renderer が「実際に開けた」時だけ
   // 'chart:opened' で確定する。ここで覚えると、開くのをキャンセル/読込失敗した後の ⌘S が、開こうと
@@ -271,6 +271,10 @@ function deliverOpenFile(p: string): void {
 app.on('open-file', (e, p) => {
   e.preventDefault()
   deliverOpenFile(p)
+})
+// 編集画面の React が「開く準備ができた」合図＝保留中ファイルを強制的に流す（load完了レース回復）
+ipcMain.on('open-file:renderer-ready', (e) => {
+  if (mainWindow && e.sender === mainWindow.webContents && pendingOpenPath) deliverOpenFile(pendingOpenPath, true)
 })
 // Windows/Linux: ダブルクリック起動時はファイルパスが引数で来る（macOS は open-file 経由）。
 if (process.platform !== 'darwin') {
@@ -416,7 +420,6 @@ function createWindow(): void {
 
   // ダブルクリックで開かれた（起動直後で保留中の）ファイルを、画面ができたら流し込む。
   mainWindow.webContents.on('did-finish-load', () => {
-    if (pendingOpenPath) deliverOpenFile(pendingOpenPath)
     // 起動直後に起きた受信機のエラー（ポート使用中など）は画面が無い時に飛んで消えるので、
     // 画面ができたここで送り直す＝「無言のNo Signal」をなくす。
     if (lastArtnetStatus) mainWindow?.webContents.send('artnet:status', lastArtnetStatus)
