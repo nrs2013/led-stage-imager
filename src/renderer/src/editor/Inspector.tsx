@@ -109,12 +109,22 @@ function modesForFamily(
 
 const rowGap = 14
 
+/** 反転ボタン（単体選択パネル用）。Multi パネルの整列ボタンと同じ当たり判定に揃える。 */
+const mirrorBtn: React.CSSProperties = {
+  ...buttonStyle({}),
+  flex: 1,
+  padding: '9px 0',
+  fontSize: 12,
+  fontFamily: F.ui
+}
+
 export function Inspector(): React.JSX.Element {
   const chart = useStore((s) => s.chart)
   const selectedId = useStore((s) => s.selectedId)
   const selectedIds = useStore((s) => s.selectedIds)
   const alignShapes = useStore((s) => s.alignShapes)
   const distributeShapes = useStore((s) => s.distributeShapes)
+  const mirrorShapes = useStore((s) => s.mirrorShapes)
   const updateShape = useStore((s) => s.updateShape)
   const upsertFixture = useStore((s) => s.upsertFixture)
   const bulkPatch = useStore((s) => s.bulkPatch)
@@ -193,6 +203,22 @@ export function Inspector(): React.JSX.Element {
               onClick={() => distributeShapes('v')}
             >
               Distribute V
+            </button>
+          </div>
+
+          <SectionTitle>Mirror</SectionTitle>
+          <div
+            style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}
+          >
+            選んだ {ids.length} 個を、位置関係を保ったまま1つの固まりとして裏返します（コピーは作りません）。⌘Z
+            で戻せます。
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: rowGap }}>
+            <button style={ab} title="左右に反転（選択全体の中心が軸）" onClick={() => mirrorShapes('h')}>
+              Mirror H
+            </button>
+            <button style={ab} title="上下に反転（選択全体の中心が軸）" onClick={() => mirrorShapes('v')}>
+              Mirror V
             </button>
           </div>
 
@@ -277,7 +303,7 @@ export function Inspector(): React.JSX.Element {
         <div style={{ color: C.faint, fontSize: 12, fontFamily: F.ui, marginTop: 8, lineHeight: 1.7 }}>
           電飾を選ぶと、ここで形と DMX 番地を編集できます。
           <br />
-          まず左上の Parts から部品をキャンバスへドラッグ、または P キーでなぞって描いてください。
+          まず上の PARTS ボタンで部品棚を開いてキャンバスへドラッグ、または P キーでなぞって描いてください。
         </div>
       </aside>
     )
@@ -307,6 +333,19 @@ export function Inspector(): React.JSX.Element {
       </div>
       <div style={{ fontFamily: F.mono, fontSize: 12, color: C.accent, marginBottom: rowGap }}>
         {sizeText(shape)}
+      </div>
+
+      <SectionTitle>Mirror</SectionTitle>
+      <div style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}>
+        この電飾をその場で裏返します（コピーは作りません）。⌘Z で戻せます。
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: rowGap }}>
+        <button style={mirrorBtn} title="左右に反転" onClick={() => mirrorShapes('h')}>
+          Mirror H
+        </button>
+        <button style={mirrorBtn} title="上下に反転" onClick={() => mirrorShapes('v')}>
+          Mirror V
+        </button>
       </div>
 
       {/* bulb: glass size + texture (colour & gauge come from the console) */}

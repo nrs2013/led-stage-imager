@@ -139,6 +139,9 @@ interface AppState {
   alignShapes: (edge: AlignEdge) => void
   /** 選択中の図形を等間隔に散らす（3個以上で有効・両端は固定して間を均す）。 */
   distributeShapes: (axis: 'h' | 'v') => void
+  /** 選んだ図形を、選択全体の中心で左右(h)／上下(v)に反転する。コピーは作らずその場で反転。
+   *  複数選ぶと位置関係を保ったまま1つの固まりとして反転する（1手で ⌘Z）。 */
+  mirrorShapes: (axis: 'h' | 'v') => void
   updateShape: (id: string, patch: Partial<Shape>) => void
   addShape: (init: { type: Shape['type']; points: Shape['points'] } & Partial<Shape>) => string
   removeShape: (id: string) => void
@@ -555,6 +558,39 @@ export const useStore = create<AppState>()((set, get) => ({
         shapes: state.chart.shapes.map((s) => {
           const m = d.get(s.id)
           return m ? { ...s, points: s.points.map((p) => ({ x: p.x + m.x, y: p.y + m.y })) } : s
+        })
+      }
+    }))
+  },
+
+  mirrorShapes: (axis) => {
+    const ids = get().selectedIds
+    const sel = get().chart.shapes.filter((s) => ids.includes(s.id) && !s.locked)
+    if (!sel.length) return
+    get().beginHistory()
+    // 反転の軸＝選択全体の外枠の中心。1個だけならその図形の中心＝その場で裏返る。
+    const bs = sel.map((s) => shapeArrayBounds(s))
+    const lo = Math.min(...bs.map((b) => (axis === 'h' ? b.x : b.y)))
+    const hi = Math.max(...bs.map((b) => (axis === 'h' ? b.x + b.w : b.y + b.h)))
+    const sum = lo + hi // 反転後の座標 = (lo+hi) − 元の座標
+    const on = new Set(sel.map((s) => s.id))
+    set((state) => ({
+      chart: {
+        ...state.chart,
+        shapes: state.chart.shapes.map((s) => {
+          if (!on.has(s.id)) return s
+          const points = s.points.map((p) =>
+            axis === 'h' ? { x: sum - p.x, y: p.y } : { x: p.x, y: sum - p.y }
+          )
+          // 連続複製(repeat)は伸びる向きも裏返す＝外枠が動かない
+          const repeat = s.repeat
+            ? {
+                ...s.repeat,
+                dx: axis === 'h' ? -s.repeat.dx : s.repeat.dx,
+                dy: axis === 'v' ? -s.repeat.dy : s.repeat.dy
+              }
+            : undefined
+          return repeat ? { ...s, points, repeat } : { ...s, points }
         })
       }
     }))

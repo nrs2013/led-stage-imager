@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { C, F } from '../ui/tokens'
 import { useStore } from '../state/store'
 import { PART_ICON } from '../render/part-icons'
 import { familyOfType } from '../model/part-family'
-import type { ShapeType, PartFamily } from '../model/types'
+import type { ShapeType } from '../model/types'
 import { drawBulbGlass, drawBulbLit, BULB_DEFAULT_DIAMETER, type RGB } from '../render/bulb'
 import { drawNeonGlyphLit, clearNeonLayoutCache } from '../render/neon'
 import { drawMarqueeGlyphLit, clearMarqueeCache, marqueeCharCount } from '../render/marquee'
@@ -441,13 +441,25 @@ const CARDS: {
   }
 ]
 
-/** アイコン棚 — drag a part onto the chart to place it (part centre = the dropped
- *  cell). 4-up grid so every card stays readable as the family grows. */
+/** Parts＝別窓。右の列には PARTS ボタンだけを置き、棚は窓として開く（のむさん 2026-07-25
+ *  「棚が場所を取って番地を見るスペースが小さい」）。窓は背景を塞がない＝開いたまま
+ *  キャンバスへドラッグして置ける。 */
 export function PartsPalette(): React.JSX.Element {
   // 電飾モード＝電飾(decor)パーツのみ。照明灯体(Spot/Moving/PAR等)は照明モードへ。照明/電飾フィルタは廃止。
   const placingPart = useStore((s) => s.placingPart)
   const setPlacingPart = useStore((s) => s.setPlacingPart)
   const setTool = useStore((s) => s.setTool)
+  const [open, setOpen] = useState(false)
+
+  // Esc で窓を閉じる（SettingsDialog / HelpPanel と同じ作法）
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.code === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
 
   const card = (c: (typeof CARDS)[number]): React.JSX.Element => (
     <div
@@ -464,6 +476,7 @@ export function PartsPalette(): React.JSX.Element {
         } else {
           setPlacingPart(c.part)
           setTool('select')
+          setOpen(false) // 窓を閉じてキャンバスへ＝1クリックで置ける状態にする
         }
       }}
       title={`${c.title}\nクリック→キャンバスを連打で置き続け（Esc で終了）／ドラッグでも置けます`}
@@ -504,33 +517,94 @@ export function PartsPalette(): React.JSX.Element {
   )
 
   // 電飾モードは電飾(decor)パーツだけを並べる（照明灯体は照明モードへ）。
-  const shown: { family: PartFamily; label: string }[] = [{ family: 'decor', label: 'Decor' }]
+  const cards = CARDS.filter((c) => familyOfType(c.part as ShapeType) === 'decor')
 
   return (
     <div style={wrapStyle}>
-      <div style={titleStyle}>Parts</div>
-      {shown.map((g) => {
-        const cards = CARDS.filter((c) => familyOfType(c.part as ShapeType) === g.family)
-        return (
-          <div key={g.family} style={{ marginBottom: 10 }}>
-            <div style={groupHeadStyle}>{g.label}</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 }}>
-              {cards.map(card)}
-            </div>
+      <button
+        style={open ? { ...openBtnStyle, borderColor: C.accent, color: C.white } : openBtnStyle}
+        onClick={() => setOpen((v) => !v)}
+        title="電飾の部品棚を開く（Esc で閉じる）。開いたままキャンバスへドラッグして置けます"
+      >
+        PARTS
+      </button>
+
+      {open && (
+        <div style={winStyle}>
+          <div style={winHeadStyle}>
+            <div style={titleStyle}>Parts</div>
+            <button style={closeBtnStyle} onClick={() => setOpen(false)} title="閉じる（Esc）">
+              CLOSE
+            </button>
           </div>
-        )
-      })}
-      <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 4, lineHeight: 1.5 }}>
-        ドラッグ＆ドロップで設置（中心がドロップ地点に乗ります） · 2個目からは ⌘C → クリック → ⌘V
-      </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 }}>
+            {cards.map(card)}
+          </div>
+          <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 10, lineHeight: 1.5 }}>
+            ドラッグ＆ドロップで設置（中心がドロップ地点に乗ります） ·
+            クリックすると窓が閉じて、キャンバスを連打で置き続けられます（Esc で終了） · 2個目からは ⌘C →
+            クリック → ⌘V
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 const wrapStyle: React.CSSProperties = {
-  padding: '12px 16px 14px',
+  padding: '10px 16px 12px',
   borderBottom: `0.5px solid ${C.border}`,
   flexShrink: 0
+}
+
+/** 右の列に残す唯一のボタン。当たり判定は大きめ（線と文字は細いまま）。 */
+const openBtnStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '11px 0',
+  background: 'rgba(255,255,255,0.04)',
+  border: `0.5px solid ${C.border}`,
+  borderRadius: 4,
+  color: C.text,
+  fontFamily: F.ui,
+  fontSize: 13,
+  fontWeight: 300,
+  letterSpacing: '0.24em',
+  cursor: 'pointer'
+}
+
+/** 部品棚の窓。背景を塞がない＝開いたままキャンバスへドラッグできる。 */
+const winStyle: React.CSSProperties = {
+  position: 'fixed',
+  top: 100,
+  right: 352,
+  width: 430,
+  maxHeight: 'calc(100vh - 180px)',
+  overflowY: 'auto',
+  padding: '12px 16px 14px',
+  background: C.panel,
+  border: `0.5px solid ${C.border}`,
+  borderRadius: 6,
+  boxShadow: '0 12px 40px rgba(0,0,0,0.55)',
+  zIndex: 90
+}
+
+const winHeadStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  marginBottom: 8
+}
+
+const closeBtnStyle: React.CSSProperties = {
+  padding: '7px 12px',
+  background: 'rgba(255,255,255,0.04)',
+  border: `0.5px solid ${C.border}`,
+  borderRadius: 4,
+  color: C.label,
+  fontFamily: F.ui,
+  fontSize: 11,
+  letterSpacing: '0.16em',
+  cursor: 'pointer'
 }
 
 const titleStyle: React.CSSProperties = {
@@ -564,13 +638,5 @@ const cardStyle: React.CSSProperties = {
   cursor: 'grab',
   userSelect: 'none',
   boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
-}
-
-const groupHeadStyle: React.CSSProperties = {
-  fontFamily: F.ui,
-  fontSize: 10,
-  letterSpacing: '0.08em',
-  color: C.label,
-  marginBottom: 5
 }
 
