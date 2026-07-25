@@ -909,7 +909,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     const onKey = (e: KeyboardEvent): void => {
       if (e.defaultPrevented) return // 先に処理済み（psheet/入力欄など）のキーを二重処理しない
       const t = e.target as HTMLElement | null
-      const isTextTarget = !!t && ((t.tagName === 'INPUT' && !/^(range|checkbox|radio|button|submit|reset|color|file)$/i.test((t as HTMLInputElement).type || 'text')) || t.tagName === 'TEXTAREA' || t.isContentEditable)
+      // フェーダー(range)等はキーを吸わせない。ただし SELECT は矢印/文字が本来の操作なので入力欄扱いに戻す
+      // （外すと、ドロップダウンにフォーカスが残ったまま矢印を押して灯体が動く＝位置データが変わる）。
+      const isRangeTarget = !!t && t.tagName === 'INPUT' && /^range$/i.test((t as HTMLInputElement).type || 'text')
+      const isTextTarget = !!t && ((t.tagName === 'INPUT' && !/^(range|checkbox|radio|button|submit|reset|color|file)$/i.test((t as HTMLInputElement).type || 'text')) || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       // ⌘+S（Ctrl+S）＝上書き保存／⇧⌘S＝別名保存。どのモードでも効く（ブラウザ既定の保存は止める）。
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
@@ -1014,6 +1017,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         return
       }
       if (isTextTarget) return
+      // フェーダーにフォーカスがある間の矢印は、そのつまみ自身の微調整に任せる
+      // （灯体の微調整・マスター明るさ・写真送りに横取りさせない）
+      if (isRangeTarget && e.code.startsWith('Arrow')) return
       if (e.key === '?') {
         setShowKeys(true)
         e.preventDefault()
@@ -1049,12 +1055,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
-      // 入力欄で文字編集中は奪わない（名前入力など）。
-      const tgt = e.target as HTMLElement | null
-      const typing =
-        !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)
+      // 文字入力欄・SELECT は上の isTextTarget で既に return 済み。フェーダーの矢印も上で返している。
       // BUILD: ⌘A / Ctrl+A で全選択（タブ連動＝そのタブのものだけ。SFXタブなら炎/火花だけ）
-      if (!typing && uiModeRef.current === 'build' && (e.metaKey || e.ctrlKey) && e.code === 'KeyA') {
+      if (uiModeRef.current === 'build' && (e.metaKey || e.ctrlKey) && e.code === 'KeyA') {
         engine.selectWhere(tabAllows)
         e.preventDefault()
         return
@@ -1062,7 +1065,6 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       // BUILD: 矢印キーで選択中の灯体を微調整（Shiftで大きく＝10px）。
       // PLAY では従来通り ↑↓=マスター明るさ / ←→=写真切替。
       if (
-        !typing &&
         uiModeRef.current === 'build' &&
         (e.code === 'ArrowUp' ||
           e.code === 'ArrowDown' ||
@@ -1103,7 +1105,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         ? (Object.keys(engine.fireKeyMap) as FireKey[]).find((k) => engine.fireKeyMap[k] === code)
         : undefined
       if (fireK) {
-        engine.toggleFire(fireK)
+        // 押しっぱなしのOSリピートで発射がON/OFF高速反転（点滅）するのを防ぐ＝FXと同じ扱い
+        if (!e.repeat) engine.toggleFire(fireK)
         e.preventDefault()
         return
       }

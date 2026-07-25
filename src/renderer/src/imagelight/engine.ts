@@ -256,6 +256,10 @@ export interface LiveFrame {
   beams: LiveBeam[]
   dmx: { frames: Record<number, Uint8Array>; gamma: boolean } | null
   events: LiveEvent[]
+  /** シーン切替の位置ブレンド（前シーンの見た目の向き→新シーンの生きた向き）。null＝ブレンド無し。
+   *  age＝送信時点での経過ms。受信側は自分の now から引いて _aimT0 に写す（ms と同じ作法）。
+   *  これが無いと出力窓だけチルトがカットになる（編集画面と本番の絵が食い違う）。 */
+  aim?: { from: number[]; age: number; ms: number } | null
 }
 
 export interface Look {
@@ -1508,6 +1512,7 @@ export class ImageLightEngine {
    *  状態変化も無ければ、描画ループは1フレーム描いて止まってよい＝静止画は無負荷。 */
   isAnimating = (): boolean =>
     this.strobeOverride ||
+    this._aimActive || // シーン切替の位置ブレンド中（これが無いとカット設定で向きが固まる）
     this.anyFx() ||
     this.activeIsVideo() ||
     this.fading ||
@@ -4193,6 +4198,9 @@ export class ImageLightEngine {
     })
     const dur = this.sceneFadeMs
     const seq = this.sceneFadeSeq
+    // 位置ブレンドが効くフェードか（両サーチONだと効かない＝C3）。効かない時は
+    // 従来どおり tilt を補間しないと、向きだけ最初の1コマで飛ぶ。
+    const aimOn = this._aimActive
     const t0 = performance.now()
     this.sceneFadeActive = true
     const lerp = (a: number, b: number, k: number): number => a + (b - a) * k
@@ -4212,7 +4220,9 @@ export class ImageLightEngine {
         ] as RGB3
         b.pan = lerp(f.pan, t.pan, e)
         // 灯体は±110で止める（applyLookと同じ。古いシーンの±180が居座らないように）。Lookは書き換えない。
-        b.tilt = b.motif ? t.tilt : clampTilt(t.tilt)
+        // ブレンド中は即 target（見た目の動きは _tn 側が持つ＝二重移動防止）。ブレンドしない時は補間。
+        const tl = aimOn ? t.tilt : lerp(f.tilt, t.tilt, e)
+        b.tilt = b.motif ? tl : clampTilt(tl)
         b.zoom = lerp(f.zoom, t.zoom, e)
       })
       this.bump(false)
@@ -5182,7 +5192,11 @@ export class ImageLightEngine {
         return { ...rest, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined }
       }),
       dmx: this.dmxFrame ? { frames: this.dmxFrame, gamma: this.dmxGamma } : null,
-      events
+      events,
+      aim:
+        this._aimActive && this._aimFrom
+          ? { from: this._aimFrom.slice(), age: now - this._aimT0, ms: this._aimMs }
+          : null
     }
   }
 
@@ -5193,6 +5207,13 @@ export class ImageLightEngine {
     if (this.restoring) return // 公演の復元中はスキップ（次のコマで追いつく）
     const now = performance.now()
     this.t0 = now - f.ms
+    // 位置ブレンドも写す（これが無いと出力窓はチルトだけカットになる）
+    if (f.aim) {
+      this._aimFrom = f.aim.from
+      this._aimT0 = now - f.aim.age
+      this._aimMs = f.aim.ms
+      this._aimActive = true
+    } else this._aimActive = false
     this.st = { ...f.st }
     this.fxp = f.fxp
     this.panicGain = f.panicGain
