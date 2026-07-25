@@ -126,7 +126,7 @@ export function StartScreen(): React.JSX.Element {
             </span>
             <span className="ss-mt">
               <span className="ss-mh">Decor Mode</span>
-              <span className="ss-ms">Draw decor on a chart · DMX · Syphon / NDI</span>
+              <span className="ss-ms">チャートに電飾を描く · 卓のDMXで光る · Syphon / NDI で出す</span>
             </span>
             <svg className="ss-ar" width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
               <path d="M5 3 L9 7 L5 11" />
@@ -150,7 +150,7 @@ export function StartScreen(): React.JSX.Element {
             </span>
             <span className="ss-mt">
               <span className="ss-mh">Lighting Mode</span>
-              <span className="ss-ms">Light a photo · ⌘-click fixtures · DMX · relief</span>
+              <span className="ss-ms">写真に照明を当てる · ⌘クリックで灯体を置く · 卓のDMXで動かす</span>
             </span>
             <svg className="ss-ar" width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
               <path d="M5 3 L9 7 L5 11" />
@@ -173,7 +173,7 @@ export function StartScreen(): React.JSX.Element {
             </span>
             <span className="ss-mt">
               <span className="ss-mh">Easy Mode</span>
-              <span className="ss-ms">Decor + lighting, the simple way</span>
+              <span className="ss-ms">電飾と照明を1画面で · 卓なしでもOK</span>
             </span>
             <svg className="ss-ar" width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
               <path d="M5 3 L9 7 L5 11" />
@@ -182,19 +182,19 @@ export function StartScreen(): React.JSX.Element {
         </div>
 
         <div className="ss-foot">
-          <button className="ss-open" onClick={loadSaved} title="Open a saved show file (.ledimager)">
+          <button className="ss-open" onClick={loadSaved} title="保存したファイルを開く（.ledimager / .ledshow）">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" strokeWidth="1">
               <path d="M1.5 4 L5.5 4 L7 6 L12.5 6 L12.5 11.5 L1.5 11.5 Z" />
             </svg>
-            Open File
+            ファイルを開く
           </button>
           {backup && (
             <button
               className="ss-recover"
               onClick={resume}
-              title="Safety net — restore what you were last editing (auto-backup every 5s)"
+              title="前回の続きから戻す（5秒ごとに自動バックアップしています）"
             >
-              Recover last session
+              前回の続きから
             </button>
           )}
         </div>

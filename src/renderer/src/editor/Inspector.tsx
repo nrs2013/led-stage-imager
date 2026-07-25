@@ -37,33 +37,33 @@ function sizeText(shape: Shape): string {
     return `Φ ${bulbDiameter(shape)} px`
   }
   if (shape.type === 'neon') {
-    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${neonCharCount(shape.text ?? '')} tubes`
+    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${neonCharCount(shape.text ?? '')} 本`
   }
   if (shape.type === 'marquee') {
-    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${marqueeCharCount(shape.text ?? '')} chars`
+    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${marqueeCharCount(shape.text ?? '')} 文字`
   }
   if (shape.type === 'stars') {
     const f = genStars(shape)
-    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${f.white.length}W+${f.blue.length}B dots`
+    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · 白 ${f.white.length}+青 ${f.blue.length} 点`
   }
   if (shape.type === 'festoon') {
-    return `Wire ${Math.round(festoonLength(shape))} px · ${festoonCount(shape)} bulbs`
+    return `ワイヤー ${Math.round(festoonLength(shape))} px · 電球 ${festoonCount(shape)} 個`
   }
   if (shape.type === 'parlight') return `Φ ${parDiameter(shape)} px`
   if (shape.type === 'patt') return `Φ ${pattDiameter(shape)} px`
-  if (shape.type === 'pixelpatt') return `Φ ${pixelPattDiameter(shape)} px · 7 cells`
+  if (shape.type === 'pixelpatt') return `Φ ${pixelPattDiameter(shape)} px · 7 セル`
   if (shape.type === 'roomlamp') return `Φ ${roomLampDiameter(shape)} px`
   if (shape.type === 'streetlamp') return `Φ ${streetLampDiameter(shape)} px`
   if (shape.type === 'chandelier') return `Φ ${chandelierDiameter(shape)} px`
   if (shape.type === 'blinder') {
     const w = blinderWidth(shape)
-    return `W ${w} × H ${w * 2} px · 8 lamps`
+    return `W ${w} × H ${w * 2} px · 8 灯`
   }
   if (shape.type === 'image') {
-    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${shape.imageData ? 'photo set' : 'no photo'}`
+    return `W ${Math.round(b.w)} × H ${Math.round(b.h)} px · ${shape.imageData ? '写真あり' : '写真なし'}`
   }
   if (shape.type === 'uplight' || shape.type === 'movinghead') {
-    return `Aperture ${Math.round(shape.beamW0 ?? 14)} · Spread ${Math.round(shape.beamW1 ?? 90)} · Throw ${Math.round(shape.beamLen ?? 200)} px`
+    return `出口 ${Math.round(shape.beamW0 ?? 14)} · 広がり ${Math.round(shape.beamW1 ?? 90)} · 届く高さ ${Math.round(shape.beamLen ?? 200)} px`
   }
   if (shape.type === 'freehand') {
     const single =
@@ -71,7 +71,7 @@ function sizeText(shape: Shape): string {
       shape.points[0].x === shape.points[1].x &&
       shape.points[0].y === shape.points[1].y
     const dots = single ? 1 : shape.points.length
-    return `X ${Math.round(b.w) + 1} px · Y ${Math.round(b.h) + 1} px · ${dots} dots`
+    return `X ${Math.round(b.w) + 1} px · Y ${Math.round(b.h) + 1} px · ${dots} 点`
   }
   if (shape.type === 'line' || shape.type === 'polyline') {
     const L = Math.round(Math.hypot(b.w, b.h))
@@ -108,6 +108,33 @@ function modesForFamily(
 }
 
 const rowGap = 14
+
+/** 画面に出す種類の名前（保存データの type は英字のまま・表示だけ日本語）。 */
+const TYPE_JA: Record<string, string> = {
+  bulb: '電球',
+  festoon: 'フェストゥーン',
+  neon: 'ネオン',
+  marquee: 'マーキー',
+  stars: '星',
+  image: '写真',
+  roomlamp: '室内ランプ',
+  streetlamp: '街灯',
+  chandelier: 'シャンデリア',
+  uplight: 'スポット',
+  movinghead: 'ムービング',
+  parlight: 'PAR',
+  patt: 'PAT',
+  pixelpatt: 'Pixel PAT',
+  blinder: '8灯ミニブル',
+  line: '直線',
+  polyline: '折れ線',
+  freehand: '手描き',
+  rect: '四角',
+  ellipse: '丸',
+  triangle: '三角',
+  star: '星形',
+  polygon: '六角形'
+}
 
 /** 反転ボタン（単体選択パネル用）。Multi パネルの整列ボタンと同じ当たり判定に揃える。 */
 const mirrorBtn: React.CSSProperties = {
@@ -154,12 +181,12 @@ export function Inspector(): React.JSX.Element {
       const abDim = (on: boolean) => ({ ...ab, opacity: on ? 1 : 0.4 })
       return (
         <aside style={asideStyle}>
-          <SectionTitle>Multi</SectionTitle>
+          <SectionTitle>複数選択</SectionTitle>
           <div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, marginBottom: 4 }}>
-            {ids.length} selected · patched {fxs.length}/{ids.length}
+            {ids.length} 個を選択中 · 番地あり {fxs.length}/{ids.length}
           </div>
 
-          <SectionTitle>Align / Distribute</SectionTitle>
+          <SectionTitle>そろえる / 等間隔</SectionTitle>
           <div
             style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}
           >
@@ -167,24 +194,24 @@ export function Inspector(): React.JSX.Element {
           </div>
           <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
             <button style={ab} title="左ぞろえ（左端を合わせる）" onClick={() => alignShapes('left')}>
-              Left
+              左
             </button>
             <button style={ab} title="左右の中央でそろえる" onClick={() => alignShapes('hcenter')}>
-              Center
+              左右中央
             </button>
             <button style={ab} title="右ぞろえ（右端を合わせる）" onClick={() => alignShapes('right')}>
-              Right
+              右
             </button>
           </div>
           <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
             <button style={ab} title="上ぞろえ（上端を合わせる）" onClick={() => alignShapes('top')}>
-              Top
+              上
             </button>
             <button style={ab} title="上下の中央でそろえる" onClick={() => alignShapes('vcenter')}>
-              Middle
+              上下中央
             </button>
             <button style={ab} title="下ぞろえ（下端を合わせる）" onClick={() => alignShapes('bottom')}>
-              Bottom
+              下
             </button>
           </div>
           <div style={{ display: 'flex', gap: 6, marginBottom: rowGap }}>
@@ -194,7 +221,7 @@ export function Inspector(): React.JSX.Element {
               title="左右の間隔を等しくする（3個以上・両端は固定）"
               onClick={() => distributeShapes('h')}
             >
-              Distribute H
+              横に等間隔
             </button>
             <button
               style={abDim(ids.length >= 3)}
@@ -202,11 +229,11 @@ export function Inspector(): React.JSX.Element {
               title="上下の間隔を等しくする（3個以上・両端は固定）"
               onClick={() => distributeShapes('v')}
             >
-              Distribute V
+              縦に等間隔
             </button>
           </div>
 
-          <SectionTitle>Mirror</SectionTitle>
+          <SectionTitle>反転</SectionTitle>
           <div
             style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}
           >
@@ -215,14 +242,14 @@ export function Inspector(): React.JSX.Element {
           </div>
           <div style={{ display: 'flex', gap: 6, marginBottom: rowGap }}>
             <button style={ab} title="左右に反転（選択全体の中心が軸）" onClick={() => mirrorShapes('h')}>
-              Mirror H
+              左右反転
             </button>
             <button style={ab} title="上下に反転（選択全体の中心が軸）" onClick={() => mirrorShapes('v')}>
-              Mirror V
+              上下反転
             </button>
           </div>
 
-          <SectionTitle>Patch</SectionTitle>
+          <SectionTitle>番地</SectionTitle>
           <div
             style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: rowGap, lineHeight: 1.5 }}
           >
@@ -237,7 +264,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => bulkPatch(ids, { universe: Math.max(0, v - 1) })}
               />
             </Field>
-            <Field label="DMX Addr" flex={1}>
+            <Field label="DMX 番地" flex={1}>
               <NumberField
                 value={common('start', 1)}
                 min={1}
@@ -246,7 +273,7 @@ export function Inspector(): React.JSX.Element {
               />
             </Field>
           </div>
-          <Field label="Type">
+          <Field label="種類">
             <select
               value={fxs[0]?.mode ?? 'rgb'}
               style={{ ...inputStyle, fontFamily: F.ui }}
@@ -275,7 +302,7 @@ export function Inspector(): React.JSX.Element {
                 : 'まとめてロック（キャンバスから掴めなくする・⌘L）'
             }
           >
-            {allLocked ? `Unlock ${ids.length}` : `Lock ${ids.length}`}
+            {allLocked ? `ロック解除 ${ids.length}` : `まとめてロック ${ids.length}`}
           </button>
           <button
             style={{
@@ -292,18 +319,18 @@ export function Inspector(): React.JSX.Element {
               removeShapes(ids)
             }}
           >
-            Delete {ids.length}
+            {ids.length} 個を削除
           </button>
         </aside>
       )
     }
     return (
       <aside style={asideStyle}>
-        <SectionTitle>Fixture</SectionTitle>
+        <SectionTitle>電飾</SectionTitle>
         <div style={{ color: C.faint, fontSize: 12, fontFamily: F.ui, marginTop: 8, lineHeight: 1.7 }}>
           電飾を選ぶと、ここで形と DMX 番地を編集できます。
           <br />
-          まず上の PARTS ボタンで部品棚を開いてキャンバスへドラッグ、または P キーでなぞって描いてください。
+          まず上の「部品棚」ボタンを押して部品をキャンバスへドラッグ、または P キーでなぞって描いてください。
         </div>
       </aside>
     )
@@ -323,35 +350,35 @@ export function Inspector(): React.JSX.Element {
 
   return (
     <aside style={asideStyle}>
-      <SectionTitle>Fixture</SectionTitle>
+      <SectionTitle>電飾</SectionTitle>
       <div style={{ fontFamily: F.ui, fontSize: 11, color: C.label, marginBottom: 4 }}>
-        Type: {(shape.family ?? familyOfType(shape.type)) === 'light' ? 'Light' : 'Decor'}
+        種別: {(shape.family ?? familyOfType(shape.type)) === 'light' ? '照明' : '電飾'}
       </div>
       <div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, marginBottom: 6 }}>
-        {shape.type === 'blinder' ? '8-Lamp Blinder' : shape.type.toUpperCase()} ·{' '}
+        {TYPE_JA[shape.type] ?? shape.type.toUpperCase()} ·{' '}
         {shape.id.slice(-6)}
       </div>
       <div style={{ fontFamily: F.mono, fontSize: 12, color: C.accent, marginBottom: rowGap }}>
         {sizeText(shape)}
       </div>
 
-      <SectionTitle>Mirror</SectionTitle>
+      <SectionTitle>反転</SectionTitle>
       <div style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}>
         この電飾をその場で裏返します（コピーは作りません）。⌘Z で戻せます。
       </div>
       <div style={{ display: 'flex', gap: 6, marginBottom: rowGap }}>
         <button style={mirrorBtn} title="左右に反転" onClick={() => mirrorShapes('h')}>
-          Mirror H
+          左右反転
         </button>
         <button style={mirrorBtn} title="上下に反転" onClick={() => mirrorShapes('v')}>
-          Mirror V
+          上下反転
         </button>
       </div>
 
       {/* bulb: glass size + texture (colour & gauge come from the console) */}
       {shape.type === 'bulb' && (
         <>
-          <Field label="Diameter (dots)">
+          <Field label="直径（ドット）">
             <NumberField
               value={bulbDiameter(shape)}
               min={1}
@@ -360,12 +387,12 @@ export function Inspector(): React.JSX.Element {
               onChange={(v) => updateShape(shape.id, { diameter: v })}
             />
           </Field>
-          <Field label="Texture">
+          <Field label="ガラス">
             <div style={{ display: 'flex', gap: 6 }}>
               {(
                 [
-                  { id: 'clear', label: 'Clear' },
-                  { id: 'frost', label: 'Frost' }
+                  { id: 'clear', label: '透明' },
+                  { id: 'frost', label: 'すりガラス' }
                 ] as { id: BulbStyle; label: string }[]
               ).map((m) => (
                 <button
@@ -389,7 +416,7 @@ export function Inspector(): React.JSX.Element {
           one address per character — the Offset field below sets the 文字間隔) */}
       {shape.type === 'neon' && (
         <>
-          <Field label="Text (1 line)">
+          <Field label="文字（1行）">
             <input
               value={shape.text ?? ''}
               placeholder="OPEN"
@@ -397,7 +424,7 @@ export function Inspector(): React.JSX.Element {
               onChange={(e) => updateShape(shape.id, { text: e.target.value })}
             />
           </Field>
-          <Field label="Typeface">
+          <Field label="書体">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {NEON_FONTS.map((f) => {
                 const active = neonFont(shape).id === f.id
@@ -436,7 +463,7 @@ export function Inspector(): React.JSX.Element {
             </div>
           </Field>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="Font Size (px)" flex={1}>
+            <Field label="文字の大きさ（px）" flex={1}>
               <NumberField
                 value={neonSize(shape)}
                 min={6}
@@ -444,7 +471,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { fontSize: v })}
               />
             </Field>
-            <Field label="Glow (%)" flex={1}>
+            <Field label="にじみ（%）" flex={1}>
               <NumberField
                 value={neonGlowAmount(shape)}
                 min={0}
@@ -460,7 +487,7 @@ export function Inspector(): React.JSX.Element {
           bulbs, 1 letter = 1 address (per-letter chase, same idea as neon) */}
       {shape.type === 'marquee' && (
         <>
-          <Field label="Text (1 line)">
+          <Field label="文字（1行）">
             <input
               value={shape.text ?? ''}
               placeholder="STAGE"
@@ -468,7 +495,7 @@ export function Inspector(): React.JSX.Element {
               onChange={(e) => updateShape(shape.id, { text: e.target.value })}
             />
           </Field>
-          <Field label="Typeface">
+          <Field label="書体">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
               {MARQUEE_FONTS.map((f) => {
                 const active = marqueeFontDef(shape).id === f.id
@@ -505,7 +532,7 @@ export function Inspector(): React.JSX.Element {
             </div>
           </Field>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="Font Size (px)" flex={1}>
+            <Field label="文字の大きさ（px）" flex={1}>
               <NumberField
                 value={marqueeSize(shape)}
                 min={20}
@@ -513,7 +540,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { fontSize: v })}
               />
             </Field>
-            <Field label="Bulb Spacing (px)" flex={1}>
+            <Field label="電球の間隔（px）" flex={1}>
               <NumberField
                 value={marqueePitch(shape)}
                 min={5}
@@ -522,7 +549,7 @@ export function Inspector(): React.JSX.Element {
               />
             </Field>
           </div>
-          <Field label="Per-letter color">
+          <Field label="文字ごとの色">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {marqueeChars(shape.text ?? '').map((ch, i) => {
                 const col = shape.letterColors?.[i] ?? '#46423c'
@@ -571,7 +598,7 @@ export function Inspector(): React.JSX.Element {
           from two desk channels — instance 0 = white sky, instance 1 = blue sky) */}
       {shape.type === 'stars' && (
         <>
-          <Field label="Density">
+          <Field label="密度">
             <NumberField
               value={starsDensity(shape)}
               min={0}
@@ -580,7 +607,7 @@ export function Inspector(): React.JSX.Element {
             />
           </Field>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="White Ratio (%)" flex={1}>
+            <Field label="白の割合（%）" flex={1}>
               <NumberField
                 value={starsWhiteRatio(shape)}
                 min={0}
@@ -588,7 +615,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { starWhiteRatio: v })}
               />
             </Field>
-            <Field label="Dot Size (px)" flex={1}>
+            <Field label="点の大きさ（px）" flex={1}>
               <NumberField
                 value={starsSize(shape)}
                 min={0.5}
@@ -598,14 +625,14 @@ export function Inspector(): React.JSX.Element {
               />
             </Field>
           </div>
-          <Field label="Placement">
+          <Field label="置き方">
             <button
               style={{ ...buttonStyle({}), width: '100%' }}
               onClick={() =>
                 updateShape(shape.id, { starSeed: (Math.random() * 0xffffffff) >>> 0 })
               }
             >
-              Shuffle
+              並べ替え
             </button>
           </Field>
         </>
@@ -615,7 +642,7 @@ export function Inspector(): React.JSX.Element {
           the console — one address per bulb, like the ball bulb) */}
       {shape.type === 'festoon' && (
         <>
-          <Field label="Sag (% of span)">
+          <Field label="たるみ（%）">
             <NumberField
               value={festoonSag(shape)}
               min={0}
@@ -624,7 +651,7 @@ export function Inspector(): React.JSX.Element {
             />
           </Field>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="Bulb Spacing (px)" flex={1}>
+            <Field label="電球の間隔（px）" flex={1}>
               <NumberField
                 value={festoonPitch(shape)}
                 min={4}
@@ -632,7 +659,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { bulbPitch: v })}
               />
             </Field>
-            <Field label="Diameter (dots)" flex={1}>
+            <Field label="直径（ドット）" flex={1}>
               <NumberField
                 value={festoonDiameter(shape)}
                 min={1}
@@ -642,7 +669,7 @@ export function Inspector(): React.JSX.Element {
               />
             </Field>
           </div>
-          <Field label="Glow (%)">
+          <Field label="にじみ（%）">
             <NumberField
               value={shape.neonGlow ?? FESTOON_DEFAULT_GLOW}
               min={0}
@@ -650,12 +677,12 @@ export function Inspector(): React.JSX.Element {
               onChange={(v) => updateShape(shape.id, { neonGlow: v })}
             />
           </Field>
-          <Field label="Texture">
+          <Field label="ガラス">
             <div style={{ display: 'flex', gap: 6 }}>
               {(
                 [
-                  { id: 'clear', label: 'Clear' },
-                  { id: 'frost', label: 'Frost' }
+                  { id: 'clear', label: '透明' },
+                  { id: 'frost', label: 'すりガラス' }
                 ] as { id: BulbStyle; label: string }[]
               ).map((m) => (
                 <button
@@ -677,7 +704,7 @@ export function Inspector(): React.JSX.Element {
 
       {/* photo material: pick the picture — it lights up only under a beam */}
       {shape.type === 'image' && (
-        <Field label="Photo">
+        <Field label="写真">
           <button
             style={{ ...buttonStyle({}), width: '100%', padding: '8px 0' }}
             onClick={() => {
@@ -720,7 +747,7 @@ export function Inspector(): React.JSX.Element {
       {(shape.type === 'uplight' || shape.type === 'movinghead') && (
         <>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Field label="Aperture Width (px)" flex={1}>
+            <Field label="出口の幅（px）" flex={1}>
               <NumberField
                 value={shape.beamW0 ?? 14}
                 min={2}
@@ -728,7 +755,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => updateShape(shape.id, { beamW0: v })}
               />
             </Field>
-            <Field label="Spread (px)" flex={1}>
+            <Field label="広がり（px）" flex={1}>
               <NumberField
                 value={shape.beamW1 ?? 90}
                 min={4}
@@ -737,7 +764,7 @@ export function Inspector(): React.JSX.Element {
               />
             </Field>
           </div>
-          <Field label="Throw Height (px)">
+          <Field label="届く高さ（px）">
             <NumberField
               value={shape.beamLen ?? 200}
               min={20}
@@ -797,7 +824,7 @@ export function Inspector(): React.JSX.Element {
         shape.type !== 'streetlamp' &&
         shape.type !== 'chandelier' &&
         shape.type !== 'marquee' && (
-        <Field label="Display">
+        <Field label="見え方">
           <div style={{ display: 'flex', gap: 6 }}>
             {DISPLAY_MODES.map((m) => (
               <button
@@ -805,7 +832,7 @@ export function Inspector(): React.JSX.Element {
                 style={{ ...buttonStyle({ active: shape.display === m }), flex: 1, padding: '8px 0' }}
                 onClick={() => updateShape(shape.id, { display: m })}
               >
-                {m === 'stroke' ? 'Stroke' : m === 'fill' ? 'Fill' : 'Both'}
+                {m === 'stroke' ? '線' : m === 'fill' ? '塗り' : '線＋塗り'}
               </button>
             ))}
           </div>
@@ -821,7 +848,7 @@ export function Inspector(): React.JSX.Element {
         shape.type !== 'patt' &&
         shape.type !== 'pixelpatt' &&
         shape.type !== 'marquee' && (
-          <Field label="Width">
+          <Field label="太さ">
           <NumberField
             value={shape.strokeWidth}
             min={1}
@@ -839,10 +866,10 @@ export function Inspector(): React.JSX.Element {
         shape.type !== 'blinder' &&
         shape.type !== 'pixelpatt' && (
         <div style={{ marginBottom: rowGap }}>
-          <label style={fieldLabel}>Array{hasRepeat ? `  ×${shape.repeat!.count}` : ''}</label>
+          <label style={fieldLabel}>連続複製{hasRepeat ? `  ×${shape.repeat!.count}` : ''}</label>
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
-              <label style={fieldLabel}>Count</label>
+              <label style={fieldLabel}>個数</label>
               <NumberField
                 value={shape.repeat?.count ?? 1}
                 min={1}
@@ -851,11 +878,11 @@ export function Inspector(): React.JSX.Element {
               />
             </div>
             <div style={{ flex: 1 }}>
-              <label style={fieldLabel}>Pitch X</label>
+              <label style={fieldLabel}>間隔 X</label>
               <NumberField value={shape.repeat?.dx ?? 10} min={-2000} max={2000} onChange={(v) => setRepeat({ dx: v })} />
             </div>
             <div style={{ flex: 1 }}>
-              <label style={fieldLabel}>Pitch Y</label>
+              <label style={fieldLabel}>間隔 Y</label>
               <NumberField value={shape.repeat?.dy ?? 0} min={-2000} max={2000} onChange={(v) => setRepeat({ dy: v })} />
             </div>
           </div>
@@ -866,7 +893,7 @@ export function Inspector(): React.JSX.Element {
       {shape.type !== 'image' && shape.type !== 'uplight' && shape.type !== 'movinghead' && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <Field
-            label={shape.glowPx != null ? 'Glow px（この図形だけ）' : 'Glow px（全体に従う）'}
+            label={shape.glowPx != null ? 'にじみ（この図形だけ・px）' : 'にじみ（全体に従う・px）'}
             flex={1}
           >
             <NumberField
@@ -891,7 +918,7 @@ export function Inspector(): React.JSX.Element {
       <div style={{ height: 1, background: C.border, margin: `${rowGap}px 0` }} />
 
       {/* DMX address */}
-      <SectionTitle>Patch</SectionTitle>
+      <SectionTitle>番地</SectionTitle>
       {shape.type === 'image' ? (
         <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8, lineHeight: 1.6 }}>
           写真は光りません — 「スポット」をパッチして当てると浮かびます
@@ -912,7 +939,7 @@ export function Inspector(): React.JSX.Element {
             )
           }
         >
-          + Patch
+          ＋ 番地をふる
         </button>
       ) : (
         <>
@@ -925,7 +952,7 @@ export function Inspector(): React.JSX.Element {
                 onChange={(v) => upsertFixture(shape.id, { universe: Math.max(0, v - 1) })}
               />
             </Field>
-            <Field label="DMX Addr" flex={1}>
+            <Field label="DMX 番地" flex={1}>
               <NumberField
                 value={fixture.start}
                 min={1}
@@ -940,7 +967,7 @@ export function Inspector(): React.JSX.Element {
             </Field>
           </div>
 
-          <Field label="Type">
+          <Field label="種類">
             <select
               value={fixture.mode}
               style={{ ...inputStyle, fontFamily: F.ui }}
@@ -955,7 +982,7 @@ export function Inspector(): React.JSX.Element {
           </Field>
 
           {fixture.mode === 'dim' && (
-            <Field label="Color">
+            <Field label="色">
               <input
                 type="color"
                 value={rgbToHex(fixture.fixedColor ?? [255, 255, 255])}
@@ -1030,7 +1057,7 @@ export function Inspector(): React.JSX.Element {
         onClick={() => setLocked([shape.id], !shape.locked)}
         title="ロック中は左クリックで掴めません。解除はロック品の上で右クリック→ロック解除、下のパッチチップ→このボタン、⌘L"
       >
-        {shape.locked ? 'Unlock' : 'Lock'}
+        {shape.locked ? 'ロック解除' : 'ロック'}
       </button>
       <button
         style={{
@@ -1040,7 +1067,7 @@ export function Inspector(): React.JSX.Element {
         }}
         onClick={() => removeShape(shape.id)}
       >
-        Delete
+        削除
       </button>
     </aside>
   )

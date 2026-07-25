@@ -76,7 +76,7 @@ export function StatusBar(): React.JSX.Element {
 
   return (
     <div style={bar}>
-      <span style={lbl}>Art-Net In</span>
+      <span style={lbl}>Art-Net 入力</span>
       {artnetError && (
         <span
           style={{ ...chip, color: '#e0726a', borderColor: '#e0726a' }}
@@ -86,7 +86,7 @@ export function StatusBar(): React.JSX.Element {
         </span>
       )}
       {universes.length === 0 ? (
-        <span style={{ ...chip, color: C.faint, borderColor: C.border }}>No Signal</span>
+        <span style={{ ...chip, color: C.faint, borderColor: C.border }}>信号なし</span>
       ) : (
         universes.map((u) => {
           const live = liveSet.has(u)
@@ -119,7 +119,7 @@ export function StatusBar(): React.JSX.Element {
       )}
 
       <div style={sep} />
-      <span style={lbl}>MIDI In</span>
+      <span style={lbl}>MIDI 入力</span>
       <span
         style={{
           ...chip,
@@ -133,7 +133,7 @@ export function StatusBar(): React.JSX.Element {
       <div style={sep} />
       {ndiActive ? (
         <>
-          <span style={{ ...chip, color: C.green, borderColor: C.green }}>NDI OUT ● LIVE</span>
+          <span style={{ ...chip, color: C.green, borderColor: C.green }}>NDI 出力 ● 出力中</span>
           {ndiRx >= 0 && (
             <span
               style={{
@@ -148,7 +148,7 @@ export function StatusBar(): React.JSX.Element {
         </>
       ) : (
         <span style={{ ...chip, color: C.faint, borderColor: C.border }}>
-          {platform === 'win32' ? 'NDI OUT ○ No Runtime' : 'NDI OUT ○ —'}
+          {platform === 'win32' ? 'NDI 出力 ○ ランタイム無し' : 'NDI 出力 ○ —'}
         </span>
       )}
 
@@ -156,7 +156,7 @@ export function StatusBar(): React.JSX.Element {
 
       {hasNet && (
         <>
-          <span style={lbl}>Interface</span>
+          <span style={lbl}>回線</span>
           <select
             value={nic}
             onFocus={refreshNics} // 起動後に挿したLANケーブルも、開いた時に一覧へ出す

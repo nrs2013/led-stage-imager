@@ -38,7 +38,7 @@ export function PatchTable(): React.JSX.Element {
     <div style={wrapStyle}>
       <div style={headerRow}>
         <div style={{ fontFamily: F.display, fontSize: 15, letterSpacing: '0.1em', color: C.white }}>
-          Patch <span style={{ color: C.hint, fontSize: 12 }}>({chart.fixtures.length})</span>
+          番地一覧 <span style={{ color: C.hint, fontSize: 12 }}>({chart.fixtures.length})</span>
         </div>
         {overlaps.length > 0 && (
           <div style={{ color: '#e0726a', fontSize: 11, fontFamily: F.ui }}>
@@ -62,9 +62,7 @@ export function PatchTable(): React.JSX.Element {
       <div ref={listRef} style={{ overflow: 'auto', flex: 1 }}>
         {chart.fixtures.length === 0 && (
           <div style={{ color: C.faint, fontFamily: F.ui, fontSize: 12, padding: '8px 2px' }}>
-            まだパッチがありません。電飾を選んで Inspector でパッチしてください。
-            <br />
-            No fixtures patched yet — select a fixture and patch it in the Inspector.
+            まだ番地がありません。電飾を選んで、右のパネルで番地をふってください。
           </div>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
@@ -115,7 +113,7 @@ export function PatchTable(): React.JSX.Element {
                       padding: '0 3px'
                     }}
                   >
-                    LOCK
+                    ロック
                   </span>
                 )}
                 <span>{formatDmx(f.universe, f.start)}</span>

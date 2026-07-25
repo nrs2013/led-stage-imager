@@ -2187,10 +2187,10 @@ export function EditorCanvas(): React.JSX.Element {
   const mmpp = mmPerPx(chart)
   const unit =
     cellPx === 0
-      ? 'grid off'
+      ? '方眼なし'
       : mmpp
-        ? `1 cell = ${(cellPx * mmpp).toFixed(cellPx * mmpp < 10 ? 1 : 0)}mm`
-        : `1 cell = ${cellPx}px`
+        ? `1マス = ${(cellPx * mmpp).toFixed(cellPx * mmpp < 10 ? 1 : 0)}mm`
+        : `1マス = ${cellPx}px`
   const [unitFlash, setUnitFlash] = useState<{ text: string; key: number } | null>(null)
   const prevUnit = useRef<string | null>(null)
   useEffect(() => {
@@ -2231,8 +2231,8 @@ export function EditorCanvas(): React.JSX.Element {
       />
 
       <div style={{ position: 'absolute', left: 10, bottom: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
-        <button onClick={fit} style={zoomBtn}>
-          FIT
+        <button onClick={fit} style={zoomBtn} title="チャート全体が入る大きさに戻す">
+          全体
         </button>
         <button onClick={() => zoomTo(1)} style={zoomBtn}>
           100%
@@ -2269,9 +2269,9 @@ export function EditorCanvas(): React.JSX.Element {
             background: snapToPixel ? C.accent : 'rgba(123,197,232,0.15)',
             color: snapToPixel ? '#0a0a0a' : C.white
           }}
-          title="Snap to 1px grid"
+          title="1ピクセルの方眼に吸着させる（きっちり揃う）"
         >
-          {snapToPixel ? 'Snap ON' : 'Snap OFF'}
+          {snapToPixel ? '吸着 ON' : '吸着 OFF'}
         </button>
         {(() => {
           // ロック解除の「必ず効く出口」。ロック品（画像/未パッチのモチーフ含む）は右クリックや
@@ -2289,15 +2289,15 @@ export function EditorCanvas(): React.JSX.Element {
               }}
               title="ロックした部品・画像を全部解除（掴めるように戻す）。⌘Zで戻せます"
             >
-              Unlock {lockedIds.length}
+              ロック解除 {lockedIds.length}
             </button>
           )
         })()}
       </div>
       {tool === 'polyline' && draft && (
-        <div style={hintStyle}>Click to add points · Double-click to finish · Esc to cancel</div>
+        <div style={hintStyle}>クリックで角を打つ · ダブルクリックで確定 · Esc で取り消し</div>
       )}
-      {spaceUi && <div style={hintStyle}>Space + drag to pan</div>}
+      {spaceUi && <div style={hintStyle}>スペースキー＋ドラッグで画面を動かせます</div>}
       {pasteArmed && (
         <div style={hintStyle}>クリックでペースト（連続OK）· Esc で終了 · 番地はコピー元と同じ</div>
       )}

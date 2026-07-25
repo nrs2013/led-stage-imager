@@ -46,15 +46,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
       <div style={modal} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
           <div style={{ fontFamily: F.display, fontSize: 18, letterSpacing: '0.1em', color: C.white }}>
-            Setup
+            設定
           </div>
           <div style={{ flex: 1 }} />
           <button style={{ ...buttonStyle({}), padding: '8px 12px', minWidth: 56 }} onClick={onClose}>
-            Close
+            閉じる
           </button>
         </div>
 
-        <Field label="Chart Name">
+        <Field label="チャート名">
           <input
             type="text"
             value={chart.name}
@@ -64,7 +64,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
           />
         </Field>
 
-        <Field label="Stage Width (m)">
+        <Field label="ステージ幅（m）">
           <input
             type="number"
             min={0}
@@ -122,7 +122,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
         )}
 
         <div style={{ display: 'flex', gap: 10 }}>
-          <Field label="Canvas W">
+          <Field label="キャンバス幅">
             <NumberField
               value={chart.canvas.w}
               min={16}
@@ -130,7 +130,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
               onChange={(v) => setCanvasSize(Math.max(16, v), chart.canvas.h)}
             />
           </Field>
-          <Field label="Canvas H">
+          <Field label="キャンバス高さ">
             <NumberField
               value={chart.canvas.h}
               min={16}
@@ -145,7 +145,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
           </div>
         )}
 
-        <Field label="Syphon Name">
+        <Field label="Syphon の名前">
           <input
             type="text"
             value={chart.syphon.name}
@@ -161,21 +161,21 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
         </Field>
 
         <Toggle
-          label="Gamma"
+          label="ガンマ"
           on={chart.settings.gamma}
           onChange={setGamma}
           onText="ON"
           offText="OFF"
         />
         <Toggle
-          label="On Signal Loss"
+          label="信号が切れた時"
           on={chart.settings.holdOnTimeout}
           onChange={setHoldOnTimeout}
-          onText="Hold Last"
-          offText="Zero"
+          onText="最後の色のまま"
+          offText="消す"
         />
         <Toggle
-          label="Smoke — 会場のスモーク（全灯体のにじみが育つ）"
+          label="スモーク — 会場のスモーク（全灯体のにじみが育つ）"
           on={chart.settings.glow}
           onChange={setGlow}
           onText="ON"
@@ -196,7 +196,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
         )}
         <div style={{ marginBottom: 12 }}>
           <label style={fieldLabel}>
-            Glow — 電飾のにじみ {chart.settings.ledGlowPx ?? 0}px（0=なし・図形ごとの上書きは右パネル）
+            にじみ — 電飾のにじみ {chart.settings.ledGlowPx ?? 0}px（0=なし・図形ごとの上書きは右パネル）
           </label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input

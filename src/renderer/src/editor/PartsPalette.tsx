@@ -336,7 +336,7 @@ const CARDS: {
 }[] = [
   {
     part: 'bulb',
-    label: 'Ball Bulb',
+    label: '電球',
     hint: `Φ${BULB_DEFAULT_DIAMETER}`,
     title: 'ドラッグしてチャートに置く（中心がそのマスに乗る）',
     thumb: <BulbThumb />
@@ -371,36 +371,36 @@ const CARDS: {
   },
   {
     part: 'festoon',
-    label: 'Festoon',
-    hint: 'STRING',
+    label: 'フェストゥーン',
+    hint: 'ひも状',
     title: 'ドラッグして張り、両端をつかんで掛け直す（1球=1番地・たわみはInspector）',
     thumb: <FestoonThumb />
   },
   {
     part: 'neon',
-    label: 'Neon',
-    hint: 'TEXT',
+    label: 'ネオン',
+    hint: '1文字=1番地',
     title: 'ドラッグしてチャートに置き、Inspectorで文字を打つ（1文字=1番地）',
     thumb: <NeonThumb />
   },
   {
     part: 'marquee',
-    label: 'Marquee',
-    hint: 'BULB TEXT',
+    label: 'マーキー',
+    hint: '電球で文字',
     title: 'マーキーライト — 電球で文字を描く劇場サイン。Inspectorで文字を打つ（1文字=1番地・文字ごとにチェイス・電球間隔も調整可）',
     thumb: <MarqueeThumb />
   },
   {
     part: 'stars',
-    label: 'Stars',
-    hint: 'W+B 2ch',
+    label: '星',
+    hint: '白+青 2番地',
     title: 'ドラッグして置き、四隅で広げる（白ch+青chの2番地・密度はInspector）',
     thumb: <StarsThumb />
   },
   {
     part: 'image',
-    label: 'Photo',
-    hint: 'ALBEDO',
+    label: '写真',
+    hint: '光らない',
     title: '写真（実物の電飾やセット）を置く — 自分では光らず、「スポット」が当たった所だけ浮かぶ。写真はInspectorで選ぶ',
     thumb: <FixtureThumb paint={paintImage} />
   },
@@ -420,22 +420,22 @@ const CARDS: {
   },
   {
     part: 'roomlamp',
-    label: 'Room Lamp',
-    hint: 'LAMP',
+    label: '室内ランプ',
+    hint: '1番地',
     title: '室内ランプ — シェードが暖色に灯り、下へ光がこぼれる。電飾屋が用意できないセットの灯り（卓RGBで色・明るさ・単一番地）',
     thumb: <FixtureThumb paint={paintRoomLamp} />
   },
   {
     part: 'streetlamp',
-    label: 'Street Lamp',
-    hint: 'STREET',
+    label: '街灯',
+    hint: '1番地',
     title: '街灯 — 灯具から下へ光のコーン・地面に光の輪。夜景・寒色にも（卓RGBで色・明るさ・単一番地）',
     thumb: <FixtureThumb paint={paintStreetLamp} />
   },
   {
     part: 'chandelier',
-    label: 'Chandelier',
-    hint: 'CHAND',
+    label: 'シャンデリア',
+    hint: '1番地',
     title: 'シャンデリア — 複数のロウソク球が暖色に灯る豪華アイテム。まず全体を1番地で一斉点灯（卓RGBで色・明るさ）',
     thumb: <FixtureThumb paint={paintChandelier} />
   }
@@ -526,15 +526,15 @@ export function PartsPalette(): React.JSX.Element {
         onClick={() => setOpen((v) => !v)}
         title="電飾の部品棚を開く（Esc で閉じる）。開いたままキャンバスへドラッグして置けます"
       >
-        PARTS
+        部品棚
       </button>
 
       {open && (
         <div style={winStyle}>
           <div style={winHeadStyle}>
-            <div style={titleStyle}>Parts</div>
+            <div style={titleStyle}>部品棚</div>
             <button style={closeBtnStyle} onClick={() => setOpen(false)} title="閉じる（Esc）">
-              CLOSE
+              閉じる
             </button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 }}>

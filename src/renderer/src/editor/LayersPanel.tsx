@@ -43,14 +43,14 @@ export function LayersPanel(): React.JSX.Element {
   return (
     <div style={panel}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <span style={title}>Layers</span>
-        <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1 song = 1 image</span>
+        <span style={title}>レイヤー</span>
+        <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1曲 = 1枚</span>
         <div style={{ flex: 1 }} />
         <button style={smallBtn} onClick={addWithImage} title="チャート画像を選んで新しい曲ページを追加">
-          + Image
+          ＋画像
         </button>
         <button style={smallBtn} onClick={() => addLayer()} title="下絵なしの空ページを追加">
-          + Blank
+          ＋空ページ
         </button>
       </div>
       <div style={{ maxHeight: 168, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -150,7 +150,7 @@ export function LayersPanel(): React.JSX.Element {
                   setLayerVisible(l.id, !l.visible)
                 }}
               >
-                {l.visible ? 'Show' : 'Hide'}
+                {l.visible ? '表示' : '非表示'}
               </button>
               <button
                 style={{
