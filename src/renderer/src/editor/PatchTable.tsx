@@ -4,11 +4,6 @@ import { C, F, chrome, buttonStyle } from '../ui/tokens'
 import { channelRange, detectOverlaps } from '../dmx/patch'
 import { formatDmx, repeatCount } from '../dmx/address'
 import { resolveColor } from '../dmx/resolve'
-import { buildMvr } from '../io/mvr-export'
-
-interface MvrApi {
-  saveMvr?: (name: string, data: Uint8Array) => Promise<string | null>
-}
 
 export function PatchTable(): React.JSX.Element {
   const chart = useStore((s) => s.chart)
@@ -37,37 +32,7 @@ export function PatchTable(): React.JSX.Element {
     return sh ? `${sh.type} ${sh.id.slice(-4)}` : shapeId.slice(-4)
   }
 
-  const exportCsv = (): void => {
-    const header = ['shape', 'type', 'universe', 'start', 'end', 'mode']
-    const rows = chart.fixtures.map((f) => {
-      const [, e] = channelRange(f)
-      return [shapeName(f.shapeId), f.mode, String(f.universe + 1), String(f.start), String(e), f.mode]
-    })
-    const csv = [header, ...rows].map((r) => r.join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${chart.name || 'chart'}-patch.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
 
-  const exportMvr = async (): Promise<void> => {
-    const data = await buildMvr(chart)
-    const api = (window as unknown as { api?: MvrApi }).api
-    if (api?.saveMvr) {
-      await api.saveMvr(chart.name || 'decor', data)
-      return
-    }
-    const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/zip' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${chart.name || 'decor'}.mvr`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
 
   return (
     <div style={wrapStyle}>
@@ -77,26 +42,20 @@ export function PatchTable(): React.JSX.Element {
         </div>
         {overlaps.length > 0 && (
           <div style={{ color: '#e0726a', fontSize: 11, fontFamily: F.ui }}>
-            ⚠ {overlaps.length} DMX clash
+            番地の重なり {overlaps.length} 件
           </div>
         )}
         <div style={{ flex: 1 }} />
+        {/* 書き出し（MVR/CSV）は「ファイル」メニューへ移動。ここは番地の作業に要る物だけ。 */}
+        <span style={{ fontSize: 11, color: C.label, fontFamily: F.mono }}>
+          キャンバス {chart.canvas.w} × {chart.canvas.h}
+        </span>
         <button
           style={{ ...buttonStyle({ active: showIds }), padding: '7px 12px', minHeight: 30 }}
           onClick={() => setShowIds(!showIds)}
           title="キャンバスに #番号 ラベルを表示（下の札と同じ番号）"
         >
-          IDs
-        </button>
-        <button
-          style={{ ...buttonStyle({}), padding: '7px 12px', minHeight: 30 }}
-          onClick={exportMvr}
-          title="grandMA3 用の MVR（パッチ＋配置＋DECOR Cell の GDTF 同梱）を書き出す"
-        >
-          Export MVR
-        </button>
-        <button style={{ ...buttonStyle({}), padding: '7px 12px', minHeight: 30 }} onClick={exportCsv}>
-          Export CSV
+          番号を出す
         </button>
       </div>
 

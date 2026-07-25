@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Toolbar } from './editor/Toolbar'
-import { SubBar } from './editor/SubBar'
 import { EditorCanvas } from './editor/EditorCanvas'
 import { Inspector } from './editor/Inspector'
 import { PartsPalette } from './editor/PartsPalette'
@@ -334,7 +333,6 @@ function EditorApp(): React.JSX.Element {
       <Toolbar testOpen={testOpen} onToggleTest={() => setTestOpen((v) => !v)} />
       {mode === 'edit' ? (
         <>
-          <SubBar />
           <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
             <EditorCanvas />
             <div

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useStore, type Tool } from '../state/store'
 import { C, F, chrome, buttonStyle } from '../ui/tokens'
 import { NumberField } from '../ui/NumberField'
+import { MenuButton, MenuItem } from '../ui/MenuButton'
+import { EditorMenus } from './EditorMenus'
 
 /** Tool icons: the shape you click is the shape you draw next. */
 function ToolIcon({ id }: { id: Tool }): React.JSX.Element {
@@ -65,42 +67,31 @@ interface ToolDef {
   hint: string
 }
 
-/** Two islands: PIXEL = precise 1px dot work, DRAW = freehand shapes. */
-const TOOL_GROUPS: { label: string | null; tools: ToolDef[] }[] = [
+/** 常に出しておく道具＝ほぼ毎回使うものだけ（のむさん 2026-07-25「ボタンが多すぎる」）。 */
+const DIRECT_TOOLS: ToolDef[] = [
   {
-    label: null,
-    tools: [
-      {
-        id: 'select',
-        label: 'Select',
-        hint: '(V) 選択 / 囲んで複数選択 / 空クリック=ペースト位置マーク / ⌘ドラッグ=ドット描き / 右クリック=メニュー'
-      }
-    ]
+    id: 'select',
+    label: '選択',
+    hint: '(V) 選択 / 囲んで複数選択 / 空クリック=ペースト位置マーク / ⌘ドラッグ=ドット描き / 右クリック=メニュー'
   },
   {
-    label: 'PIXEL',
-    tools: [
-      {
-        id: 'pixelpen',
-        label: 'Paint',
-        hint: '(P) なぞって塗る→離すと自動清書。クリック=1ドット・Shift=直線・⌘ドラッグ=移動'
-      },
-      { id: 'eraser', label: 'Eraser', hint: '(E) ドット消しゴム — はみ出した所をなぞって消す' }
-    ]
+    id: 'pixelpen',
+    label: '塗る',
+    hint: '(P) なぞって塗る→離すと自動清書。クリック=1ドット・Shift=直線・⌘ドラッグ=移動'
   },
-  {
-    label: 'DRAW',
-    tools: [
-      { id: 'freehand', label: 'Pen', hint: 'なめらかな手描き' },
-      { id: 'line', label: 'Line', hint: '(L) 直線（Shift=水平/垂直/45°）' },
-      { id: 'polyline', label: 'Poly Line', hint: '折れ線（クリックで角・ダブルクリックで確定）' },
-      { id: 'ellipse', label: 'Bulb', hint: '丸・電球（Shift=正円）' },
-      { id: 'triangle', label: 'Triangle', hint: '三角' },
-      { id: 'rect', label: 'Rect', hint: '四角（Shift=正方形）' },
-      { id: 'star', label: 'Star', hint: '星' },
-      { id: 'polygon', label: 'Polygon', hint: '六角形' }
-    ]
-  }
+  { id: 'eraser', label: '消しゴム', hint: '(E) ドット消しゴム — はみ出した所をなぞって消す' }
+]
+
+/** 「図形」ボタンに畳む道具（たまにしか使わない8種）。 */
+const SHAPE_TOOLS: ToolDef[] = [
+  { id: 'freehand', label: 'ペン', hint: 'なめらかな手描き' },
+  { id: 'line', label: '直線', hint: '(L) 直線（Shift=水平/垂直/45°）' },
+  { id: 'polyline', label: '折れ線', hint: '折れ線（クリックで角・ダブルクリックで確定）' },
+  { id: 'ellipse', label: '丸・電球', hint: '丸・電球（Shift=正円）' },
+  { id: 'triangle', label: '三角', hint: '三角' },
+  { id: 'rect', label: '四角', hint: '四角（Shift=正方形）' },
+  { id: 'star', label: '星', hint: '星' },
+  { id: 'polygon', label: '六角形', hint: '六角形' }
 ]
 
 interface PreviewApi {
@@ -122,7 +113,10 @@ export function Toolbar({
   const setTool = useStore((s) => s.setTool)
   const penWidth = useStore((s) => s.penWidth)
   const setPenWidth = useStore((s) => s.setPenWidth)
+  const stepPatch = useStore((s) => s.stepPatch)
+  const setStepPatch = useStore((s) => s.setStepPatch)
   const editing = mode === 'edit'
+  const shapeTool = SHAPE_TOOLS.find((t) => t.id === tool) // 図形を選んでいる時はボタンに出す
 
   const [previewOpen, setPreviewOpen] = useState(false)
   const hasPreview = !!previewApi()?.togglePreview
@@ -162,74 +156,81 @@ export function Toolbar({
       <div
         style={{
           display: 'flex',
+          alignItems: 'center',
           gap: 6,
           opacity: editing ? 1 : 0.3,
           pointerEvents: editing ? 'auto' : 'none'
         }}
       >
-        {TOOL_GROUPS.map((g, gi) => (
-          <div
-            key={g.label ?? gi}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        <EditorMenus />
+
+        <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
+
+        {DIRECT_TOOLS.map((t) => (
+          <button
+            key={t.id}
+            style={{
+              ...buttonStyle({ active: tool === t.id }),
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              height: 32,
+              padding: '0 10px'
+            }}
+            onClick={() => setTool(t.id)}
+            title={`${t.label} — ${t.hint}`}
           >
-            {gi > 0 && (
-              <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
-            )}
-            {g.label && (
-              <span
-                style={{
-                  fontSize: 9,
-                  letterSpacing: '0.14em',
-                  color: C.hint,
-                  fontFamily: F.ui,
-                  fontWeight: 700,
-                  lineHeight: 1,
-                  userSelect: 'none'
-                }}
-              >
-                {g.label}
-              </span>
-            )}
-            {g.tools.map((t) => (
-              <button
-                key={t.id}
-                style={{
-                  ...buttonStyle({ active: tool === t.id }),
-                  width: 36,
-                  height: 32,
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onClick={() => setTool(t.id)}
-                title={`${t.label} — ${t.hint}`}
-                aria-label={t.label}
-              >
-                <ToolIcon id={t.id} />
-              </button>
-            ))}
-            {g.label === 'PIXEL' && (
-              <span
-                style={{ display: 'flex', alignItems: 'center', gap: 4, width: 74 }}
-                title="書く太さ（px）— Paint と矢印の⌘描きに効く。左右ドラッグで増減・クリックで入力"
-              >
-                <NumberField value={penWidth} min={1} max={500} onChange={setPenWidth} />
-                <span style={{ fontSize: 10, color: C.hint, fontFamily: F.ui }}>px</span>
-              </span>
-            )}
-          </div>
+            <ToolIcon id={t.id} />
+            <span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{t.label}</span>
+          </button>
         ))}
+        <span
+          style={{ display: 'flex', alignItems: 'center', gap: 4, width: 74 }}
+          title="書く太さ（px）— 「塗る」と矢印の⌘描きに効く。左右ドラッグで増減・クリックで入力"
+        >
+          <NumberField value={penWidth} min={1} max={500} onChange={setPenWidth} />
+          <span style={{ fontSize: 10, color: C.hint, fontFamily: F.ui }}>px</span>
+        </span>
+
+        <MenuButton
+          label={shapeTool ? `図形: ${shapeTool.label}` : '図形'}
+          title="直線・折れ線・丸・三角・四角・星・六角形（たまに使う道具をここにまとめました）"
+          width={200}
+        >
+          {(close) =>
+            SHAPE_TOOLS.map((t) => (
+              <MenuItem
+                key={t.id}
+                label={t.label}
+                title={t.hint}
+                active={tool === t.id}
+                onClick={() => {
+                  setTool(t.id)
+                  close()
+                }}
+              />
+            ))
+          }
+        </MenuButton>
       </div>
 
       <div style={{ flex: 1 }} />
+
+      <button
+        style={buttonStyle({ active: stepPatch, accent: C.green, accentRGB: '168,232,120' })}
+        onClick={() => setStepPatch(!stepPatch)}
+        title="連番パッチ：描く（置く・スタンプする）たびに、次の空き番地へ自動でパッチされます"
+      >
+        連番パッチ
+      </button>
+      <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
 
       <button
         style={buttonStyle({})}
         onClick={() => useStore.getState().setHelpOpen(!useStore.getState().helpOpen)}
         title="ショートカット・隠し操作の一覧（?キーでも開く）"
       >
-        Keys
+        キー一覧
       </button>
       <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
       <button
@@ -237,7 +238,7 @@ export function Toolbar({
         onClick={onToggleTest}
         title="卓やArt-Net無しでも、選んだ電飾に色を手で当てて確認できます（テスト用フェーダー）"
       >
-        Programmer
+        卓なしで確認
       </button>
       <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
 
@@ -246,8 +247,9 @@ export function Toolbar({
           <button
             style={buttonStyle({ active: previewOpen, accent: C.green, accentRGB: '168,232,120' })}
             onClick={() => previewApi()?.togglePreview?.()}
+            title="出力の絵を別ウィンドウで全画面表示（確認用）"
           >
-            Fullscreen
+            全画面
           </button>
           <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
         </>
@@ -267,7 +269,7 @@ export function Toolbar({
         }}
         title="Syphon/NDI「LED STAGE IMAGER」へ常に出力中（編集中の絵もそのまま出ます。隠したい時はResolume側でレイヤーを落とす）"
       >
-        ● OUT LIVE
+        ● 出力中
       </span>
     </header>
   )

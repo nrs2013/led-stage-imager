@@ -482,7 +482,7 @@ export function PartsPalette(): React.JSX.Element {
       title={`${c.title}\nクリック→キャンバスを連打で置き続け（Esc で終了）／ドラッグでも置けます`}
       style={
         placingPart === c.part
-          ? { ...cardStyle, borderColor: C.amber, boxShadow: `inset 0 0 0 0.5px ${C.amber}` }
+          ? { ...cardStyle, border: `1px solid ${C.amber}`, boxShadow: `inset 0 0 0 0.5px ${C.amber}` }
           : cardStyle
       }
     >
@@ -522,7 +522,7 @@ export function PartsPalette(): React.JSX.Element {
   return (
     <div style={wrapStyle}>
       <button
-        style={open ? { ...openBtnStyle, borderColor: C.accent, color: C.white } : openBtnStyle}
+        style={open ? { ...openBtnStyle, border: `0.5px solid ${C.accent}`, color: C.white } : openBtnStyle}
         onClick={() => setOpen((v) => !v)}
         title="電飾の部品棚を開く（Esc で閉じる）。開いたままキャンバスへドラッグして置けます"
       >
