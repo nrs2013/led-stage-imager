@@ -39,6 +39,19 @@ import {
 } from './snapping'
 
 /** Vertex / corner / edge handles are POINTS: they may snap to either family. */
+/** 1マスの列を「太さ w」ぶんの塊に膨らませる（描画側 OutputRenderer と同じ n×n の考え方）。
+ *  消しゴムが芯1マスしか消せず「効かない」と言われる原因を根から消すための共通処理。 */
+function fatCells(cells: { x: number; y: number }[], w: number): string[] {
+  const n = Math.max(1, Math.round(w))
+  if (n === 1) return cells.map((c) => `${c.x},${c.y}`)
+  const off = Math.floor((n - 1) / 2)
+  const out = new Set<string>()
+  for (const c of cells)
+    for (let dy = 0; dy < n; dy++)
+      for (let dx = 0; dx < n; dx++) out.add(`${c.x - off + dx},${c.y - off + dy}`)
+  return [...out]
+}
+
 const flatX = (c: SnapCand): number[] => [...c.xs, ...(c.cxs ?? [])]
 const flatY = (c: SnapCand): number[] => [...c.ys, ...(c.cys ?? [])]
 import { cleanPaintStroke, regenChain } from './stroke-fit'
@@ -645,7 +658,7 @@ export function EditorCanvas(): React.JSX.Element {
           type: draft.type,
           points: draft.points,
           display: draft.type === 'rect' || draft.type === 'ellipse' ? 'both' : 'stroke',
-          strokeWidth: 2
+          strokeWidth: Math.max(2, penWidth)
         }
         drawShapeInto(ctx, dShape, C.accent, 'rgba(123,197,232,0.3)', boostRef.current)
       }
@@ -1431,7 +1444,9 @@ export function EditorCanvas(): React.JSX.Element {
       const cell = toCell(e.clientX, e.clientY)
       drawing.current = true
       lastCell.current = cell
-      useStore.getState().eraseCells([`${cell.x},${cell.y}`])
+      // 消す範囲は「書く太さ」と同じ幅にする（描画は strokeWidth の n×n なので、
+      // 芯1マスだけ消していると帯の縁をなぞっても1つも消えず「壊れてる」に見える）
+      useStore.getState().eraseCells(fatCells([cell], penWidth))
       canvasRef.current?.setPointerCapture(e.pointerId)
       return
     }
@@ -1739,7 +1754,7 @@ export function EditorCanvas(): React.JSX.Element {
       const cell = toCell(e.clientX, e.clientY)
       const last = lastCell.current
       if (!last || (cell.x === last.x && cell.y === last.y)) return
-      const keys = cellsBetween(last, cell).map((c) => `${c.x},${c.y}`)
+      const keys = fatCells(cellsBetween(last, cell), penWidth)
       lastCell.current = cell
       useStore.getState().eraseCells(keys)
       return
@@ -1879,7 +1894,7 @@ export function EditorCanvas(): React.JSX.Element {
         const id = addShape({
           type: 'freehand',
           points: pp,
-          ...(isPaint ? { strokeWidth: penWidth } : {})
+          strokeWidth: penWidth
         })
         if (isPaint) {
           // なぞり×自動清書: fit the raw trail on release. Recorded as its own history
@@ -1891,10 +1906,11 @@ export function EditorCanvas(): React.JSX.Element {
         }
       }
     } else if (d0.type === 'line') {
-      if (dist(a, b) >= MIN_SIZE) addShape({ type: 'line', points: [a, b] })
+      if (dist(a, b) >= MIN_SIZE) addShape({ type: 'line', points: [a, b], strokeWidth: penWidth })
     } else {
       const bnd = cornerBounds(a, b)
-      if (bnd.w >= MIN_SIZE || bnd.h >= MIN_SIZE) addShape({ type: d0.type, points: [a, b] })
+      if (bnd.w >= MIN_SIZE || bnd.h >= MIN_SIZE)
+        addShape({ type: d0.type, points: [a, b], strokeWidth: penWidth })
     }
     setDraft(null)
   }
@@ -2297,6 +2313,9 @@ export function EditorCanvas(): React.JSX.Element {
       {tool === 'polyline' && draft && (
         <div style={hintStyle}>クリックで角を打つ · ダブルクリックで確定 · Esc で取り消し</div>
       )}
+      {placingPart && (
+        <div style={hintStyle}>クリックした所に置き続けます · Esc でやめる</div>
+      )}
       {spaceUi && <div style={hintStyle}>スペースキー＋ドラッグで画面を動かせます</div>}
       {pasteArmed && (
         <div style={hintStyle}>クリックでペースト（連続OK）· Esc で終了 · 番地はコピー元と同じ</div>
@@ -2441,7 +2460,9 @@ const measureBadge: React.CSSProperties = {
 const hintStyle: React.CSSProperties = {
   position: 'absolute',
   left: '50%',
-  bottom: 12,
+  // 上に出す。下(bottom:12)だと拡大率・方眼・吸着のボタン列と重なって、
+  // 帯がボタンを覆い隠していた（実測: 帯 423-677 / 吸着ボタン 374-436）。
+  top: 12,
   transform: 'translateX(-50%)',
   background: 'rgba(15,14,13,0.9)',
   border: `0.5px solid ${C.border}`,

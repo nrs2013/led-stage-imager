@@ -362,18 +362,139 @@ export function Inspector(): React.JSX.Element {
         {sizeText(shape)}
       </div>
 
-      <SectionTitle>反転</SectionTitle>
-      <div style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}>
-        この電飾をその場で裏返します（コピーは作りません）。⌘Z で戻せます。
-      </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: rowGap }}>
-        <button style={mirrorBtn} title="左右に反転" onClick={() => mirrorShapes('h')}>
-          左右反転
+      <SectionTitle>番地</SectionTitle>
+      {shape.type === 'image' ? (
+        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8, lineHeight: 1.6 }}>
+          写真は光りません — 「スポット」をパッチして当てると浮かびます
+        </div>
+      ) : !fixture ? (
+        <button
+          style={{ ...buttonStyle({}), width: '100%', marginTop: 8 }}
+          onClick={() =>
+            upsertFixture(
+              shape.id,
+              // stars = two plain dimmer channels (White / Blue);
+              // blinder = 8 cells on ONE address by default (間隔3で8球バラバラ)
+              shape.type === 'stars'
+                ? { mode: 'dim', fixedColor: [255, 255, 255] }
+                : shape.type === 'blinder'
+                  ? { addressStep: 0 }
+                  : {}
+            )
+          }
+        >
+          ＋ 番地をふる
         </button>
-        <button style={mirrorBtn} title="上下に反転" onClick={() => mirrorShapes('v')}>
-          上下反転
-        </button>
-      </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <Field label="Universe" flex={1}>
+              <NumberField
+                value={fixture.universe + 1}
+                min={1}
+                max={32768}
+                onChange={(v) => upsertFixture(shape.id, { universe: Math.max(0, v - 1) })}
+              />
+            </Field>
+            <Field label="DMX 番地" flex={1}>
+              <NumberField
+                value={fixture.start}
+                min={1}
+                max={Math.max(1, 513 - channelCount(fixture.mode))}
+                onChange={(v) =>
+                  // 使用ch数ぶん512に収まる位置まで＝はみ出したchが黙って0扱いになるのを防ぐ
+                  upsertFixture(shape.id, {
+                    start: Math.min(v, Math.max(1, 513 - channelCount(fixture.mode)))
+                  })
+                }
+              />
+            </Field>
+          </div>
+
+          <Field label="種類">
+            <select
+              value={fixture.mode}
+              style={{ ...inputStyle, fontFamily: F.ui }}
+              onChange={(e) => upsertFixture(shape.id, { mode: e.target.value as ChannelMode })}
+            >
+              {modesForFamily(shape.family ?? familyOfType(shape.type), fixture.mode).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {fixture.mode === 'dim' && (
+            <Field label="色">
+              <input
+                type="color"
+                value={rgbToHex(fixture.fixedColor ?? [255, 255, 255])}
+                style={{ width: '100%', height: 30, background: C.inputBg, border: `0.5px solid ${C.border}`, borderRadius: 4 }}
+                onChange={(e) => upsertFixture(shape.id, { fixedColor: hexToRgb(e.target.value) })}
+              />
+            </Field>
+          )}
+
+          {(hasRepeat || repeatCount(shape) > 1) && (
+            <Field
+              label={
+                shape.type === 'neon' || shape.type === 'marquee'
+                  ? `文字ごとの番地の飛び幅（0=全部同じ番地 / 標準 ${channelCount(fixture.mode)}）`
+                  : shape.type === 'stars'
+                    ? `白→青の番地の飛び幅（標準 ${channelCount(fixture.mode)}）`
+                    : shape.type === 'festoon' ||
+                        shape.type === 'blinder' ||
+                        shape.type === 'pixelpatt'
+                      ? `番地の飛び幅（0=全部同じ番地 / ${channelCount(fixture.mode)}=1個ずつ別）`
+                      : `番地の飛び幅（標準 ${channelCount(fixture.mode)}）`
+              }
+            >
+              <NumberField
+                value={fixture.addressStep ?? channelCount(fixture.mode)}
+                min={0}
+                max={512}
+                onChange={(v) => upsertFixture(shape.id, { addressStep: v })}
+              />
+            </Field>
+          )}
+
+          <div
+            style={{
+              fontFamily: F.mono,
+              fontSize: 12,
+              color: C.accent,
+              marginTop: 4,
+              letterSpacing: '0.04em'
+            }}
+          >
+            {(() => {
+              if (shape.type === 'stars') {
+                const blue = addressAt(
+                  fixture.universe,
+                  fixture.start,
+                  fixture.mode,
+                  fixture.addressStep,
+                  1
+                )
+                return `White ${formatDmx(fixture.universe, fixture.start)} · Blue ${formatDmx(blue.universe, blue.start)}`
+              }
+              const reps = repeatCount(shape)
+              if (reps <= 1)
+                return `${formatDmx(fixture.universe, fixture.start)} – ${formatDmx(fixture.universe, fixture.start + channelCount(fixture.mode) - 1)}`
+              const last = addressAt(
+                fixture.universe,
+                fixture.start,
+                fixture.mode,
+                fixture.addressStep,
+                reps - 1
+              )
+              return `${formatDmx(fixture.universe, fixture.start)} … ${formatDmx(last.universe, last.start)} ×${reps}`
+            })()}
+          </div>
+        </>
+      )}
+
 
       {/* bulb: glass size + texture (colour & gauge come from the console) */}
       {shape.type === 'bulb' && (
@@ -918,138 +1039,18 @@ export function Inspector(): React.JSX.Element {
       <div style={{ height: 1, background: C.border, margin: `${rowGap}px 0` }} />
 
       {/* DMX address */}
-      <SectionTitle>番地</SectionTitle>
-      {shape.type === 'image' ? (
-        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8, lineHeight: 1.6 }}>
-          写真は光りません — 「スポット」をパッチして当てると浮かびます
-        </div>
-      ) : !fixture ? (
-        <button
-          style={{ ...buttonStyle({}), width: '100%', marginTop: 8 }}
-          onClick={() =>
-            upsertFixture(
-              shape.id,
-              // stars = two plain dimmer channels (White / Blue);
-              // blinder = 8 cells on ONE address by default (間隔3で8球バラバラ)
-              shape.type === 'stars'
-                ? { mode: 'dim', fixedColor: [255, 255, 255] }
-                : shape.type === 'blinder'
-                  ? { addressStep: 0 }
-                  : {}
-            )
-          }
-        >
-          ＋ 番地をふる
+      <SectionTitle>反転</SectionTitle>
+      <div style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}>
+        この電飾をその場で裏返します（コピーは作りません）。⌘Z で戻せます。
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: rowGap }}>
+        <button style={mirrorBtn} title="左右に反転" onClick={() => mirrorShapes('h')}>
+          左右反転
         </button>
-      ) : (
-        <>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <Field label="Universe" flex={1}>
-              <NumberField
-                value={fixture.universe + 1}
-                min={1}
-                max={32768}
-                onChange={(v) => upsertFixture(shape.id, { universe: Math.max(0, v - 1) })}
-              />
-            </Field>
-            <Field label="DMX 番地" flex={1}>
-              <NumberField
-                value={fixture.start}
-                min={1}
-                max={Math.max(1, 513 - channelCount(fixture.mode))}
-                onChange={(v) =>
-                  // 使用ch数ぶん512に収まる位置まで＝はみ出したchが黙って0扱いになるのを防ぐ
-                  upsertFixture(shape.id, {
-                    start: Math.min(v, Math.max(1, 513 - channelCount(fixture.mode)))
-                  })
-                }
-              />
-            </Field>
-          </div>
-
-          <Field label="種類">
-            <select
-              value={fixture.mode}
-              style={{ ...inputStyle, fontFamily: F.ui }}
-              onChange={(e) => upsertFixture(shape.id, { mode: e.target.value as ChannelMode })}
-            >
-              {modesForFamily(shape.family ?? familyOfType(shape.type), fixture.mode).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          {fixture.mode === 'dim' && (
-            <Field label="色">
-              <input
-                type="color"
-                value={rgbToHex(fixture.fixedColor ?? [255, 255, 255])}
-                style={{ width: '100%', height: 30, background: C.inputBg, border: `0.5px solid ${C.border}`, borderRadius: 4 }}
-                onChange={(e) => upsertFixture(shape.id, { fixedColor: hexToRgb(e.target.value) })}
-              />
-            </Field>
-          )}
-
-          {(hasRepeat || repeatCount(shape) > 1) && (
-            <Field
-              label={
-                shape.type === 'neon' || shape.type === 'marquee'
-                  ? `文字ごとの番地の飛び幅（0=全部同じ番地 / 標準 ${channelCount(fixture.mode)}）`
-                  : shape.type === 'stars'
-                    ? `白→青の番地の飛び幅（標準 ${channelCount(fixture.mode)}）`
-                    : shape.type === 'festoon' ||
-                        shape.type === 'blinder' ||
-                        shape.type === 'pixelpatt'
-                      ? `番地の飛び幅（0=全部同じ番地 / ${channelCount(fixture.mode)}=1個ずつ別）`
-                      : `番地の飛び幅（標準 ${channelCount(fixture.mode)}）`
-              }
-            >
-              <NumberField
-                value={fixture.addressStep ?? channelCount(fixture.mode)}
-                min={0}
-                max={512}
-                onChange={(v) => upsertFixture(shape.id, { addressStep: v })}
-              />
-            </Field>
-          )}
-
-          <div
-            style={{
-              fontFamily: F.mono,
-              fontSize: 12,
-              color: C.accent,
-              marginTop: 4,
-              letterSpacing: '0.04em'
-            }}
-          >
-            {(() => {
-              if (shape.type === 'stars') {
-                const blue = addressAt(
-                  fixture.universe,
-                  fixture.start,
-                  fixture.mode,
-                  fixture.addressStep,
-                  1
-                )
-                return `White ${formatDmx(fixture.universe, fixture.start)} · Blue ${formatDmx(blue.universe, blue.start)}`
-              }
-              const reps = repeatCount(shape)
-              if (reps <= 1)
-                return `${formatDmx(fixture.universe, fixture.start)} – ${formatDmx(fixture.universe, fixture.start + channelCount(fixture.mode) - 1)}`
-              const last = addressAt(
-                fixture.universe,
-                fixture.start,
-                fixture.mode,
-                fixture.addressStep,
-                reps - 1
-              )
-              return `${formatDmx(fixture.universe, fixture.start)} … ${formatDmx(last.universe, last.start)} ×${reps}`
-            })()}
-          </div>
-        </>
-      )}
+        <button style={mirrorBtn} title="上下に反転" onClick={() => mirrorShapes('v')}>
+          上下反転
+        </button>
+      </div>
 
       <div style={{ flex: 1 }} />
       <button

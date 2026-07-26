@@ -441,6 +441,9 @@ const CARDS: {
   }
 ]
 
+/** 置き続け中のボタン表示に使う部品名（CARDS の label をそのまま引く）。 */
+const PART_LABEL: Record<string, string> = Object.fromEntries(CARDS.map((c) => [c.part, c.label]))
+
 /** Parts＝別窓。右の列には PARTS ボタンだけを置き、棚は窓として開く（のむさん 2026-07-25
  *  「棚が場所を取って番地を見るスペースが小さい」）。窓は背景を塞がない＝開いたまま
  *  キャンバスへドラッグして置ける。 */
@@ -476,7 +479,8 @@ export function PartsPalette(): React.JSX.Element {
         } else {
           setPlacingPart(c.part)
           setTool('select')
-          setOpen(false) // 窓を閉じてキャンバスへ＝1クリックで置ける状態にする
+          // 窓は閉じない＝別の種類へ続けて持ち替えられる／選択中のカードが目印として残る
+          // （閉じると「置き続けモード」の手がかりがカーソルの形だけになり、置きすぎ事故になる）
         }
       }}
       title={`${c.title}\nクリック→キャンバスを連打で置き続け（Esc で終了）／ドラッグでも置けます`}
@@ -522,11 +526,21 @@ export function PartsPalette(): React.JSX.Element {
   return (
     <div style={wrapStyle}>
       <button
-        style={open ? { ...openBtnStyle, border: `0.5px solid ${C.accent}`, color: C.white } : openBtnStyle}
-        onClick={() => setOpen((v) => !v)}
-        title="電飾の部品棚を開く（Esc で閉じる）。開いたままキャンバスへドラッグして置けます"
+        style={
+          placingPart
+            ? { ...openBtnStyle, border: `0.5px solid ${C.amber}`, color: C.amber }
+            : open
+              ? { ...openBtnStyle, border: `0.5px solid ${C.accent}`, color: C.white }
+              : openBtnStyle
+        }
+        onClick={() => (placingPart ? setPlacingPart(null) : setOpen((v) => !v))}
+        title={
+          placingPart
+            ? '置き続けモード中。押すとやめます（Esc でも同じ）'
+            : '電飾の部品棚を開く（Esc で閉じる）。開いたままキャンバスへドラッグして置けます'
+        }
       >
-        部品棚
+        {placingPart ? `置き続け中: ${PART_LABEL[placingPart] ?? placingPart} — やめる` : '部品棚'}
       </button>
 
       {open && (
@@ -541,9 +555,9 @@ export function PartsPalette(): React.JSX.Element {
             {cards.map(card)}
           </div>
           <div style={{ fontSize: 10, color: C.faint, fontFamily: F.ui, marginTop: 10, lineHeight: 1.5 }}>
-            ドラッグ＆ドロップで設置（中心がドロップ地点に乗ります） ·
-            クリックすると窓が閉じて、キャンバスを連打で置き続けられます（Esc で終了） · 2個目からは ⌘C →
-            クリック → ⌘V
+            カードをクリック → キャンバスをクリックした所に置き続けます（Esc でやめる） ·
+            ドラッグ＆ドロップでも置けます（中心がドロップ地点に乗ります） ·
+            この窓は開いたままにできます
           </div>
         </div>
       )}
