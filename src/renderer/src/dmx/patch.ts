@@ -25,18 +25,26 @@ export function detectOverlaps(
   repsOf?: (fx: Fixture) => number
 ): Array<[string, string]> {
   const out: Array<[string, string]> = []
-  const reps = (fx: Fixture): number => Math.max(1, Math.round(repsOf?.(fx) ?? 1))
-  for (let i = 0; i < fixtures.length; i++) {
-    for (let j = i + 1; j < fixtures.length; j++) {
-      const a = fixtures[i],
-        b = fixtures[j]
-      const ra = reps(a),
-        rb = reps(b)
+  // 🔴 範囲は「1灯につき1回」だけ計算する。総当たりの中で計算すると図形数の2乗ぶん
+  //    アドレス計算が走り、ドラッグ中（毎フレーム再計算）に画面がもたつく。
+  const n = fixtures.length
+  const spans: [number, number][] = new Array(n)
+  const rp: number[] = new Array(n)
+  for (let i = 0; i < n; i++) {
+    rp[i] = Math.max(1, Math.round(repsOf?.(fixtures[i]) ?? 1))
+    spans[i] = usedSpan(fixtures[i], rp[i])
+  }
+  for (let i = 0; i < n; i++) {
+    const a = fixtures[i]
+    const [as, ae] = spans[i]
+    for (let j = i + 1; j < n; j++) {
+      const b = fixtures[j]
+      const [bs, be] = spans[j]
+      if (as > be || bs > ae) continue // 重なっていない（先に弾く＝比較だけで済む）
       // 同じ番地・同じモード・同じ個数＝わざと一斉点灯にしている形なので警告しない
-      if (a.universe === b.universe && a.start === b.start && a.mode === b.mode && ra === rb) continue
-      const [as, ae] = usedSpan(a, ra),
-        [bs, be] = usedSpan(b, rb)
-      if (as <= be && bs <= ae) out.push([a.id, b.id])
+      if (a.universe === b.universe && a.start === b.start && a.mode === b.mode && rp[i] === rp[j])
+        continue
+      out.push([a.id, b.id])
     }
   }
   return out

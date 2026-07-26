@@ -674,17 +674,26 @@ function getHazeTex(): HTMLCanvasElement {
     ph: rnd() * Math.PI * 2,
     a: 0.25 + rnd() * 0.75
   }))
+  // 1マスずつ fillRect すると 16,384 回で最初の点灯が一瞬止まる。画素を直接書いて1回で置く。
+  const img = g.createImageData(W, H)
+  const px = img.data
+  const cols = new Float32Array(W) // 横方向の縞は y に依らないので先に1回だけ作る
+  for (let x = 0; x < W; x++) {
+    let v = 0
+    for (const b of bands) v += b.a * Math.sin((x / W) * Math.PI * 2 * b.k + b.ph)
+    cols[x] = Math.max(0, v / bands.length)
+  }
   for (let y = 0; y < H; y++) {
     const vy = 0.75 + 0.25 * Math.sin((y / H) * Math.PI * 2 * 1.5 + 0.7)
     for (let x = 0; x < W; x++) {
-      let v = 0
-      for (const b of bands) v += b.a * Math.sin((x / W) * Math.PI * 2 * b.k + b.ph)
-      // -1..1 → 0..1 にして、上半分だけ使う（暗くはできない＝加算なので明るいムラだけ作る）
-      const t = Math.max(0, v / bands.length) * vy
-      g.fillStyle = `rgba(255,255,255,${(t * 0.9).toFixed(3)})`
-      g.fillRect(x, y, 1, 1)
+      const o = (y * W + x) * 4
+      px[o] = 255
+      px[o + 1] = 255
+      px[o + 2] = 255
+      px[o + 3] = Math.round(cols[x] * vy * 0.9 * 255)
     }
   }
+  g.putImageData(img, 0, 0)
   hazeTex = c
   return c
 }
