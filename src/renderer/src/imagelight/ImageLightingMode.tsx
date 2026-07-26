@@ -533,12 +533,20 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           s.platform === 'darwin'
             ? !!s.syphonAvailable && !!s.hasClients
             : !!(s as { ndiActive?: boolean }).ndiActive
-        setLive({ midiIn: (s.midiIn ?? 0) > 0, out })
+        // 中身が同じなら state を差し替えない＝1秒ごとに画面全体を作り直さない
+        // （実測: この再描画が つまみ操作中の 70ms 級の引っかかりの正体だった）
+        const nextLive = { midiIn: (s.midiIn ?? 0) > 0, out }
+        setLive((cur) =>
+          cur.midiIn === nextLive.midiIn && cur.out === nextLive.out ? cur : nextLive
+        )
       } catch {
         syphonReadyRef.current = true // 取得失敗 → 送る側に倒す
       }
       // DMXランプ：受信ユニバースと灯体のパッチを突き合わせて短い診断文を作る
       try {
+        // ランプの文言が同じなら state を差し替えない（同上）
+        const setLamp = (n: { on: boolean; note: string }): void =>
+          setDmxLamp((cur) => (cur.on === n.on && cur.note === n.note ? cur : n))
         const st = useStore.getState()
         const nowMs = Date.now()
         const recv = Object.keys(st.lastSeenByUniverse)
@@ -550,27 +558,27 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         ).sort((a, b) => a - b)
         const fmt = (a: number[]): string => a.map((u) => `U${u + 1}`).join(',')
         if (st.artnetError) {
-          setDmxLamp({ on: false, note: `受信エラー（${st.artnetError}）— 他のArt-Netアプリを閉じて再起動` })
+          setLamp({ on: false, note: `受信エラー（${st.artnetError}）— 他のArt-Netアプリを閉じて再起動` })
         } else if (recv.length === 0) {
-          setDmxLamp({
+          setLamp({
             on: false,
             note: pat.length ? `DMX受信なし（灯体は ${fmt(pat)} で待機中）` : 'DMX受信なし'
           })
         } else if (pat.length === 0) {
-          setDmxLamp({ on: true, note: `${fmt(recv)} を受信中（灯体は未パッチ）` })
+          setLamp({ on: true, note: `${fmt(recv)} を受信中（灯体は未パッチ）` })
         } else {
           const hit = recv.filter((u) => pat.includes(u))
           const missing = pat.filter((u) => !recv.includes(u))
           if (hit.length === 0) {
-            setDmxLamp({
+            setLamp({
               on: true,
               note: `${fmt(recv)} を受信中ですが灯体は ${fmt(pat)}＝ユニバースが合っていません（0始まり表示の卓では「アプリの番号−1」）`
             })
           } else if (missing.length === 0) {
-            setDmxLamp({ on: true, note: `${fmt(recv)} を受信中 → 灯体 ${fmt(pat)} に接続OK` })
+            setLamp({ on: true, note: `${fmt(recv)} を受信中 → 灯体 ${fmt(pat)} に接続OK` })
           } else {
             // 一部だけ届いている＝「半分暗い」状態。緑OKと言い切らず、欠けている番号を名指しする
-            setDmxLamp({
+            setLamp({
               on: true,
               note: `${fmt(hit)} は接続OK／${fmt(missing)} が未受信（卓の出力設定を確認）`
             })

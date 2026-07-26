@@ -698,6 +698,41 @@ function getHazeTex(): HTMLCanvasElement {
   return c
 }
 
+/** FX ツマミ / シーン棚の速いコピー。JSON.parse(JSON.stringify()) は ⌘Z のスナップショットで
+ *  600ms ごとに走り、実測で1回 80ms 級の引っかかりになっていた
+ *  （のむさん 2026-07-26「つまみがマウスについてこない」）。中身は小さな数値の入れ物だけなので、
+ *  手で写す方が桁違いに速い。 */
+function cloneFxp(p: FxParams): FxParams {
+  return {
+    search: { ...p.search },
+    rndsearch: { ...p.rndsearch },
+    chase: { ...p.chase },
+    strobe: { ...p.strobe },
+    rndstrobe: { ...p.rndstrobe },
+    colorchase: { ...p.colorchase },
+    breath: { ...p.breath },
+    fire: { ...p.fire },
+    wave: { ...p.wave },
+    bolt: { ...p.bolt },
+    rainbow: { ...p.rainbow },
+    zoompulse: { ...p.zoompulse }
+  }
+}
+function cloneLook(l: Look): Look {
+  return {
+    fxst: { ...l.fxst },
+    fxp: cloneFxp(l.fxp),
+    lights: l.lights.map((x) => ({ ...x, color: x.color.slice() as RGB3 })),
+    ...(l.chasePalette ? { chasePalette: l.chasePalette.map((c) => c.slice() as RGB3) } : {})
+  }
+}
+function clonePatterns(ps: (Pattern | null)[]): (Pattern | null)[] {
+  return ps.map((p) =>
+    p ? { name: p.name, key: p.key, midi: p.midi, look: cloneLook(p.look) } : null
+  )
+}
+
+
 /** 固定シードの擬似乱数（毎回同じ「ランダム」個性）。 */
 function makeSearchParams(rnd: () => number): SearchParams {
   return { phase: rnd() * Math.PI * 2, speedK: 0.6 + 0.8 * rnd(), widthK: 0.7 + 0.6 * rnd() }
@@ -1423,10 +1458,10 @@ export class ImageLightEngine {
     return {
       beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined })),
       st: { ...this.st },
-      fxp: JSON.parse(JSON.stringify(this.fxp)),
+      fxp: cloneFxp(this.fxp),
       selected: [...this.selected],
       activeScene: this.activeScene,
-      patterns: JSON.parse(JSON.stringify(this.patterns)),
+      patterns: clonePatterns(this.patterns),
       userColors: this.userColors.map((c) => c.slice() as RGB3),
       chasePalette: this.chasePalette.map((c) => c.slice() as RGB3),
       // 写真/動画オブジェクトは参照共有・fix と pieces(配置)だけ独立コピー（Undoで戻せるように）
@@ -1462,10 +1497,10 @@ export class ImageLightEngine {
     this.sceneFadeTo = null
     this.beams = s.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined }))
     this.st = { ...s.st }
-    this.fxp = JSON.parse(JSON.stringify(s.fxp))
+    this.fxp = cloneFxp(s.fxp)
     // タブ制限（selGuard）も通す＝⌘Zで「今のタブで触れないもの」が選択に復活しない
     this.selected = s.selected.filter((i) => i >= 0 && i < s.beams.length && this.selAllowed(this.beams[i]))
-    this.patterns = JSON.parse(JSON.stringify(s.patterns))
+    this.patterns = clonePatterns(s.patterns)
     this.userColors = s.userColors.map((c) => c.slice() as RGB3)
     this.chasePalette = s.chasePalette.map((c) => c.slice() as RGB3)
     this.scenes = s.scenes.map((sc) => ({
@@ -4183,7 +4218,7 @@ export class ImageLightEngine {
         rainbow: s.rainbow,
         zoompulse: s.zoompulse
       },
-      fxp: JSON.parse(JSON.stringify(this.fxp)),
+      fxp: cloneFxp(this.fxp),
       lights: this.beams.map((b) => ({
         // 卓駆動中はストロボの明滅を除いた明るさで保存（暗相の瞬間に押しても0にならない）
         gauge: b.dmx && this.dmxFrame ? (b.gaugeStable ?? b.gauge) : b.gauge,
@@ -4213,7 +4248,7 @@ export class ImageLightEngine {
     s.strobe = 'off'
     s.breath = s.fire = s.wave = s.bolt = s.rainbow = s.zoompulse = false
     Object.assign(s, L.fxst)
-    if (L.fxp) this.fxp = JSON.parse(JSON.stringify(L.fxp))
+    if (L.fxp) this.fxp = cloneFxp(L.fxp)
     // 復元データ(古い/壊れた/手編集 show.json)で lights が無い/壊れていても落ちないよう防御。
     const lights = Array.isArray(L.lights) ? L.lights : []
     lights.forEach((f, i) => {
@@ -4312,7 +4347,7 @@ export class ImageLightEngine {
     s.strobe = 'off'
     s.breath = s.fire = s.wave = s.bolt = s.rainbow = s.zoompulse = false
     Object.assign(s, L.fxst)
-    if (L.fxp) this.fxp = JSON.parse(JSON.stringify(L.fxp))
+    if (L.fxp) this.fxp = cloneFxp(L.fxp)
     this.chasePalette = (L.chasePalette ?? []).map((c) => c.slice() as RGB3)
     // mute/solo は真偽値＝フェード不可。明かり切替と同時に即反映する。
     this.beams.forEach((b, i) => {
@@ -5274,10 +5309,20 @@ export class ImageLightEngine {
     const d = this.rigData()
     // 明かり/色/シーンはセッション内（ページ生存中）だけ保持＝モード切替の行き来では残るが、
     // アプリ再起動で消える（のむさん確定 2026-06-21）。
-    try {
-      sessionRig = JSON.parse(JSON.stringify(d)) as RigPayload
-    } catch {
-      /* ignore */
+    // ここも JSON をやめる（patterns を含むので重く、つまみ操作の合間に走って引っかかる）
+    sessionRig = {
+      ...d,
+      st: d.st ? { ...d.st } : undefined,
+      fxst: d.fxst ? { ...d.fxst } : undefined,
+      fxp: d.fxp ? cloneFxp(d.fxp) : undefined,
+      patterns: d.patterns ? clonePatterns(d.patterns) : undefined,
+      userColors: d.userColors?.map((c) => c.slice() as RGB3),
+      chasePalette: d.chasePalette?.map((c) => c.slice() as RGB3),
+      paramMidi: d.paramMidi ? { ...d.paramMidi } : undefined,
+      fxMidi: d.fxMidi ? { ...d.fxMidi } : undefined,
+      fxKey: d.fxKey ? { ...d.fxKey } : undefined,
+      colorMidi: d.colorMidi ? { ...d.colorMidi } : undefined,
+      colorKey: d.colorKey ? { ...d.colorKey } : undefined
     }
     // MIDI とキーの割当だけは再起動でも残す（仕込みなので引きずって困らない）。
     // 🔴 localStorage への書き込みは同期＝つまみを動かすたびに書くと指に付いてこない。
