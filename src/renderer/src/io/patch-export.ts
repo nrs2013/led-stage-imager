@@ -1,5 +1,6 @@
 import type { Chart } from '../model/types'
-import { channelRange } from '../dmx/patch'
+import { channelCount } from '../dmx/channel-math'
+import { addressAt, repeatCount } from '../dmx/address'
 import { buildMvr } from './mvr-export'
 
 interface MvrApi {
@@ -21,10 +22,23 @@ export function exportPatchCsv(chart: Chart): void {
     const sh = chart.shapes.find((s) => s.id === shapeId)
     return sh ? `${sh.type} ${sh.id.slice(-4)}` : shapeId.slice(-4)
   }
-  const header = ['shape', 'type', 'universe', 'start', 'end', 'mode']
+  const header = ['shape', 'type', 'universe', 'start', 'end', 'count', 'mode']
   const rows = chart.fixtures.map((f) => {
-    const [, e] = channelRange(f)
-    return [shapeName(f.shapeId), f.mode, String(f.universe + 1), String(f.start), String(e), f.mode]
+    // 連続複製ぶんを含めた最終番地を書く（×20 のネオンが「1〜3ch」と出て
+    // 電飾屋が別の電飾と番地をぶつける事故を防ぐ）
+    const sh = chart.shapes.find((x) => x.id === f.shapeId)
+    const reps = sh ? repeatCount(sh) : 1
+    const last = addressAt(f.universe, f.start, f.mode, f.addressStep, Math.max(0, reps - 1))
+    const end = last.start + channelCount(f.mode) - 1
+    return [
+      shapeName(f.shapeId),
+      f.mode,
+      String(last.universe + 1 === f.universe + 1 ? f.universe + 1 : `${f.universe + 1}-${last.universe + 1}`),
+      String(f.start),
+      String(end),
+      String(reps),
+      f.mode
+    ]
   })
   const csv = [header, ...rows].map((r) => r.join(',')).join('\n')
   download(csv, 'text/csv', `${chart.name || 'chart'}-patch.csv`)

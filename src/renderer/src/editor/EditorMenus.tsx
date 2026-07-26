@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore, activeLayerOf } from '../state/store'
+import type { Chart } from '../model/types'
 import { createChart, newId } from '../model/chart-model'
 import { saveChartToFile, saveChartAsToFile, openChartFromFile, markNewChart } from '../io/file-ops'
 import { pickImage, imageSize } from '../io/image-pick'
@@ -27,6 +28,11 @@ export function EditorMenus(): React.JSX.Element {
   const [fillOpen, setFillOpen] = useState(false)
   const [savedFlash, setSavedFlash] = useState<string | null>(null)
   const [newFlash, setNewFlash] = useState(false)
+  // 今どのファイルを触っているか＋保存済みかを、消えない表示で出す
+  // （今までは2.5秒で消える「保存しました」だけで、未保存かどうか画面から分からなかった）
+  const [fileName, setFileName] = useState<string | null>(null)
+  const savedChartRef = useRef<Chart | null>(null)
+  const dirty = savedChartRef.current !== chart
   const u = activeLayerOf(chart).underlay
 
   // 「新規」の手応え — 空のチャートで押しても見た目が変わらず「効いてない？」になるため
@@ -41,7 +47,10 @@ export function EditorMenus(): React.JSX.Element {
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | null = null
     const onSaved = (e: Event): void => {
-      setSavedFlash(String((e as CustomEvent).detail))
+      const label = String((e as CustomEvent).detail)
+      setSavedFlash(label)
+      setFileName(label)
+      savedChartRef.current = useStore.getState().chart
       if (t) clearTimeout(t)
       t = setTimeout(() => setSavedFlash(null), 2500)
     }
@@ -75,6 +84,8 @@ export function EditorMenus(): React.JSX.Element {
     // 編集画面のまま空チャートにする。StartScreen へ戻すと SHOW MODE 再選択で
     // 「前回の続き(自動バックアップ)」が復活し、新規にならない不具合になるため戻さない。
     setSavedFlash(null)
+    setFileName(null)
+    savedChartRef.current = null
     setNewFlash(true)
     window.dispatchEvent(new CustomEvent('decor:fit')) // ビューを全体表示にリセット
   }
@@ -88,7 +99,11 @@ export function EditorMenus(): React.JSX.Element {
     }
     try {
       const c = await openChartFromFile()
-      if (c) setChart(c)
+      if (c) {
+        setChart(c)
+        setFileName(c.name || '名前なし')
+        savedChartRef.current = c
+      }
     } catch (err) {
       // eslint-disable-next-line no-alert
       alert('チャートを開けませんでした: ' + (err as Error).message)
@@ -215,9 +230,29 @@ export function EditorMenus(): React.JSX.Element {
         )}
       </MenuButton>
 
+      <span
+        style={{
+          fontSize: 11,
+          color: dirty ? C.amber : C.label,
+          fontFamily: F.mono,
+          whiteSpace: 'nowrap',
+          maxWidth: 220,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis'
+        }}
+        title={
+          fileName
+            ? dirty
+              ? `${fileName} — 保存していない変更があります（⌘S で保存）`
+              : `${fileName} — 保存済み`
+            : 'まだファイルにしていません（⌘S で保存先を聞きます）'
+        }
+      >
+        {fileName ? `${dirty ? '● ' : ''}${fileName}` : '● 未保存'}
+      </span>
       {savedFlash && (
         <span style={{ fontSize: 11, color: C.green, fontFamily: F.mono, whiteSpace: 'nowrap' }}>
-          保存しました: {savedFlash}
+          保存しました
         </span>
       )}
       {newFlash && (

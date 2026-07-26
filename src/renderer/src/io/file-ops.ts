@@ -64,5 +64,12 @@ export async function openChartFromFile(): Promise<Chart | null> {
     })
   }
   if (!json) return null
-  return parseChart(json)
+  try {
+    return parseChart(json)
+  } catch (err) {
+    // 読めなかったファイルを「今のファイル」として覚えたままにすると、
+    // 次の ⌘S でそのファイルを今の中身で上書きしてしまう（元のデータが消える）。
+    markNewChart()
+    throw err
+  }
 }

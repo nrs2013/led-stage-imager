@@ -142,6 +142,10 @@ interface AppState {
   /** 選んだ図形を、選択全体の中心で左右(h)／上下(v)に反転する。コピーは作らずその場で反転。
    *  複数選ぶと位置関係を保ったまま1つの固まりとして反転する（1手で ⌘Z）。 */
   mirrorShapes: (axis: 'h' | 'v') => void
+  /** 選択中の電飾に、左上から順（上の行→下の行）で番地を連番でふり直す。
+   *  すでに番地がある物はその一番小さい番地から、無ければ 1.001 から。1手で ⌘Z。
+   *  連番パッチ(stepPatch)は「これから描く物」用なので、既に置いた物にはこれを使う。 */
+  renumberSelection: () => void
   updateShape: (id: string, patch: Partial<Shape>) => void
   addShape: (init: { type: Shape['type']; points: Shape['points'] } & Partial<Shape>) => string
   removeShape: (id: string) => void
@@ -411,7 +415,10 @@ export const useStore = create<AppState>()((set, get) => ({
       }
     }))
   },
-  setChart: (chart) => set({ chart, selectedId: null, selectedIds: [] }),
+  // 履歴も切る＝新規/別ファイルを開いた直後の ⌘Z で「前の作品」が戻ってきて、
+  // そのまま保存すると開いたファイルを別作品で上書きしてしまう事故を防ぐ。
+  setChart: (chart) =>
+    set({ chart, selectedId: null, selectedIds: [], history: [], future: [], histTag: null }),
   setMode: (mode) => set({ mode }),
   setTool: (tool) => set({ tool }),
   select: (selectedId) => set({ selectedId, selectedIds: selectedId ? [selectedId] : [] }),
@@ -561,6 +568,61 @@ export const useStore = create<AppState>()((set, get) => ({
         })
       }
     }))
+  },
+
+  renumberSelection: () => {
+    const st = get()
+    const ids = st.selectedIds
+    const sel = st.chart.shapes.filter((sh) => ids.includes(sh.id) && !sh.locked)
+    if (sel.length < 2) return
+    // 左上から順＝チャートを読む順（行が変わったら次の行へ）。行の判定は高さの半分。
+    const withBounds = sel.map((sh) => ({ sh, b: shapeArrayBounds(sh) }))
+    const rowH = Math.max(8, Math.min(...withBounds.map((x) => Math.max(8, x.b.h))))
+    const ordered = withBounds
+      .slice()
+      .sort((p, q) => {
+        const pr = Math.floor(p.b.y / rowH),
+          qr = Math.floor(q.b.y / rowH)
+        return pr !== qr ? pr - qr : p.b.x - q.b.x
+      })
+      .map((x) => x.sh)
+    // 開始番地＝選択の中で一番小さい既存番地（無ければ 1.001）
+    const selFx = st.chart.fixtures.filter((f) => ids.includes(f.shapeId))
+    let addr = selFx.length
+      ? selFx.reduce(
+          (m, f) => (f.universe * 512 + f.start < m.universe * 512 + m.start ? f : m),
+          selFx[0]
+        )
+      : { universe: 0, start: 1 }
+    let cur = { universe: addr.universe, start: addr.start }
+    get().beginHistory()
+    set((state) => {
+      const fixtures = [...state.chart.fixtures]
+      const shapes = [...state.chart.shapes]
+      for (const sh of ordered) {
+        const i = fixtures.findIndex((f) => f.shapeId === sh.id)
+        const defMode: ChannelMode =
+          (sh.family ?? familyOfType(sh.type)) === 'light' ? 'beam8' : 'rgb'
+        const base: Fixture =
+          i >= 0
+            ? { ...fixtures[i], universe: cur.universe, start: cur.start }
+            : {
+                id: newId('fx'),
+                shapeId: sh.id,
+                universe: cur.universe,
+                start: cur.start,
+                mode: defMode
+              }
+        if (i >= 0) fixtures[i] = base
+        else {
+          fixtures.push(base)
+          const si = shapes.findIndex((x) => x.id === sh.id)
+          if (si >= 0) shapes[si] = { ...shapes[si], fixtureId: base.id }
+        }
+        cur = nextAddressAfter(base, repeatCount(sh))
+      }
+      return { chart: { ...state.chart, shapes, fixtures } }
+    })
   },
 
   mirrorShapes: (axis) => {

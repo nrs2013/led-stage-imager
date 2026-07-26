@@ -24,7 +24,12 @@ export function PatchTable(): React.JSX.Element {
     el?.scrollIntoView({ block: 'nearest' })
   }, [selectedId])
 
-  const overlaps = detectOverlaps(chart.fixtures)
+  // 個数（ネオンの文字数・連続複製）まで含めて重なりを見る
+  const repsOf = (fx: { shapeId: string }): number => {
+    const sh = chart.shapes.find((x) => x.id === fx.shapeId)
+    return sh ? repeatCount(sh) : 1
+  }
+  const overlaps = detectOverlaps(chart.fixtures, repsOf)
   const flagged = new Set(overlaps.flat())
 
   const shapeName = (shapeId: string): string => {

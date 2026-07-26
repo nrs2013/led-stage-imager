@@ -10,7 +10,7 @@ import { useStore, activeLayerOf } from '../state/store'
 import { visibleByFilter } from '../model/part-family'
 import type { Point, Shape } from '../model/types'
 import { fileToDataUrl } from '../io/image-pick'
-import { saveChartToFile } from '../io/file-ops'
+import { saveChartToFile, saveChartAsToFile } from '../io/file-ops'
 import { C, F } from '../ui/tokens'
 import {
   cornerBounds,
@@ -963,8 +963,22 @@ export function EditorCanvas(): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return
       const st = useStore.getState()
+      // 保存は入力欄ガードより前。番地や太さを打った直後の ⌘S が無反応で
+      // 「保存したつもり」になるのを防ぐ（照明モードと同じ順番）。
+      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        ;(t as HTMLInputElement | null)?.blur?.() // 打ちかけの数字を確定させてから保存する
+        const save = e.shiftKey ? saveChartAsToFile : saveChartToFile
+        // blur の反映（React の状態更新）が終わってから今の中身を読む＝打ちかけの値を落とさない
+        setTimeout(() => {
+          void save(useStore.getState().chart).then((label) => {
+            if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
+          })
+        }, 0)
+        return
+      }
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return
       // undo / redo
       if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
         if (e.shiftKey) st.redo()
@@ -990,14 +1004,6 @@ export function EditorCanvas(): React.JSX.Element {
           }
           e.preventDefault()
         }
-        return
-      }
-      // ⌘S = save to file (the Save button's keyboard twin; blocks the browser dialog)
-      if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault()
-        void saveChartToFile(st.chart).then((label) => {
-          if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
-        })
         return
       }
       // ⌘A = select the whole active layer (locked shapes stay out, ghosts untouched)

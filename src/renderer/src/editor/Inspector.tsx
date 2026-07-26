@@ -152,6 +152,7 @@ export function Inspector(): React.JSX.Element {
   const alignShapes = useStore((s) => s.alignShapes)
   const distributeShapes = useStore((s) => s.distributeShapes)
   const mirrorShapes = useStore((s) => s.mirrorShapes)
+  const renumberSelection = useStore((s) => s.renumberSelection)
   const updateShape = useStore((s) => s.updateShape)
   const upsertFixture = useStore((s) => s.upsertFixture)
   const bulkPatch = useStore((s) => s.bulkPatch)
@@ -250,6 +251,18 @@ export function Inspector(): React.JSX.Element {
           </div>
 
           <SectionTitle>番地</SectionTitle>
+          <div
+            style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: 6, lineHeight: 1.5 }}
+          >
+            すでに置いた電飾に、左上から順で番地をふり直せます（1手で ⌘Z）。
+          </div>
+          <button
+            style={{ ...ab, width: '100%', marginBottom: rowGap }}
+            title="選んだ電飾を左上から順（上の行→下の行）に見て、連番で番地をふり直します。開始は選択の中の一番小さい番地（無ければ 1.001）"
+            onClick={() => renumberSelection()}
+          >
+            連番でふり直す（{ids.length} 個）
+          </button>
           <div
             style={{ fontFamily: F.ui, fontSize: 11, color: C.faint, marginBottom: rowGap, lineHeight: 1.5 }}
           >
