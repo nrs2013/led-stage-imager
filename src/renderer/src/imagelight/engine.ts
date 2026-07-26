@@ -484,6 +484,13 @@ export function clearSavedMidiMap(): void {
 /** localStorage / 公演ファイル 共通のリグ内容（灯体配置=beams は含めない）。 */
 export interface RigPayload {
   st?: { master?: number; smoke?: number }
+  /** FX の入り切り（CHASE/SEARCH/RND SEARCH/STROBE/…）。無い古い保存＝全部切。
+   *  のむさん 2026-07-26「保存した時の設定がすべて残るようにしたい」。 */
+  fxst?: FxFlags
+  /** 見え方: 光だけ出力・立体強調・方向の立体（SETUP の OUTPUT / RELIEF）。 */
+  lightOnly?: boolean
+  relief?: number
+  lumReliefStrength?: number
   fxp?: FxParams
   patterns?: (Pattern | null)[]
   userColors?: RGB3[]
@@ -506,6 +513,9 @@ export interface RigPayload {
 export interface ShowSceneMeta {
   name: string
   kind: 'photo' | 'video'
+  /** 写真を持たない「空の背景」枠（モチーフ・電飾だけで使うシーン）。
+   *  無い古い保存＝写真ありとして扱う。これが無いと media が無いため復元で丸ごと消えていた。 */
+  empty?: boolean
   fix: { m: boolean; s: boolean }[] | null
   media: string | null
   /** このシーンを呼び出す MIDI Note 番号（未割当は省略可）。 */
@@ -632,6 +642,52 @@ const BEAM_ROOT_BOOST = 0.6 // ★出口付近の明るさを足す 0..1（根�
 const CONTACT_HOT = 0.85 // 接触面の焼け（白飛び）0..1（据え置き）
 const CONTACT_HOT_FROM = 0.3 // ★この明るさ(ゲージ)未満では白く焼けない。0..1。大きいほど「明るい時だけ白飛び」＝暗い時に白くならずリアル
 const CONTACT_NIJIMI = 0.45 // 根元のにじみ 0..1（色つき＝明るさに比例で自然に暗くなる）
+// ★光の筋の質感（のむさん 2026-07-26「ランダムサーチがモヤモヤしていてリアリティに欠ける」）。
+// 実際の煙の中の光は筋の中に濃淡のムラがあり、均一なグラデーションだけだと「モヤ」に見える。
+// 灯体ごとの blur は禁止（激重）なので、作り置きした縞テクスチャを筋に1枚重ねるだけで出す。
+const BEAM_HAZE = 0.3 // 筋の中の濃淡ムラの強さ 0..1（0=従来のなめらかなグラデだけ）
+const BEAM_HAZE_SCROLL = 0.045 // ムラが筋に沿って流れる速さ（煙の動き。0=止まる）
+const BEAM_LAYER_SPREAD = 0.62 // ★筋の縁のはっきり具合。小さいほど層が重なって縁がはっきりする
+
+/** 光の筋に重ねる縞テクスチャ（作り置き・全灯体で共用）。縦=筋の向き。
+ *  1回だけ作って drawImage で使い回す＝灯体ごとの重い処理を増やさない。 */
+let hazeTex: HTMLCanvasElement | null = null
+function getHazeTex(): HTMLCanvasElement {
+  if (hazeTex) return hazeTex
+  const W = 64
+  const H = 256
+  const c = document.createElement('canvas')
+  c.width = W
+  c.height = H
+  const g = c.getContext('2d')!
+  g.fillStyle = '#000'
+  g.fillRect(0, 0, W, H)
+  // 固定シードの擬似乱数＝毎回同じ模様（本番で見え方が変わらない）
+  let seed = 20260726
+  const rnd = (): number => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return seed / 0x7fffffff
+  }
+  // 横方向にゆるく変化する縞を数本重ねる（煙の筋）。縦にもゆっくり濃淡を付ける。
+  const bands = Array.from({ length: 5 }, () => ({
+    k: 1 + Math.floor(rnd() * 4), // 横の周期
+    ph: rnd() * Math.PI * 2,
+    a: 0.25 + rnd() * 0.75
+  }))
+  for (let y = 0; y < H; y++) {
+    const vy = 0.75 + 0.25 * Math.sin((y / H) * Math.PI * 2 * 1.5 + 0.7)
+    for (let x = 0; x < W; x++) {
+      let v = 0
+      for (const b of bands) v += b.a * Math.sin((x / W) * Math.PI * 2 * b.k + b.ph)
+      // -1..1 → 0..1 にして、上半分だけ使う（暗くはできない＝加算なので明るいムラだけ作る）
+      const t = Math.max(0, v / bands.length) * vy
+      g.fillStyle = `rgba(255,255,255,${(t * 0.9).toFixed(3)})`
+      g.fillRect(x, y, 1, 1)
+    }
+  }
+  hazeTex = c
+  return c
+}
 
 /** 固定シードの擬似乱数（毎回同じ「ランダム」個性）。 */
 function makeSearchParams(rnd: () => number): SearchParams {
@@ -1640,7 +1696,7 @@ export class ImageLightEngine {
     const NL = 12
     for (let k = 0; k < NL; k++) {
       const u = k / (NL - 1)
-      const wf = 1 - u * 0.62
+      const wf = 1 - u * BEAM_LAYER_SPREAD
       const lf = 0.7 + 0.3 * Math.pow(u, 1.4)
       const L = geo.len * lf
       const gr = g.createLinearGradient(0, geo.y, 0, geo.y - L)
@@ -1659,6 +1715,27 @@ export class ImageLightEngine {
       g.fill()
     }
     g.filter = 'none'
+    g.globalAlpha = 1
+    // 筋の中の濃淡ムラ（煙）。作り置きテクスチャを1枚、筋の形に切り抜いて重ねるだけ。
+    // 先の方は元々暗いので、ムラも先へ行くほど薄くしてグラデを壊さない。
+    if (BEAM_HAZE > 0.001) {
+      const tex = getHazeTex()
+      const halfMax = Math.max(geo.w0, geo.w1) / 2
+      const ms = performance.now() - this.t0
+      const scroll = ((ms * BEAM_HAZE_SCROLL) % tex.height) | 0
+      g.save()
+      this.trap(g, geo, 1, geo.y, geo.y - geo.len)
+      g.clip()
+      g.globalCompositeOperation = 'screen'
+      g.globalAlpha = BEAM_HAZE * ampl * 0.5
+      // 上下2枚でつなぎ目なく流す（テクスチャの高さぶんで巻き戻る）
+      const x = geo.x - halfMax
+      const w = halfMax * 2
+      const h = geo.len
+      g.drawImage(tex, 0, scroll, tex.width, tex.height - scroll, x, geo.y - h, w, h)
+      if (scroll > 0) g.drawImage(tex, 0, 0, tex.width, scroll, x, geo.y - h, w, h * (scroll / tex.height))
+      g.restore()
+    }
     g.globalAlpha = 1
     g.restore()
   }
@@ -5114,6 +5191,24 @@ export class ImageLightEngine {
   private rigData(): RigPayload {
     return {
       st: { master: this.st.master, smoke: this.st.smoke },
+      // FX の入り切りは「今出している絵」そのもの。保存に入っていないと開き直した時に
+      // 灯体の色と向きだけ戻った“動かない絵”になる。
+      fxst: {
+        chase: this.st.chase,
+        search: this.st.search,
+        searchRandom: this.st.searchRandom,
+        strobe: this.st.strobe,
+        colorChase: this.st.colorChase,
+        breath: this.st.breath,
+        fire: this.st.fire,
+        wave: this.st.wave,
+        bolt: this.st.bolt,
+        rainbow: this.st.rainbow,
+        zoompulse: this.st.zoompulse
+      },
+      lightOnly: this.lightOnly,
+      relief: this.relief,
+      lumReliefStrength: this.lumReliefStrength,
       fxp: this.fxp,
       patterns: this.patterns,
       userColors: this.userColors,
@@ -5140,6 +5235,11 @@ export class ImageLightEngine {
       this.st.master = d.st.master ?? 1
       this.st.smoke = d.st.smoke ?? 12
     }
+    if (d.fxst) Object.assign(this.st, d.fxst)
+    if (typeof d.lightOnly === 'boolean') this.lightOnly = d.lightOnly
+    if (typeof d.relief === 'number') this.relief = Math.max(0, Math.min(1, d.relief))
+    if (typeof d.lumReliefStrength === 'number')
+      this.lumReliefStrength = Math.max(0, Math.min(1, d.lumReliefStrength))
     if (d.fxp) this.fxp = { ...this.fxp, ...d.fxp }
     if (Array.isArray(d.patterns)) this.patterns = d.patterns
     if (Array.isArray(d.userColors)) this.userColors = d.userColors
@@ -5436,6 +5536,9 @@ export class ImageLightEngine {
       scenesMeta.push({
         name: sc.name,
         kind: sc.kind,
+        // 写真を持たない「空の背景」枠は印を付けて保存する（media が無いので、これが
+        // 無いと復元側でスキップされて枠ごと消える）
+        ...(!file && sc.kind === 'photo' && !sc.src && !sc.img ? { empty: true } : {}),
         fix: sc.fix ?? null,
         media: file,
         midiNote: sc.midiNote ?? null,
@@ -5571,6 +5674,18 @@ export class ImageLightEngine {
     }
     for (const sm of show.scenes ?? []) {
       const dataUrl = sm.media ? mediaByFile[sm.media] : null
+      // 「空の背景」＝写真を持たない枠。media が無くても作り直す（前は丸ごと消えていた）。
+      if (!dataUrl && sm.empty) {
+        this.addEmptyScene()
+        const e = this.scenes[this.scenes.length - 1]
+        if (e) {
+          e.name = sm.name || '空の背景'
+          if (sm.fix) e.fix = sm.fix
+          if (typeof sm.midiNote === 'number') e.midiNote = sm.midiNote
+          if (sm.warpBox) e.warpBox = sm.warpBox
+        }
+        continue
+      }
       if (!dataUrl) continue
       if (sm.kind === 'video') {
         const blobUrl = await dataUrlToBlobUrl(dataUrl)
@@ -5739,7 +5854,15 @@ export class ImageLightEngine {
         : this.scenes.length
           ? 0
           : -1
+    // 🔴 selectScene は「同じ番号なら何もしない」早期 return があるので、復元では必ず
+    // 通す。通さないと写真の位置と大きさ（4辺スケールワープ）が作り直されず、
+    // 保存した時の見え方と違う位置に写真が出る。
+    this.activeScene = -1
     this.selectScene(vs)
+    // 🔴 開いた直後の ⌘Z で「前の公演」の配置が戻ってくるのを止める（別公演の配置で
+    // 今開いたファイルを上書きしてしまう事故になる）。
+    this.hist = []
+    this.fut = []
     this.bump()
     return true
   }
