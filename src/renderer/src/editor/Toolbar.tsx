@@ -268,7 +268,10 @@ export function Toolbar({
           border: `0.5px solid ${C.border}`,
           borderRadius: 4,
           padding: '5px 10px',
-          userSelect: 'none'
+          userSelect: 'none',
+          // 1行に固定＝バーが狭い時に「出/力/中」と縦3行に潰れるのを防ぐ
+          whiteSpace: 'nowrap',
+          flexShrink: 0
         }}
         title="Syphon/NDI「LED STAGE IMAGER」へ常に出力中（編集中の絵もそのまま出ます。隠したい時はResolume側でレイヤーを落とす）"
       >
