@@ -648,6 +648,17 @@ const CONTACT_NIJIMI = 0.45 // 根元のにじみ 0..1（色つき＝明るさ�
 const BEAM_HAZE = 0.3 // 筋の中の濃淡ムラの強さ 0..1（0=従来のなめらかなグラデだけ）
 const BEAM_HAZE_SCROLL = 0.045 // ムラが筋に沿って流れる速さ（煙の動き。0=止まる）
 const BEAM_LAYER_SPREAD = 0.62 // ★筋の縁のはっきり具合。小さいほど層が重なって縁がはっきりする
+// ★「伸び」の減衰をどれだけ現実に寄せるか（のむさん 2026-07-26「伸びの精度がいまいち」）。
+// 従来は 明るさ=(1-進んだ割合)^n。これだと (1)伸びを長くしても暗くなり方が変わらない
+// （長さで割った“割合”で計算しているため）(2)先端でぴったり0になって光の終わりが見える
+// (3)広がっても薄くならない、の3点が現実と違う。
+// 新しい式＝逆二乗（1/(1+距離/基準)²）×広がりぶんの薄まり×先端のとけ込み。
+const BEAM_REAL = 1 // 0=従来のまま / 1=物理寄り。間の値で混ぜられる（実機で追い込む用）
+const BEAM_SPREAD_DIM = 0.6 // 広がるほど薄くする強さ 0..1（1=面積ぶん完全に薄める）
+const BEAM_END_FADE_FROM = 0.55 // この割合から先端へ向けて溶かす（0で終わらせず闇に馴染ませる）
+/** 落ち込みプリセット（ソフト/標準/きつめ）→「明るさが1/4になる距離」。画面高さに対する割合。
+ *  ここが“絶対の距離”なのが要点＝伸びを長くすると先端は本当に暗くなる。 */
+const halfDistOf = (pow: number): number => (pow >= 4 ? 0.25 : pow >= 2.5 ? 0.45 : 0.75)
 
 /** 光の筋に重ねる縞テクスチャ（作り置き・全灯体で共用）。縦=筋の向き。
  *  1回だけ作って drawImage で使い回す＝灯体ごとの重い処理を増やさない。 */
@@ -1744,13 +1755,23 @@ export class ImageLightEngine {
       const lf = 0.7 + 0.3 * Math.pow(u, 1.4)
       const L = geo.len * lf
       const gr = g.createLinearGradient(0, geo.y, 0, geo.y - L)
+      // 明るさが1/4になる距離。画面高さ基準の“絶対の距離”なので、伸びを長くすると
+      // 先端は本当に暗くなる（従来は長さで割った割合だったので変わらなかった）。
+      const d0 = Math.max(1, LH * halfDistOf(this.falloffPow))
       for (let s = 0; s <= 28; s++) {
         const t = s / 28
-        // 落ち込み: 光源(t=0)で最大、先(t=1)で0。指数 this.falloffPow で強さを切替（プリセット
-        // ソフト1.5 / 標準2.5 / きつめ4）。大きいほど手前が明るく先がかなり暗いメリハリ。
-        // ＋出口付近(t<0.3)をちょっとだけ強く（BEAM_ROOT_BOOST）。
+        // 出口付近(t<0.3)をちょっとだけ強く（BEAM_ROOT_BOOST）。
         const boost = 1 + BEAM_ROOT_BOOST * Math.max(0, 1 - t / 0.3)
-        const v = Math.pow(1 - t, this.falloffPow) * boost
+        // 従来: 長さで割った割合の累乗（ソフト1.5 / 標準2.5 / きつめ4）
+        const legacy = Math.pow(1 - t, this.falloffPow)
+        // 物理寄り: 逆二乗（実距離）× 広がるほど薄まる
+        const inv = 1 / Math.pow(1 + (t * L) / d0, 2)
+        const wRatio = geo.w0 / Math.max(1, geo.w0 + (geo.w1 - geo.w0) * t)
+        const phys = inv * Math.pow(Math.max(0.05, wRatio), BEAM_SPREAD_DIM)
+        // 先端は0で切らずに溶かす（光の終わりの位置が線で見えないように）
+        const e = Math.max(0, (t - BEAM_END_FADE_FROM) / (1 - BEAM_END_FADE_FROM))
+        const endFade = 1 - e * e * (3 - 2 * e)
+        const v = (legacy + (phys - legacy) * BEAM_REAL) * boost * endFade
         gr.addColorStop(t, rgs(col, v))
       }
       g.fillStyle = gr
