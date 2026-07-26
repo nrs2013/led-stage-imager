@@ -783,7 +783,7 @@ export function Inspector(): React.JSX.Element {
         shape.type === 'roomlamp' ||
         shape.type === 'streetlamp' ||
         shape.type === 'chandelier') && (
-        <Field label={shape.type === 'blinder' ? 'Width (dots)' : 'Diameter (dots)'}>
+        <Field label={shape.type === 'blinder' ? '幅（ドット）' : '直径（ドット）'}>
           <NumberField
             value={
               shape.type === 'parlight'
@@ -996,14 +996,14 @@ export function Inspector(): React.JSX.Element {
             <Field
               label={
                 shape.type === 'neon' || shape.type === 'marquee'
-                  ? `Letter step ch (0=together / default ${channelCount(fixture.mode)})`
+                  ? `文字ごとの番地の飛び幅（0=全部同じ番地 / 標準 ${channelCount(fixture.mode)}）`
                   : shape.type === 'stars'
-                    ? `White→Blue step ch (default ${channelCount(fixture.mode)})`
+                    ? `白→青の番地の飛び幅（標準 ${channelCount(fixture.mode)}）`
                     : shape.type === 'festoon' ||
                         shape.type === 'blinder' ||
                         shape.type === 'pixelpatt'
-                      ? `Address step ch (0=together / ${channelCount(fixture.mode)}=separate)`
-                      : `Offset (default ${channelCount(fixture.mode)})`
+                      ? `番地の飛び幅（0=全部同じ番地 / ${channelCount(fixture.mode)}=1個ずつ別）`
+                      : `番地の飛び幅（標準 ${channelCount(fixture.mode)}）`
               }
             >
               <NumberField
