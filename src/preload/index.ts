@@ -107,6 +107,8 @@ const api = {
     ipcRenderer.invoke('engine:status'),
   // renderer が検出した MIDI 入力ポート名をメインへ通知（ステータスバー表示用・Web MIDI 用の名残）
   reportMidiInputs: (names: string[]): void => ipcRenderer.send('midi:inputs', names),
+  /** MIDI をつなぎ直す。つながっている入力ポート名を返す。 */
+  restartMidi: (): Promise<string[]> => ipcRenderer.invoke('midi:restart'),
   // CoreMIDI(ネイティブ)からの MIDI メッセージ受信 [status, data1, data2]
   onMidiMessage: (cb: (msg: [number, number, number]) => void): (() => void) => {
     const h = (_e: IpcRendererEvent, msg: [number, number, number]): void => cb(msg)

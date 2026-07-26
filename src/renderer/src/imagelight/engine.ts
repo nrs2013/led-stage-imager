@@ -431,14 +431,54 @@ export function detectDmxOverlaps(
 //     チルト等を捨てて、初期プリセットを常にまっさら（均等10台・tilt0・下向き）にする
 const RIG_KEY = 'decor.imagelight.rig.v3'
 
-// アプリを新しく開くたびに明かり/色/MIDI を引き継がない（のむさん確定 2026-06-21）。
-// 保持はページ生存中のメモリ(sessionRig)のみ＝モード切替の行き来では残るが、アプリ再起動で消える。
+// アプリを新しく開くたびに明かり/色/シーンは引き継がない（のむさん確定 2026-06-21）。
+// 保持はページ生存中のメモリ(sessionRig)のみ＝モード切替の行き来では残る。
 // 旧バージョンが localStorage に残した前回リグも、開いた瞬間に完全削除する。
+//
+// ただし MIDI とキーの割当だけは別に取っておく（のむさん 2026-07-26
+// 「アプリを立ち上げ直すと一度設定したMIDIが外れて操作できない」）。割当は
+// 仕込みであって「前の明かり」ではないので、引きずっても事故にならない。
+const MAP_KEY = 'decor.imagelight.midimap.v1'
+/** 再起動でも残す割当だけを抜き出した形。 */
+type MidiMap = Pick<
+  RigPayload,
+  | 'paramMidi'
+  | 'masterMidi'
+  | 'fxMidi'
+  | 'fxKey'
+  | 'colorMidi'
+  | 'colorKey'
+  | 'strobeMidi'
+  | 'motifChaseMidi'
+>
 let sessionRig: RigPayload | null = null
 try {
   localStorage.removeItem(RIG_KEY)
 } catch {
   /* localStorage が使えなくても支障なし */
+}
+function loadMidiMap(): MidiMap | null {
+  try {
+    const raw = localStorage.getItem(MAP_KEY)
+    return raw ? (JSON.parse(raw) as MidiMap) : null
+  } catch {
+    return null
+  }
+}
+function saveMidiMap(m: MidiMap): void {
+  try {
+    localStorage.setItem(MAP_KEY, JSON.stringify(m))
+  } catch {
+    /* 保存できなくても操作は続けられる */
+  }
+}
+/** 割当を全部消す（SETUP の「割当をぜんぶ消す」用）。 */
+export function clearSavedMidiMap(): void {
+  try {
+    localStorage.removeItem(MAP_KEY)
+  } catch {
+    /* noop */
+  }
 }
 
 /** localStorage / 公演ファイル 共通のリグ内容（灯体配置=beams は含めない）。 */
@@ -4976,6 +5016,39 @@ export class ImageLightEngine {
       }
     }
   }
+  /** requestMIDIAccess の結果（つなぎ直しで使い回す）。 */
+  private midiAccess: MIDIAccess | null = null
+  /** MIDI をつなぎ直す。抜き差しの後に効かなくなった時の出口（SETUP のボタンから呼ぶ）。
+   *  Mac は main 側の CoreMIDI リーダーも作り直す。割当（ノート/CC）は消さない。 */
+  async reconnectMidi(): Promise<string[]> {
+    const acc = this.midiAccess
+    if (acc) {
+      // 今見えている入力を全部繋ぎ直す
+      acc.inputs.forEach((inp) => {
+        inp.onmidimessage = (m: MIDIMessageEvent): void => {
+          const data = m.data
+          if (!data) return
+          this.handleMidiMessage(data[0], data[1] ?? 0, data[2] ?? 0)
+        }
+      })
+      const names: string[] = []
+      acc.inputs.forEach((inp) => names.push(inp.name || 'MIDI'))
+      this.midiInputs = names
+      this.onMidiInputs?.(names)
+    } else {
+      this.midiTried = false // まだ取れていなければ取り直す
+      this.initMidi()
+    }
+    // Mac(CoreMIDI) 側: 子プロセスを作り直して全ソースへ再接続
+    const api = (window as unknown as { api?: { restartMidi?: () => Promise<string[]> } }).api
+    const ports = (await api?.restartMidi?.()) ?? []
+    if (ports.length) {
+      this.midiInputs = ports
+      this.onMidiInputs?.(ports)
+    }
+    this.bump()
+    return this.midiInputs
+  }
   initMidi(): void {
     const nav = navigator as Navigator & { requestMIDIAccess?: () => Promise<MIDIAccess> }
     if (this.midiTried || !nav.requestMIDIAccess) return
@@ -5001,11 +5074,13 @@ export class ImageLightEngine {
             this.handleMidiMessage(data[0], data[1] ?? 0, data[2] ?? 0)
           }
         }
+        this.midiAccess = acc
         acc.inputs.forEach(hook)
         refreshInputs()
-        acc.onstatechange = (e): void => {
-          const port = e.port
-          if (port && port.type === 'input' && port.state === 'connected') hook(port as MIDIInput)
+        acc.onstatechange = (): void => {
+          // 抜き差しでは「変わったポートだけ」繋ぎ直しても足りないことがある
+          // （別のポート番号で生え直す機種がある）。毎回ぜんぶ繋ぎ直す＝取りこぼしなし。
+          acc.inputs.forEach(hook)
           refreshInputs()
         }
       })
@@ -5079,17 +5154,31 @@ export class ImageLightEngine {
     if (typeof d.strobeRate === 'number') this.strobeRate = d.strobeRate
   }
   private saveRig(): void {
-    // セッション内（ページ生存中）だけ保持＝モード切替の行き来では残るが、アプリ再起動で消える。
-    // localStorage には書かない＝新しく開いたら明かり/色/MIDI はまっさら。
+    // 明かり/色/シーンはセッション内（ページ生存中）だけ保持＝モード切替の行き来では残るが、
+    // アプリ再起動で消える（のむさん確定 2026-06-21）。
     try {
       sessionRig = JSON.parse(JSON.stringify(this.rigData())) as RigPayload
     } catch {
       /* ignore */
     }
+    // MIDI とキーの割当だけは再起動でも残す（仕込みなので引きずって困らない）。
+    const d = this.rigData()
+    saveMidiMap({
+      paramMidi: d.paramMidi,
+      masterMidi: d.masterMidi,
+      fxMidi: d.fxMidi,
+      fxKey: d.fxKey,
+      colorMidi: d.colorMidi,
+      colorKey: d.colorKey,
+      strobeMidi: d.strobeMidi,
+      motifChaseMidi: d.motifChaseMidi
+    })
   }
   private loadRig(): void {
-    // 同一セッション中に作ったリグだけ復元（モード切替で消えないように）。
-    // アプリ再起動後は sessionRig=null＝初期状態のまま＝まっさら。
+    // 先に「前回の MIDI/キー割当」を戻す（アプリ再起動をまたぐ）。
+    const map = loadMidiMap()
+    if (map) this.applyRig(map as RigPayload)
+    // 同一セッション中に作ったリグ（明かり/色/シーン）はこの後で上書き復元。
     if (sessionRig) this.applyRig(sessionRig)
   }
 

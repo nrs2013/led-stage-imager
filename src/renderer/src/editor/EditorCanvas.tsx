@@ -42,7 +42,10 @@ import {
 /** 1マスの列を「太さ w」ぶんの塊に膨らませる（描画側 OutputRenderer と同じ n×n の考え方）。
  *  消しゴムが芯1マスしか消せず「効かない」と言われる原因を根から消すための共通処理。 */
 function fatCells(cells: { x: number; y: number }[], w: number): string[] {
-  const n = Math.max(1, Math.round(w))
+  // ponytail: 消す幅は 64 で止める。太さは最大500まで入るので、そのまま n×n を作ると
+  // 1回のマウス移動で 500×500×(通過マス) = 数百万キーになり画面が固まる。
+  // 64 なら 1回あたり2万キー程度で収まる。それより太い帯は「選んで削除」で消せる。
+  const n = Math.min(64, Math.max(1, Math.round(w)))
   if (n === 1) return cells.map((c) => `${c.x},${c.y}`)
   const off = Math.floor((n - 1) / 2)
   const out = new Set<string>()

@@ -503,6 +503,17 @@ app.whenReady().then(() => {
   })
 
   // renderer が検出した MIDI 入力ポート一覧を受け取る（ステータスバー表示＋疎通ログ）。
+  // MIDI をつなぎ直す（現場で抜き差しした後に効かなくなった時の出口）。
+  // Mac は CoreMIDI リーダーを作り直し、返り値でポート名を返す。
+  ipcMain.handle('midi:restart', async () => {
+    if (process.platform === 'darwin') {
+      stopMidiInput()
+      startMidiInput((s2, d1, d2) => broadcast('midi:message', [s2, d1, d2]))
+      await new Promise((r) => setTimeout(r, 700)) // 子プロセスが READY を出すのを待つ
+      return getMidiPorts()
+    }
+    return midiInputs.slice()
+  })
   ipcMain.on('midi:inputs', (_e, names: string[]) => {
     midiInputs = Array.isArray(names) ? names : []
     console.log('[midi] 検出した入力:', midiInputs.length ? midiInputs.join(', ') : '(なし)')

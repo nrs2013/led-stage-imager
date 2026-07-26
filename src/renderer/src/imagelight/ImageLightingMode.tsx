@@ -438,6 +438,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // DMX(Art-Net)受信ランプ：本番モードでも「卓の信号が届いているか・ユニバースが合っているか」を
   // ひと目で分かるように（今までは電飾モードに戻らないと確認できず、接続当日に詰む）。
   const [dmxLamp, setDmxLamp] = useState<{ on: boolean; note: string }>({ on: false, note: 'DMX受信なし' })
+  const [midiBusy, setMidiBusy] = useState(false) // MIDI つなぎ直し中
   const [showKeys, setShowKeys] = useState(false) // 操作キー一覧オーバーレイ
   const [presetOpen, setPresetOpen] = useState(false) // 設定コンソールの「設定（解像度/落ち込み）」を開くか
   const [batchUniv, setBatchUniv] = useState(1) // 「全灯体のユニバースをまとめて」の入力値（1始まり表示）
@@ -1724,13 +1725,26 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           <i className={dmxLamp.on ? 'on' : ''} />
           DMX
         </span>
-        <span
+        {/* 抜き差しで効かなくなった時の出口。ランプ自体を押せる＝迷わない（割当は消えない）。 */}
+        <button
           className="il-lamp"
-          title={live.midiIn ? 'MIDI入力：受信中' : 'MIDI入力：なし（卓/ケーブルを確認）'}
+          style={{ background: 'none', border: 'none', padding: '4px 2px', cursor: 'pointer' }}
+          title={
+            midiBusy
+              ? 'つなぎ直しています…'
+              : (live.midiIn ? 'MIDI入力：受信中' : 'MIDI入力：なし（卓/ケーブルを確認）') +
+                '\nクリックでつなぎ直します（機器を抜き差しした後に効かなくなった時／割当は消えません）' +
+                (engine.midiInputs.length ? '\n見えている機器: ' + engine.midiInputs.join(', ') : '')
+          }
+          onClick={() => {
+            if (midiBusy) return
+            setMidiBusy(true)
+            void engine.reconnectMidi().finally(() => setMidiBusy(false))
+          }}
         >
           <i className={live.midiIn ? 'on' : ''} />
-          MIDI
-        </span>
+          {midiBusy ? 'MIDI…' : 'MIDI'}
+        </button>
         <span
           className="il-lamp"
           title={
