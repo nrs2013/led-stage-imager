@@ -147,6 +147,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     }
     window.addEventListener('pointerdown', mark, true)
     window.addEventListener('keydown', mark, true)
+    engine.onUserTouch = mark // MIDI のパッド/つまみだけ触ったセッションも保存対象にする
     // 写真をドラッグ&ドロップだけで入れたセッションも「触った」扱いにする
     //（これが無いと自動保存も閉じる時の確認も効かず、ドロップした公演が黙って消える）。
     window.addEventListener('drop', mark, true)
@@ -154,8 +155,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       window.removeEventListener('pointerdown', mark, true)
       window.removeEventListener('keydown', mark, true)
       window.removeEventListener('drop', mark, true)
+      engine.onUserTouch = null
     }
-  }, [])
+  }, [engine])
 
   // シーン名のインライン編集（null=非編集中）
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null)

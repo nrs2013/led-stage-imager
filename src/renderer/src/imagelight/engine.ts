@@ -4955,7 +4955,12 @@ export class ImageLightEngine {
   }
   /** MIDI メッセージ1件を処理（ネイティブ midiread / Web MIDI 共通の入口）。
    *  stt=ステータス, note=データ1(ノート/CC番号), vel=データ2(ベロシティ/値)。 */
+  /** MIDI で何か動いた時に呼ぶ（画面側が「ユーザーが触った」判定に使う＝自動保存が働く）。 */
+  onUserTouch: (() => void) | null = null
   handleMidiMessage(stt: number, note: number, vel: number): void {
+    // 物理つまみ/パッドしか触っていないセッションでも自動保存が働くようにする
+    // （画面のクリックやキーだけを「触った」としていたため、MIDI だけの仕込みが消えていた）。
+    this.onUserTouch?.()
     if ((stt & 0xf0) === 0x90 && vel > 0) {
       // ノートON：LEARN中なら割当、そうでなければ割当済みを発火
       if (this.learnFx != null) this.assignFxShortcut(this.learnFx, null, note)
@@ -5186,7 +5191,29 @@ export class ImageLightEngine {
    *  （＝起動直後のデフォルト灯体だけ）なら false＝中身なし扱い。冷間起動のデフォルト
    *  状態で前回データ(il-autosave)を上書きする事故を防ぐためのガード。 */
   hasSaveableContent(): boolean {
-    return this.scenes.length > 0 || !!this.maskImage || this.rigCustomized
+    if (this.scenes.length > 0 || !!this.maskImage || this.rigCustomized) return true
+    // 仕込みだけ作った状態（写真をまだ入れていない／灯体を動かしていない）も“中身あり”とする。
+    // のむさん 2026-07-26「一度設定したものは、立ち上げ直しても全部残っているようにしたい」。
+    // これが無いと MIDI を覚えさせただけのセッションが自動保存されず、次の起動で消える。
+    const someMidiOrKey =
+      this.masterMidi != null ||
+      this.strobeMidi != null ||
+      this.motifChaseMidi != null ||
+      Object.keys(this.paramMidi).length > 0 ||
+      Object.keys(this.fxMidi).length > 0 ||
+      Object.keys(this.fxKey).length > 0 ||
+      Object.keys(this.colorMidi).length > 0 ||
+      Object.keys(this.colorKey).length > 0 ||
+      Object.keys(this.fireMidiMap).length > 0 ||
+      Object.keys(this.fireKeyMap).length > 0 ||
+      Object.keys(this.goMidiMap).length > 0 ||
+      Object.keys(this.goKeyMap).length > 0
+    const someShelf =
+      this.patterns.some((p) => !!p) ||
+      this.sfxScenes.some((s) => !!s) ||
+      this.cueSheet.length > 0 ||
+      this.userColors.length > 0
+    return someMidiOrKey || someShelf
   }
 
   // ---------- GPU直結出力（出力専用ウィンドウ）との状態同期 ----------
