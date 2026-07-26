@@ -465,9 +465,9 @@ function loadMidiMap(): MidiMap | null {
     return null
   }
 }
-function saveMidiMap(m: MidiMap): void {
+function saveMidiMapRaw(json: string): void {
   try {
-    localStorage.setItem(MAP_KEY, JSON.stringify(m))
+    localStorage.setItem(MAP_KEY, json)
   } catch {
     /* 保存できなくても操作は続けられる */
   }
@@ -5267,17 +5267,22 @@ export class ImageLightEngine {
     if (typeof d.motifChaseMidi === 'number') this.motifChaseMidi = d.motifChaseMidi
     if (typeof d.strobeRate === 'number') this.strobeRate = d.strobeRate
   }
+  /** 前回 localStorage に書いた割当。同じ内容なら書かない（つまみ操作ごとの同期書き込みを避ける）。 */
+  private lastMidiMapJson = ''
   private saveRig(): void {
+    // 🔴 rigData() は1回だけ。ここはつまみから指を離すたびに走るので、2回作ると素で倍のコスト。
+    const d = this.rigData()
     // 明かり/色/シーンはセッション内（ページ生存中）だけ保持＝モード切替の行き来では残るが、
     // アプリ再起動で消える（のむさん確定 2026-06-21）。
     try {
-      sessionRig = JSON.parse(JSON.stringify(this.rigData())) as RigPayload
+      sessionRig = JSON.parse(JSON.stringify(d)) as RigPayload
     } catch {
       /* ignore */
     }
     // MIDI とキーの割当だけは再起動でも残す（仕込みなので引きずって困らない）。
-    const d = this.rigData()
-    saveMidiMap({
+    // 🔴 localStorage への書き込みは同期＝つまみを動かすたびに書くと指に付いてこない。
+    // 割当が実際に変わった時（LEARN した時）だけ書く。
+    const json = JSON.stringify({
       paramMidi: d.paramMidi,
       masterMidi: d.masterMidi,
       fxMidi: d.fxMidi,
@@ -5287,6 +5292,9 @@ export class ImageLightEngine {
       strobeMidi: d.strobeMidi,
       motifChaseMidi: d.motifChaseMidi
     })
+    if (json === this.lastMidiMapJson) return
+    this.lastMidiMapJson = json
+    saveMidiMapRaw(json)
   }
   private loadRig(): void {
     // 先に「前回の MIDI/キー割当」を戻す（アプリ再起動をまたぐ）。
