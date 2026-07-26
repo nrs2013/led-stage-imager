@@ -13,7 +13,9 @@ import { C, F } from '../ui/tokens'
  *  使う場面ごとに2つのまとめボタンへ畳んだもの（のむさん 2026-07-25）。
  *  ⌘S などのショートカットは従来どおり別経路で効く。 */
 export function EditorMenus(): React.JSX.Element {
-  const chart = useStore((s) => s.chart)
+  // 🔴 chart を丸ごと購読しない。このメニューは Toolbar の中にいるので、購読すると
+  // 電飾を1px動かすたびに上のバー全体（道具ボタン・太さ欄・図形メニュー）が作り直されて
+  // 操作がもたつく。表示に要る所だけを細かく購読する（値は操作時に getState() で読む）。
   const setChart = useStore((s) => s.setChart)
   const setUnderlay = useStore((s) => s.setUnderlay)
   const setUnderlayOpacity = useStore((s) => s.setUnderlayOpacity)
@@ -30,10 +32,11 @@ export function EditorMenus(): React.JSX.Element {
   // 今どのファイルを触っているか＋保存済みかは store に置く（モードを往復しても消えない・
    // StartScreen やダブルクリックで開いた時も同じ表示になる）
   const fileName = useStore((s) => s.chartFileName)
-  const savedChart = useStore((s) => s.savedChart)
   const markChartFile = useStore((s) => s.markChartFile)
-  const dirty = savedChart !== chart
-  const u = activeLayerOf(chart).underlay
+  // 真偽値だけを購読＝未保存の状態が変わった時しか作り直されない
+  const dirty = useStore((s) => s.savedChart !== s.chart)
+  // 下絵は「差し替えた時」だけ参照が変わる＝図形を動かしても作り直されない
+  const u = useStore((s) => activeLayerOf(s.chart).underlay)
 
   // 「新規」の手応え — 空のチャートで押しても見た目が変わらず「効いてない？」になるため
   // 必ず目に見える反応を出す（のむさん 2026-06-20）
@@ -73,7 +76,7 @@ export function EditorMenus(): React.JSX.Element {
   }
   const newChart = (): void => {
     if (
-      chart.shapes.length > 0 &&
+      useStore.getState().chart.shapes.length > 0 &&
       !window.confirm('現在の作品を閉じて新規にしますか？（保存していない変更は消えます）')
     ) {
       return
@@ -90,7 +93,7 @@ export function EditorMenus(): React.JSX.Element {
   const openChart = async (): Promise<void> => {
     // 新規と同じく、未保存の作業があるなら開く前に確認（Open で黙って消えるのを防ぐ）
     if (
-      chart.shapes.length > 0 &&
+      useStore.getState().chart.shapes.length > 0 &&
       !window.confirm('現在の作品を閉じて開きますか？（保存していない変更は消えます）')
     ) {
       return
@@ -107,16 +110,17 @@ export function EditorMenus(): React.JSX.Element {
     }
   }
   const saveChart = async (): Promise<void> => {
-    const label = await saveChartToFile(chart)
+    const label = await saveChartToFile(useStore.getState().chart)
     if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
   }
   const saveChartAs = async (): Promise<void> => {
-    const label = await saveChartAsToFile(chart)
+    const label = await saveChartAsToFile(useStore.getState().chart)
     if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
   }
   const duplicate = (): void => {
     markNewChart() // 複製＝別作品。元ファイルに上書きしないよう保存先をリセット
-    setChart({ ...chart, id: newId('chart'), name: `${chart.name || 'Untitled'} copy` })
+    const cur = useStore.getState().chart
+    setChart({ ...cur, id: newId('chart'), name: `${cur.name || 'Untitled'} copy` })
     markChartFile(null, null) // 表示も「まだファイルにしていない」に戻す
   }
 
@@ -148,12 +152,12 @@ export function EditorMenus(): React.JSX.Element {
             <MenuItem
               label="MVRで書き出す"
               title="grandMA3 用の MVR（パッチ＋配置＋DECOR Cell の GDTF 同梱）"
-              onClick={() => { close(); void exportPatchMvr(chart) }}
+              onClick={() => { close(); void exportPatchMvr(useStore.getState().chart) }}
             />
             <MenuItem
               label="CSVで書き出す"
               title="パッチ表を表計算で開ける形にして書き出します"
-              onClick={() => { close(); exportPatchCsv(chart) }}
+              onClick={() => { close(); exportPatchCsv(useStore.getState().chart) }}
             />
             <MenuSep />
             <MenuItem label="設定" title="キャンバスの大きさ・出力名・にじみなど" onClick={() => { close(); setSettingsOpen(true) }} />
