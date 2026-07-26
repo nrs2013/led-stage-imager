@@ -113,6 +113,13 @@ interface AppState {
    *  the chart is show artwork with the decoration areas punched out (invert OFF). */
   applyChartImage: (dataUrl: string, w: number, h: number) => void
   setChart: (c: Chart) => void
+  /** 今どのファイルを触っているか（上のバーの表示用・null=まだファイルにしていない）。
+   *  EditorMenus のローカル state だと StartScreen 経由/ダブルクリック/モード往復で
+   *  「未保存」と嘘をつくので store に置く（main が持つ上書き先と歩調を合わせる）。 */
+  chartFileName: string | null
+  /** 最後に保存した時の chart。これと今の chart が違えば未保存（オブジェクト同一性で見る）。 */
+  savedChart: Chart | null
+  markChartFile: (name: string | null, saved: Chart | null) => void
   setMode: (m: Mode) => void
   setTool: (t: Tool) => void
   select: (id: string | null) => void
@@ -419,6 +426,9 @@ export const useStore = create<AppState>()((set, get) => ({
   // そのまま保存すると開いたファイルを別作品で上書きしてしまう事故を防ぐ。
   setChart: (chart) =>
     set({ chart, selectedId: null, selectedIds: [], history: [], future: [], histTag: null }),
+  chartFileName: null,
+  savedChart: null,
+  markChartFile: (chartFileName, savedChart) => set({ chartFileName, savedChart }),
   setMode: (mode) => set({ mode }),
   setTool: (tool) => set({ tool }),
   select: (selectedId) => set({ selectedId, selectedIds: selectedId ? [selectedId] : [] }),

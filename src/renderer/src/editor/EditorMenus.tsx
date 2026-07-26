@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore, activeLayerOf } from '../state/store'
-import type { Chart } from '../model/types'
 import { createChart, newId } from '../model/chart-model'
 import { saveChartToFile, saveChartAsToFile, openChartFromFile, markNewChart } from '../io/file-ops'
 import { pickImage, imageSize } from '../io/image-pick'
@@ -28,11 +27,12 @@ export function EditorMenus(): React.JSX.Element {
   const [fillOpen, setFillOpen] = useState(false)
   const [savedFlash, setSavedFlash] = useState<string | null>(null)
   const [newFlash, setNewFlash] = useState(false)
-  // 今どのファイルを触っているか＋保存済みかを、消えない表示で出す
-  // （今までは2.5秒で消える「保存しました」だけで、未保存かどうか画面から分からなかった）
-  const [fileName, setFileName] = useState<string | null>(null)
-  const savedChartRef = useRef<Chart | null>(null)
-  const dirty = savedChartRef.current !== chart
+  // 今どのファイルを触っているか＋保存済みかは store に置く（モードを往復しても消えない・
+   // StartScreen やダブルクリックで開いた時も同じ表示になる）
+  const fileName = useStore((s) => s.chartFileName)
+  const savedChart = useStore((s) => s.savedChart)
+  const markChartFile = useStore((s) => s.markChartFile)
+  const dirty = savedChart !== chart
   const u = activeLayerOf(chart).underlay
 
   // 「新規」の手応え — 空のチャートで押しても見た目が変わらず「効いてない？」になるため
@@ -49,8 +49,7 @@ export function EditorMenus(): React.JSX.Element {
     const onSaved = (e: Event): void => {
       const label = String((e as CustomEvent).detail)
       setSavedFlash(label)
-      setFileName(label)
-      savedChartRef.current = useStore.getState().chart
+      useStore.getState().markChartFile(label, useStore.getState().chart)
       if (t) clearTimeout(t)
       t = setTimeout(() => setSavedFlash(null), 2500)
     }
@@ -84,8 +83,7 @@ export function EditorMenus(): React.JSX.Element {
     // 編集画面のまま空チャートにする。StartScreen へ戻すと SHOW MODE 再選択で
     // 「前回の続き(自動バックアップ)」が復活し、新規にならない不具合になるため戻さない。
     setSavedFlash(null)
-    setFileName(null)
-    savedChartRef.current = null
+    markChartFile(null, null)
     setNewFlash(true)
     window.dispatchEvent(new CustomEvent('decor:fit')) // ビューを全体表示にリセット
   }
@@ -101,8 +99,7 @@ export function EditorMenus(): React.JSX.Element {
       const c = await openChartFromFile()
       if (c) {
         setChart(c)
-        setFileName(c.name || '名前なし')
-        savedChartRef.current = c
+        markChartFile(c.name || '名前なし', c)
       }
     } catch (err) {
       // eslint-disable-next-line no-alert
@@ -120,6 +117,7 @@ export function EditorMenus(): React.JSX.Element {
   const duplicate = (): void => {
     markNewChart() // 複製＝別作品。元ファイルに上書きしないよう保存先をリセット
     setChart({ ...chart, id: newId('chart'), name: `${chart.name || 'Untitled'} copy` })
+    markChartFile(null, null) // 表示も「まだファイルにしていない」に戻す
   }
 
   return (

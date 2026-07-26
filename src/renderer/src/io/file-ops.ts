@@ -46,7 +46,13 @@ export async function openChartFromFile(): Promise<Chart | null> {
   const a = api()
   let json: string | null = null
   if (a?.openChartFile) {
-    json = await a.openChartFile()
+    // 読み出し自体が失敗した時も、保存先の記憶を消してから投げる（次の ⌘S で潰さない）
+    try {
+      json = await a.openChartFile()
+    } catch (err) {
+      markNewChart()
+      throw err
+    }
   } else {
     json = await new Promise<string | null>((resolve) => {
       const input = document.createElement('input')

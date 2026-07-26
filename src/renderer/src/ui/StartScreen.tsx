@@ -52,6 +52,8 @@ export function StartScreen(): React.JSX.Element {
       const c = await openChartFromFile()
       if (c) {
         setChart(c)
+        // 上のバーの表示を実態に合わせる（ここを飛ばすと「未保存」と出るのに ⌘S は黙って上書きする）
+        useStore.getState().markChartFile(c.name || '名前なし', c)
         setStarted(true)
       }
     } catch (err) {

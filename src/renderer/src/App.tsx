@@ -245,6 +245,7 @@ function useOpenFile(): void {
         }
         st.setImageLight(false)
         st.setChart(c)
+        st.markChartFile(c.name || '名前なし', c) // 上のバーの表示を実態に合わせる
         st.setStarted(true)
         // 実際に開けた時だけ ⌘S 上書き先を確定（キャンセル/失敗時はここに来ない＝別ファイル誤上書き防止）
         if (path) getApi()?.chartOpened?.(path)

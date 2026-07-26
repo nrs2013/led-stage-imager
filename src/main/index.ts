@@ -666,8 +666,13 @@ app.whenReady().then(() => {
       filters: CHART_FILTERS
     })
     if (res.canceled || res.filePaths.length === 0) return null
-    currentChartPath = res.filePaths[0]
-    return readFileSync(currentChartPath, 'utf8')
+    // 🔴 先に読んで、成功してから「今のファイル」を覚える。逆にすると読み出しに失敗した時
+    // （Dropbox/iCloud のオンライン専用ファイル・権限なし等）に、そのファイルが上書き先として
+    // 残り、次の ⌘S で今の作品を書き込んで元データを潰す（249行の方針どおり eager に覚えない）。
+    const picked = res.filePaths[0]
+    const json = readFileSync(picked, 'utf8')
+    currentChartPath = picked
+    return json
   })
   // 新規/別作品に切り替えたら「今のファイル」を忘れる（次の⌘Sで保存先を聞く）。
   ipcMain.handle('chart:new', () => {

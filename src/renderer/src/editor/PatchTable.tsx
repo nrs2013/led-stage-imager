@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useStore } from '../state/store'
 import { C, F, chrome, buttonStyle } from '../ui/tokens'
 import { channelRange, detectOverlaps } from '../dmx/patch'
@@ -24,13 +24,17 @@ export function PatchTable(): React.JSX.Element {
     el?.scrollIntoView({ block: 'nearest' })
   }, [selectedId])
 
-  // 個数（ネオンの文字数・連続複製）まで含めて重なりを見る
-  const repsOf = (fx: { shapeId: string }): number => {
-    const sh = chart.shapes.find((x) => x.id === fx.shapeId)
-    return sh ? repeatCount(sh) : 1
-  }
-  const overlaps = detectOverlaps(chart.fixtures, repsOf)
-  const flagged = new Set(overlaps.flat())
+  // 個数（ネオンの文字数・連続複製）まで含めて重なりを見る。
+  // 🔴 卓(Art-Net)は毎フレーム dmxByUniverse を更新するので、ここを素で書くと
+  // 図形数×灯体数の総当たりが毎フレーム走って出力がガクつく。番地と図形が変わった時だけ計算する。
+  const { overlaps, flagged } = useMemo(() => {
+    const repsOf = (fx: { shapeId: string }): number => {
+      const sh = chart.shapes.find((x) => x.id === fx.shapeId)
+      return sh ? repeatCount(sh) : 1
+    }
+    const ov = detectOverlaps(chart.fixtures, repsOf)
+    return { overlaps: ov, flagged: new Set(ov.flat()) }
+  }, [chart.fixtures, chart.shapes])
 
   const shapeName = (shapeId: string): string => {
     const sh = chart.shapes.find((s) => s.id === shapeId)

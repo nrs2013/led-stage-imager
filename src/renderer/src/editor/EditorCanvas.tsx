@@ -971,13 +971,17 @@ export function EditorCanvas(): React.JSX.Element {
       // 「保存したつもり」になるのを防ぐ（照明モードと同じ順番）。
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
-        ;(t as HTMLInputElement | null)?.blur?.() // 打ちかけの数字を確定させてから保存する
+        const el = t as (HTMLElement & { blur?: () => void; focus?: () => void }) | null
+        el?.blur?.() // 打ちかけの数字を確定させてから保存する
         const save = e.shiftKey ? saveChartAsToFile : saveChartToFile
         // blur の反映（React の状態更新）が終わってから今の中身を読む＝打ちかけの値を落とさない
         setTimeout(() => {
           void save(useStore.getState().chart).then((label) => {
             if (label) window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
           })
+          // 入力欄に戻す。戻さないと続けて打った文字がキャンバスのショートカットになり、
+          // Backspace で選択中の電飾が消える／z で直前の編集が黙って戻る事故になる。
+          el?.focus?.()
         }, 0)
         return
       }
@@ -2004,7 +2008,7 @@ export function EditorCanvas(): React.JSX.Element {
     const d0 = draftRef.current
     if (d0?.type === 'polyline') {
       const verts = d0.points.slice(0, -1)
-      if (verts.length >= 2) addShape({ type: 'polyline', points: verts })
+      if (verts.length >= 2) addShape({ type: 'polyline', points: verts, strokeWidth: penWidth })
       setDraft(null)
     }
   }
