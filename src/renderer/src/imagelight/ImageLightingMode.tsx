@@ -804,9 +804,22 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           st.chart.settings.gamma ?? false
         )
       }
-      // GPUが本番を担っている間だけ出力合成(composeOutput・3840で重い)を編集側から省く。
-      // 互換 or bridge（実絵前）はCPU publish のため合成が要る＝ここでは省かない（finding14）。
-      engine.skipCompose = gpuAuthoritative
+      // このフレームを CPU経路で実際に送出するか（＝重い出力合成が要るか）を、描画の前に決める。
+      // 送出間隔は「60fps上限」かつ「送出コストの2倍以上」＝重い環境（高精細出力・遅いマシン）では
+      // 自動で間引き、描画60fpsと応答性を死守する。速い環境ではそのまま60fps送出。
+      // -4ms は rAF の揺らぎ許容・「+1コマ」進行で平均を正確に保つ（60を超えない）。
+      const pubMin = Math.max(PUBLISH_MIN_MS, publishCost * 2)
+      const willPublish =
+        !gpuAuthoritative &&
+        syphonReadyRef.current &&
+        !!api?.publishFrame &&
+        (!animating || dmxDirty || now - lastPublish >= pubMin - 4)
+      // 出力合成(composeOutput・3840で重い)は「このコマを送る時」だけやる。
+      // GPUが本番を担っている間は willPublish=false＝従来どおり省く。
+      // 互換 or bridge（実絵前）はCPU publish のため合成が要る＝送るコマでは必ず走る（finding14）。
+      // 🔴 Windows の互換経路は送出が自動間引き（3840で実測35ms超＝約12fps）される一方、
+      // 合成は毎コマ走っていた＝5/6が捨てられていた。ここを揃えるとカクつきが減る。
+      engine.skipCompose = !willPublish
       const perfT0 = performance.now()
       engine.renderFrame(now)
       const perfT1 = performance.now()
@@ -835,17 +848,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       // CPU経路: GPUが本番を担っていない時（互換 or 出力窓の実絵前 bridge or 死亡）は従来どおり
       // 読み出して publish＝main 側で本番として採用される（黒落ち防止 finding14）。
       // フェイルオープン：未接続が確証できる時だけ省く。
-      if (!gpuAuthoritative && syphonReadyRef.current && api?.publishFrame) {
-        // 送出間隔は「60fps上限」かつ「送出コストの2倍以上」＝重い環境（高精細出力・遅いマシン）では
-        // 自動で間引き、描画60fpsと応答性を死守する。速い環境ではそのまま60fps送出。
-        // -4ms は rAF の揺らぎ許容・「+1コマ」進行で平均を正確に保つ（60を超えない）。
-        const pubMin = Math.max(PUBLISH_MIN_MS, publishCost * 2)
-        if (!animating || dmxDirty || now - lastPublish >= pubMin - 4) {
-          lastPublish = animating ? Math.max(lastPublish + pubMin, now - pubMin) : now
-          const t0 = performance.now()
-          api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
-          publishCost = publishCost * 0.8 + (performance.now() - t0) * 0.2
-        }
+      // 送るコマかどうかは描画前に決めてある（willPublish）＝合成済みのものを読み出して送るだけ。
+      if (willPublish && api?.publishFrame) {
+        lastPublish = animating ? Math.max(lastPublish + pubMin, now - pubMin) : now
+        const t0 = performance.now()
+        api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
+        publishCost = publishCost * 0.8 + (performance.now() - t0) * 0.2
       }
     }
     raf = requestAnimationFrame(tick)
