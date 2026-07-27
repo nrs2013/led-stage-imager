@@ -769,6 +769,13 @@ export class ImageLightEngine {
   skipCompose = false
   outW = 16
   outH = 9
+  /** true=このコマの出力は「中身なし」（写真が無い or 無灯＝暗転/ストロボOFF/マスター0）。
+   *  出力(outCv)へ重ねる処理（モチーフ/電飾/炎/火花/受け系）は全部これを見て降りる。
+   *  🔴 以前は「outW <= 16」を暗転の合図に使っていたが、そのために無灯のたびに出力を
+   *  16x9 へ縮めており、NDIの解像度が毎秒何度も切り替わって受け手(Resolume)が
+   *  そのつどフォーマットを繋ぎ直す＝ストロボ/暗転で激しくカクついた（現場 2026-07-22 の主犯）。
+   *  サイズは保ったまま「中身なし」を別に持つ＝合図と大きさを切り離す。 */
+  private outBlank = false
   private outBlurCv = mk(16, 9)
 
   // 内部バッファ
@@ -1227,7 +1234,7 @@ export class ImageLightEngine {
   }
   /** 出力(outCv)へ炎本体を重ねる（box領域→出力解像度へ写像）。glowは光マップ経由で既にcomposeOutputに入る。 */
   private drawFlameOnOutput(): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
+    if (this.lightOnly || !this.box || this.outBlank) return
     const oc = this.octx()
     const box = this.box
     const bd = this.flame.body
@@ -1246,7 +1253,7 @@ export class ImageLightEngine {
   }
   /** 出力(outCv)へ火花本体を重ねる（炎と同じ box→出力の写像）。glowは光マップ経由で反映済み。 */
   private drawSparklerOnOutput(): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
+    if (this.lightOnly || !this.box || this.outBlank) return
     const oc = this.octx()
     const box = this.box
     const bd = this.sparkler.body
@@ -1283,7 +1290,7 @@ export class ImageLightEngine {
   }
   /** vmCv(色付き受け系) を出力(outCv)へ加算合成（box領域→出力解像度）。 */
   private drawVolumetricOnOutput(alpha: number): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
+    if (this.lightOnly || !this.box || this.outBlank) return
     const oc = this.octx()
     const b = this.box
     oc.setTransform(1, 0, 0, 1, 0, 0)
@@ -2490,7 +2497,8 @@ export class ImageLightEngine {
     if (sparklerLit) this.drawSparklerOnOutput()
 
     // 立体強調: 出力(Syphon/NDI)も編集画面と同じ仕上げにする（relief=0なら無処理）
-    if (this.relief > 0 && this.outW > 16) {
+    // 中身なし（暗転/ストロボOFF）のコマは透明のままにする＝無駄な全画面処理も走らせない。
+    if (this.relief > 0 && !this.outBlank) {
       const oc2 = this.octx()
       this.reliefPass(this.outCv, oc2, this.reliefOutCv, this.outW, this.outH)
     }
@@ -2500,7 +2508,7 @@ export class ImageLightEngine {
    *  ステージ座標(LW×LH) → 出力座標へ写像してから drawMotifLit を呼ぶ（位置・大きさが
    *  写真上の見え方と一致）。空シーンは warpBox=全ステージなので全モチーフが入る。 */
   private drawMotifsOnOutput(beams: Beam[], Is: number[], ms: number): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
+    if (this.lightOnly || !this.box || this.outBlank) return
     if (!beams.some((b) => b.motif)) return
     const oc = this.octx()
     const box = this.box
@@ -2594,6 +2602,7 @@ export class ImageLightEngine {
   /** 出力(outCv)を「写真の部分だけ・写真の解像度・余白なし」で合成する。写真(mat)はフル解像度、
    *  ソフトな光は lightCv の box 領域を引き伸ばす（写真だけシャープに保つ）。編集画面とは別物。 */
   private composeOutput(maxI: number): void {
+    this.outBlank = false // 下の「写真無し or 無灯」分岐だけが true にする
     const OUT_CAP = this.outCap // 出力上限幅（可変：なめらか1920/バランス2560/高精細3840）
     const flameLit = (this.flameEnabled && this.flame.active) || (this.sparklerEnabled && this.sparkler.active) // 特効: 炎/火花だけでも出力する
     // 光だけ出力モード: 写真を使わず光マップ(lightCv)を出力。Arena側で 映像×光(Multiply)。
@@ -2636,8 +2645,19 @@ export class ImageLightEngine {
       return
     }
     if (!this.mat || !this.box || (maxI <= 0.004 && !flameLit)) {
-      // 写真無し or 無灯 → 透明な小フレーム（Add合成で何も乗らない）
-      if (this.outCv.width !== 16) {
+      // 写真無し or 無灯 → 中身は透明（Add合成で何も乗らない）。
+      // 🔴 サイズは縮めない。無灯のたびに 3840→16 と解像度が変わると、受け手(Resolume 等)が
+      //   そのつどフォーマットを繋ぎ直し、ストロボ/暗転で激しくカクつく（現場 2026-07-22 の主犯）。
+      //   写真がある間は本来の出力サイズのまま「透明なコマ」を送り続ける＝解像度が一定になる。
+      //   送るのをやめるという手は取れない（受け手が最後の絵を保持＝暗転で残像になる）。
+      //   写真がまだ無い時だけ、大きさの決めようが無いので従来どおり小さいダミー。
+      this.outBlank = true
+      if (this.mat && this.box) {
+        const bw = Math.min(this.mat.width, OUT_CAP)
+        const bh = Math.max(1, Math.round((this.mat.height * bw) / this.mat.width))
+        if (this.outCv.width !== bw) this.outCv.width = bw
+        if (this.outCv.height !== bh) this.outCv.height = bh
+      } else if (this.outCv.width !== 16) {
         this.outCv.width = 16
         this.outCv.height = 9
       }
@@ -4808,7 +4828,7 @@ export class ImageLightEngine {
 
   /** 出力(outCv)に電飾パターンを重ねる（モチーフと同じ box→出力写像）。 */
   private drawDecorOnOutput(t: number): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
+    if (this.lightOnly || !this.box || this.outBlank) return
     if (!this.decor.enabled || !this.decorSegs || !this.decorSegs.length) return
     const boxLW = this.getMaskBoxLW()
     if (!boxLW) return
