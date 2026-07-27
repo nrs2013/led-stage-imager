@@ -8,10 +8,10 @@ out
 node_modules.nosync
 dist.nosync
 *.tsbuildinfo
-# 引き継ぎ書・監査レポートは公演機密を含む可能性があるため公開リポに上げない
-LED-STAGE-IMAGER-引き継ぎ-*.md
-LED-STAGE-IMAGER-監査-*.md
-DECOR-STUDIO-引き継ぎ-*.md
+# 引き継ぎ書・監査レポート・現場手順は公演機密を含む可能性があるため公開リポに上げない
+# 名前を個別に並べると新しい種類（現場手順など）が漏れるので、接頭辞でまとめて弾く。
+LED-STAGE-IMAGER-*.md
+DECOR-STUDIO-*.md
 
 # NDI 部品（市販バイナリ＋自前ビルドのブリッジ）は公開リポに入れない。
 # 入手・再生成の手順は resources/ndi/README.md を参照。
