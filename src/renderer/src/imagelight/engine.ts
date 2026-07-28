@@ -5223,6 +5223,10 @@ export class ImageLightEngine {
     this.bump()
     return this.midiInputs
   }
+  /** Web MIDI を掴めているか（起動直後の自動リトライを打ち切る判定に使う）。 */
+  get midiReady(): boolean {
+    return this.midiTried
+  }
   initMidi(): void {
     const nav = navigator as Navigator & { requestMIDIAccess?: () => Promise<MIDIAccess> }
     if (this.midiTried || !nav.requestMIDIAccess) return

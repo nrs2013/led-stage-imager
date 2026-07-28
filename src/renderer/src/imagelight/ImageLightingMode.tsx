@@ -170,9 +170,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     forceRenderRef.current = true // モード切替でマーカー表示が変わる→1回描き直す
   }, [uiMode])
 
-  // 検出した MIDI 入力名をメイン（下部バーの「MIDI IN」表示）へ通知する配線だけ用意。
-  // ※ initMidi() は起動時には呼ばない。Electron の requestMIDIAccess はユーザー操作(クリック)
-  //   起点でないと解決しないため、LEARN(◎)クリック時に初めて初期化する（engine 側で実行）。
+  // 検出した MIDI 入力名をメイン（下部バーの「MIDI IN」表示）へ通知する配線。
   useEffect(() => {
     engine.onMidiInputs = (names) => getApi()?.reportMidiInputs?.(names)
     // CoreMIDI(ネイティブ)から届く MIDI を engine の共通処理へ。LEARN も発火もこれで動く。
@@ -181,6 +179,43 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     return () => {
       off?.()
       engine.onMidiInputs = null
+    }
+  }, [engine])
+
+  // 🔴 Windows は Web MIDI が唯一の受け口なのに、これまで起動時に一度も掴みに行っていなかった。
+  // ＝ LEARN(◎) か上のバーの MIDI ランプを押すまで、卓のつまみ・パッドが完全に無反応
+  //   （のむさん 2026-07-28 現場「立ち上げ直すとすぐMIDIが壊れてる。さわってもできない」）。
+  // 開いた直後に掴みにいき、取れなければ2秒おきに数回だけ静かに再試行する。
+  // requestMIDIAccess がユーザー操作起点でないと解決しない環境のために、最初の操作でも一度試す。
+  // 🔴 Mac ではやらない: Mac は CoreMIDI 直読みが主経路なので、Web MIDI も掴むと同じ1メッセージを
+  //   2回処理してしまう（入/切のトグルが打ち消し合って「押しても効かない」事故になる）。
+  useEffect(() => {
+    let iv: ReturnType<typeof setInterval> | null = null
+    let cancelled = false
+    const stop = (): void => {
+      if (iv) clearInterval(iv)
+      iv = null
+    }
+    const onGesture = (): void => engine.initMidi()
+    void getApi()
+      ?.getStatus?.()
+      .then((s) => {
+        if (cancelled || s.platform === 'darwin') return
+        engine.initMidi()
+        let n = 0
+        iv = setInterval(() => {
+          if (engine.midiReady || ++n > 5) return stop()
+          engine.initMidi()
+        }, 2000)
+        window.addEventListener('pointerdown', onGesture, { once: true })
+        window.addEventListener('keydown', onGesture, { once: true })
+      })
+      .catch(() => {}) // 取れなくても本番は止めない（MIDIランプの手動つなぎ直しは従来どおり残る）
+    return () => {
+      cancelled = true
+      stop()
+      window.removeEventListener('pointerdown', onGesture)
+      window.removeEventListener('keydown', onGesture)
     }
   }, [engine])
 
