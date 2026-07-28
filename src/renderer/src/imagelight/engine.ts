@@ -645,7 +645,9 @@ const CONTACT_NIJIMI = 0.45 // 根元のにじみ 0..1（色つき＝明るさ�
 // ★光の筋の質感（のむさん 2026-07-26「ランダムサーチがモヤモヤしていてリアリティに欠ける」）。
 // 実際の煙の中の光は筋の中に濃淡のムラがあり、均一なグラデーションだけだと「モヤ」に見える。
 // 灯体ごとの blur は禁止（激重）なので、作り置きした縞テクスチャを筋に1枚重ねるだけで出す。
-const BEAM_HAZE = 0.3 // 筋の中の濃淡ムラの強さ 0..1（0=従来のなめらかなグラデだけ）
+// 🔴 2026-07-28 現場（Windows）で「チラつく」＝0 に戻した。ムラは時間で流す作りなので、
+// コマ落ちしている機械だと飛んで見える。上げ直すのは実機で確かめてから。
+const BEAM_HAZE = 0 // 筋の中の濃淡ムラの強さ 0..1（0=従来のなめらかなグラデだけ）
 const BEAM_HAZE_SCROLL = 0.045 // ムラが筋に沿って流れる速さ（煙の動き。0=止まる）
 const BEAM_LAYER_SPREAD = 0.62 // ★筋の縁のはっきり具合。小さいほど層が重なって縁がはっきりする
 // ★「伸び」の減衰をどれだけ現実に寄せるか（のむさん 2026-07-26「伸びの精度がいまいち」）。
@@ -653,9 +655,11 @@ const BEAM_LAYER_SPREAD = 0.62 // ★筋の縁のはっきり具合。小さい�
 // （長さで割った“割合”で計算しているため）(2)先端でぴったり0になって光の終わりが見える
 // (3)広がっても薄くならない、の3点が現実と違う。
 // 新しい式＝逆二乗（1/(1+距離/基準)²）×広がりぶんの薄まり×先端のとけ込み。
-const BEAM_REAL = 1 // 0=従来のまま / 1=物理寄り。間の値で混ぜられる（実機で追い込む用）
+// 🔴 2026-07-28 現場（Windows）で「先が暗くなりすぎ／先端の消え方が変」＝両方 0 側に戻した。
+// BEAM_REAL=0 かつ BEAM_END_FADE_FROM>=1 で、式は 7/26 より前と完全に同じになる。
+const BEAM_REAL = 0 // 0=従来のまま / 1=物理寄り。間の値で混ぜられる（実機で追い込む用）
 const BEAM_SPREAD_DIM = 0.6 // 広がるほど薄くする強さ 0..1（1=面積ぶん完全に薄める）
-const BEAM_END_FADE_FROM = 0.55 // この割合から先端へ向けて溶かす（0で終わらせず闇に馴染ませる）
+const BEAM_END_FADE_FROM = 1 // この割合から先端へ向けて溶かす（1=溶かさない＝従来）
 /** 落ち込みプリセット（ソフト/標準/きつめ）→「明るさが1/4になる距離」。画面高さに対する割合。
  *  ここが“絶対の距離”なのが要点＝伸びを長くすると先端は本当に暗くなる。 */
 const halfDistOf = (pow: number): number => (pow >= 4 ? 0.25 : pow >= 2.5 ? 0.45 : 0.75)
@@ -1776,7 +1780,10 @@ export class ImageLightEngine {
         const wRatio = geo.w0 / Math.max(1, geo.w0 + (geo.w1 - geo.w0) * t)
         const phys = inv * Math.pow(Math.max(0.05, wRatio), BEAM_SPREAD_DIM)
         // 先端は0で切らずに溶かす（光の終わりの位置が線で見えないように）
-        const e = Math.max(0, (t - BEAM_END_FADE_FROM) / (1 - BEAM_END_FADE_FROM))
+        const e =
+          BEAM_END_FADE_FROM >= 1
+            ? 0 // 溶かさない（0除算=NaNで光が消える事故を防ぐ）
+            : Math.max(0, (t - BEAM_END_FADE_FROM) / (1 - BEAM_END_FADE_FROM))
         const endFade = 1 - e * e * (3 - 2 * e)
         const v = (legacy + (phys - legacy) * BEAM_REAL) * boost * endFade
         gr.addColorStop(t, rgs(col, v))
