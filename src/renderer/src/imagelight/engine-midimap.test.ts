@@ -39,6 +39,21 @@ describe('MIDI割当の保存（再起動をまたぐ）', () => {
     })
   })
 
+  // のむさん 2026-07-28「割り振れるのと割り振れないのがある」＝ストロボ/チェイスはMIDI専用だった。
+  // キー割当を足したので、それも再起動をまたいで残ること（読み込みで消されないこと）を固定する。
+  it('ストロボ/チェイスのキー割当も再起動で消えない', async () => {
+    localStorage.setItem(
+      MAP_KEY,
+      JSON.stringify({ strobeKey: 'KeyS', motifChaseKey: 'Digit5', strobeMidi: 40 })
+    )
+    await import('./engine')
+    expect(JSON.parse(localStorage.getItem(MAP_KEY)!)).toEqual({
+      strobeKey: 'KeyS',
+      motifChaseKey: 'Digit5',
+      strobeMidi: 40
+    })
+  })
+
   it('clearSavedMidiMap() で割当を消せる', async () => {
     localStorage.setItem(MAP_KEY, JSON.stringify({ masterMidi: 7 }))
     const { clearSavedMidiMap } = await import('./engine')

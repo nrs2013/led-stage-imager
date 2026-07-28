@@ -333,6 +333,8 @@ export interface Scene {
   fix?: { m: boolean; s: boolean }[]
   /** このシーンを呼び出す MIDI Note 番号（LEARN で割当）。 */
   midiNote?: number | null
+  /** このシーンを呼び出すキー（e.code・LEARN で割当）。MIDIと両方持てる。 */
+  key?: string | null
   /** 4 辺スケールワープの結果 box（LW×LH 座標系）。null＝デフォルト contain fit。 */
   warpBox?: { x: number; y: number; w: number; h: number } | null
   /** ピース（写真の一部を切り抜いて 4 隅コーナーピンで貼り付ける）の並び。
@@ -449,7 +451,9 @@ type MidiMap = Pick<
   | 'colorMidi'
   | 'colorKey'
   | 'strobeMidi'
+  | 'strobeKey'
   | 'motifChaseMidi'
+  | 'motifChaseKey'
 >
 let sessionRig: RigPayload | null = null
 try {
@@ -506,8 +510,12 @@ export interface RigPayload {
   sceneFadeMode?: 'cut' | 'fade'
   sceneFadeMs?: number
   strobeMidi?: number | null
+  /** 特別ストロボのキー割当（e.code）。 */
+  strobeKey?: string | null
   strobeRate?: number
   motifChaseMidi?: number | null
+  /** モチーフチェイスのキー割当（e.code）。 */
+  motifChaseKey?: string | null
 }
 /** 公演ファイル（show.json）のシーン1件。メディアは media/ 配下のファイル名で参照。 */
 export interface ShowSceneMeta {
@@ -520,6 +528,8 @@ export interface ShowSceneMeta {
   media: string | null
   /** このシーンを呼び出す MIDI Note 番号（未割当は省略可）。 */
   midiNote?: number | null
+  /** このシーンを呼び出すキー（e.code・未割当は省略可）。 */
+  key?: string | null
   /** 4 辺スケールワープの結果（LW×LH 座標系）。null/省略＝デフォルト contain fit。 */
   warpBox?: { x: number; y: number; w: number; h: number } | null
   /** ピース（4 隅コーナーピンで貼り付ける切り抜き）の並び。省略＝0 個。 */
@@ -1402,10 +1412,14 @@ export class ImageLightEngine {
   strobeOverride = false
   /** 特別ストロボの MIDI ノート割当（保存対象）。 */
   strobeMidi: number | null = null
+  /** 特別ストロボを入/切するキー（e.code）。MIDIと両方持てる。 */
+  strobeKey: string | null = null
   /** 特別ストロボ LEARN 待機中か。 */
   learnStrobe = false
   /** モチーフチェイス(Chase motifs)の MIDI ノート割当（保存対象・rigData）。 */
   motifChaseMidi: number | null = null
+  /** モチーフチェイスを入/切するキー（e.code）。MIDIと両方持てる。 */
+  motifChaseKey: string | null = null
   /** モチーフチェイス LEARN 待機中か。 */
   learnMotifChase = false
   /** 特別ストロボの速さ 0..1（大きいほど速い・保存対象）。 */
@@ -3466,8 +3480,13 @@ export class ImageLightEngine {
     this.outCap = px
     this.bump()
   }
-  /** 同じキー(e.code)を持つ他カテゴリ(pattern/FX/color)から外す＝「1キー1役」。 */
+  /** 同じキー(e.code)を持つ他カテゴリ(pattern/FX/color/シーン/ストロボ/チェイス)から外す＝「1キー1役」。 */
   private clearKeyEverywhere(code: string): void {
+    if (this.strobeKey === code) this.strobeKey = null
+    if (this.motifChaseKey === code) this.motifChaseKey = null
+    this.scenes.forEach((s) => {
+      if (s.key === code) s.key = null
+    })
     this.patterns.forEach((p) => {
       if (p && p.key === code) p.key = null
     })
@@ -4551,6 +4570,31 @@ export class ImageLightEngine {
     this.learnScene = null
     this.bump()
   }
+  /** シーンにキー(e.code)を割当。同じキーは他カテゴリからも外す＝1キー1役。null でクリア。 */
+  assignSceneKey(i: number, code: string | null): void {
+    if (i < 0 || i >= this.scenes.length) return
+    this.pushHistory()
+    if (code !== null) this.clearKeyEverywhere(code)
+    this.scenes[i].key = code
+    this.learnScene = null
+    this.bump()
+  }
+  /** 特別ストロボにキーを割当（1キー1役）。null でクリア。 */
+  assignStrobeKey(code: string | null): void {
+    this.pushHistory()
+    if (code !== null) this.clearKeyEverywhere(code)
+    this.strobeKey = code
+    this.learnStrobe = false
+    this.bump()
+  }
+  /** モチーフチェイスにキーを割当（1キー1役）。null でクリア。 */
+  assignMotifChaseKey(code: string | null): void {
+    this.pushHistory()
+    if (code !== null) this.clearKeyEverywhere(code)
+    this.motifChaseKey = code
+    this.learnMotifChase = false
+    this.bump()
+  }
 
   /** マスク用画像を入れる（dataURL）。null/空文字で解除。
    *  入れた時点でアルファ境界線キャンバスを作る（BUILDで重ねて表示）。 */
@@ -5091,9 +5135,10 @@ export class ImageLightEngine {
     }
     this.bump(false)
   }
-  /** 特別ストロボの MIDI 割当を解除。 */
+  /** 特別ストロボの割当（キー・MIDI とも）を解除。 */
   clearStrobeShortcut(): void {
     this.strobeMidi = null
+    this.strobeKey = null
     this.bump()
   }
   /** モチーフチェイスの MIDI Learn 待機を開始/解除。 */
@@ -5115,6 +5160,7 @@ export class ImageLightEngine {
   /** モチーフチェイスの MIDI 割当を解除。 */
   clearMotifChaseShortcut(): void {
     this.motifChaseMidi = null
+    this.motifChaseKey = null
     this.bump()
   }
   /** 特別ストロボの速さ 0..1。 */
@@ -5320,8 +5366,10 @@ export class ImageLightEngine {
       sceneFadeMode: this.sceneFadeMode,
       sceneFadeMs: this.sceneFadeMs,
       strobeMidi: this.strobeMidi,
+      strobeKey: this.strobeKey,
       strobeRate: this.strobeRate,
-      motifChaseMidi: this.motifChaseMidi
+      motifChaseMidi: this.motifChaseMidi,
+      motifChaseKey: this.motifChaseKey
     }
   }
   // rigData を取り込む（localStorage / 公演読込 共通）。灯体配置は読み込まない。
@@ -5351,7 +5399,9 @@ export class ImageLightEngine {
     if (d.sceneFadeMode === 'cut' || d.sceneFadeMode === 'fade') this.sceneFadeMode = d.sceneFadeMode
     if (typeof d.sceneFadeMs === 'number') this.sceneFadeMs = d.sceneFadeMs
     if (typeof d.strobeMidi === 'number') this.strobeMidi = d.strobeMidi
+    if (typeof d.strobeKey === 'string') this.strobeKey = d.strobeKey
     if (typeof d.motifChaseMidi === 'number') this.motifChaseMidi = d.motifChaseMidi
+    if (typeof d.motifChaseKey === 'string') this.motifChaseKey = d.motifChaseKey
     if (typeof d.strobeRate === 'number') this.strobeRate = d.strobeRate
   }
   /** 前回 localStorage に書いた割当。同じ内容なら書かない（つまみ操作ごとの同期書き込みを避ける）。 */
@@ -5387,7 +5437,9 @@ export class ImageLightEngine {
       colorMidi: d.colorMidi,
       colorKey: d.colorKey,
       strobeMidi: d.strobeMidi,
-      motifChaseMidi: d.motifChaseMidi
+      strobeKey: d.strobeKey,
+      motifChaseMidi: d.motifChaseMidi,
+      motifChaseKey: d.motifChaseKey
     })
     if (json === this.lastMidiMapJson) return
     this.lastMidiMapJson = json
@@ -5656,6 +5708,7 @@ export class ImageLightEngine {
         fix: sc.fix ?? null,
         media: file,
         midiNote: sc.midiNote ?? null,
+        key: sc.key ?? null,
         warpBox: sc.warpBox ?? null,
         pieces: sc.pieces ? sc.pieces.map((p) => ({
           id: p.id,
@@ -5796,6 +5849,7 @@ export class ImageLightEngine {
           e.name = sm.name || '空の背景'
           if (sm.fix) e.fix = sm.fix
           if (typeof sm.midiNote === 'number') e.midiNote = sm.midiNote
+          if (typeof sm.key === 'string') e.key = sm.key
           if (sm.warpBox) e.warpBox = sm.warpBox
         }
         continue
@@ -5811,6 +5865,7 @@ export class ImageLightEngine {
       if (added) {
         if (sm.fix) added.fix = sm.fix
         if (sm.midiNote != null) added.midiNote = sm.midiNote
+        if (sm.key != null) added.key = sm.key
         if (sm.warpBox) added.warpBox = { ...sm.warpBox }
         if (sm.pieces && sm.pieces.length) {
           added.pieces = sm.pieces.map((p) => ({

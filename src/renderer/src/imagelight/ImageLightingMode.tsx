@@ -994,28 +994,44 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
-      // シーン LEARN 待機中：Esc で中止だけ受ける（割当は MIDI 入力のみ）
+      // シーン LEARN 待機中：Esc で中止、それ以外のキーでそのシーンに割当
+      // （のむさん 2026-07-28「割り振れるのと割り振れないのがある」＝ここは MIDI 専用だった）
       if (engine.learnScene != null) {
         if (e.key === 'Escape') {
           engine.setLearnScene(null)
           e.preventDefault()
+          return
         }
+        const lc = shortcutCode(e)
+        if (!lc) return // 修飾キー単体は無視して待ち続ける
+        engine.assignSceneKey(engine.learnScene, lc)
+        e.preventDefault()
         return
       }
-      // 特別ストロボ LEARN 待機中：Esc で中止（割当は MIDI ノートのみ）。
+      // 特別ストロボ LEARN 待機中：Esc で中止、それ以外のキーで割当
       if (engine.learnStrobe) {
         if (e.key === 'Escape') {
           engine.setLearnStrobe(false)
           e.preventDefault()
+          return
         }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignStrobeKey(lc)
+        e.preventDefault()
         return
       }
-      // モチーフチェイス LEARN 待機中：Esc で中止（割当は MIDI ノートのみ）。
+      // モチーフチェイス LEARN 待機中：Esc で中止、それ以外のキーで割当
       if (engine.learnMotifChase) {
         if (e.key === 'Escape') {
           engine.setLearnMotifChase(false)
           e.preventDefault()
+          return
         }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignMotifChaseKey(lc)
+        e.preventDefault()
         return
       }
       // FX LEARN 待機中：Esc で中止、それ以外のキーでそのFXに割当
@@ -1174,6 +1190,25 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const goW = code ? (['go', 'back'] as const).find((w) => engine.goKeyMap[w] === code) : undefined
       if (goW) {
         if (!e.repeat) (goW === 'go' ? engine.goNext() : engine.goBack())
+        e.preventDefault()
+        return
+      }
+      // 割り当て済みのキーでシーン（写真）を呼ぶ
+      const sci = code ? engine.scenes.findIndex((s) => s.key === code) : -1
+      if (sci >= 0) {
+        engine.selectScene(sci)
+        e.preventDefault()
+        return
+      }
+      // 割り当て済みのキーで特別ストロボ／モチーフチェイスを入切
+      // （OSのキーリピートで高速反転＝ストロボ化しないよう FX と同じく e.repeat を除外）
+      if (code && engine.strobeKey === code) {
+        if (!e.repeat) engine.toggleStrobeOverride()
+        e.preventDefault()
+        return
+      }
+      if (code && engine.motifChaseKey === code) {
+        if (!e.repeat) engine.setMotifChase(!engine.motifChase)
         e.preventDefault()
         return
       }
@@ -1944,14 +1979,19 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <span
                     className={
                       'il-sc-learn' + (engine.learnScene === i ? ' on' : '') +
-                      (s.midiNote != null && engine.learnScene !== i ? ' assigned' : '')
+                      ((s.midiNote != null || s.key) && engine.learnScene !== i ? ' assigned' : '')
                     }
                     title={
                       engine.learnScene === i
-                        ? 'MIDI 入力待ち中（クリックで中止）'
-                        : s.midiNote != null
-                        ? `MIDI Note ${s.midiNote} 割当済（クリックで再 LEARN）`
-                        : 'LEARN — このシーンを呼ぶ MIDI を覚えさせる'
+                        ? '待機中… キーを押すか MIDI を入力（Escで中止）'
+                        : s.midiNote != null || s.key
+                          ? [
+                              s.key ? `キー ${codeLabel(s.key)}` : '',
+                              s.midiNote != null ? `MIDI Note ${s.midiNote}` : ''
+                            ]
+                              .filter(Boolean)
+                              .join(' ／ ') + ' 割当済（クリックで再 LEARN）'
+                          : 'LEARN — このシーンを呼ぶキー / MIDI を覚えさせる'
                     }
                     onClick={(e) => {
                       e.stopPropagation()
@@ -2205,9 +2245,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     className={'il-mini' + (engine.learnMotifChase ? ' learnon' : '')}
                     style={{ flexShrink: 0, padding: '2px 8px', fontSize: 11 }}
                     onClick={(e) => e.shiftKey ? engine.clearMotifChaseShortcut() : engine.setLearnMotifChase(!engine.learnMotifChase)}
-                    title="MIDIのパッドでチェイスを入/切。押して待機→パッドを叩くと割当（Shift+クリックで解除）"
+                    title="キーかMIDIのパッドでチェイスを入/切。押して待機→キーを押すかパッドを叩くと割当（Shift+クリックで解除）"
                   >
-                    {engine.learnMotifChase ? '待機…' : engine.motifChaseMidi != null ? 'MIDI ' + engine.motifChaseMidi : 'MIDI'}
+                    {engine.learnMotifChase
+                      ? '待機…'
+                      : engine.motifChaseKey
+                        ? codeLabel(engine.motifChaseKey)
+                        : engine.motifChaseMidi != null
+                          ? 'MIDI ' + engine.motifChaseMidi
+                          : 'LEARN'}
                   </button>
                 </div>
                 {engine.beams.map((b, i) => {
@@ -2660,9 +2706,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       className={'il-mini' + (engine.learnMotifChase ? ' learnon' : '')}
                       style={{ flexShrink: 0, padding: '2px 8px', fontSize: 11 }}
                       onClick={(e) => e.shiftKey ? engine.clearMotifChaseShortcut() : engine.setLearnMotifChase(!engine.learnMotifChase)}
-                      title="MIDIのパッドでチェイスを入/切。押して待機→パッドを叩くと割当（Shift+クリックで解除）"
+                      title="キーかMIDIのパッドでチェイスを入/切。押して待機→キーを押すかパッドを叩くと割当（Shift+クリックで解除）"
                     >
-                      {engine.learnMotifChase ? '待機…' : engine.motifChaseMidi != null ? 'MIDI ' + engine.motifChaseMidi : 'MIDI'}
+                      {engine.learnMotifChase
+                      ? '待機…'
+                      : engine.motifChaseKey
+                        ? codeLabel(engine.motifChaseKey)
+                        : engine.motifChaseMidi != null
+                          ? 'MIDI ' + engine.motifChaseMidi
+                          : 'LEARN'}
                     </button>
                   </div>
                 )}
@@ -4402,7 +4454,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 function StrobeSpecial({ engine }: { engine: ImageLightEngine }): React.JSX.Element {
   const on = engine.strobeOverride
   const learning = engine.learnStrobe
-  const assigned = engine.strobeMidi != null
+  const assigned = engine.strobeMidi != null || !!engine.strobeKey
   return (
     <>
       <div className="il-strobebox">
@@ -4417,10 +4469,15 @@ function StrobeSpecial({ engine }: { engine: ImageLightEngine }): React.JSX.Elem
           className={'il-fx-learn' + (learning ? ' on' : assigned ? ' assigned' : '')}
           title={
             learning
-              ? '待機中… MIDIノートを入力（Escで中止）'
+              ? '待機中… キーを押すか MIDI を入力（Escで中止）'
               : assigned
-                ? 'MIDI割当済み（クリックで再割当・右クリックで解除）'
-                : 'MIDIを割当'
+                ? [
+                    engine.strobeKey ? `キー ${codeLabel(engine.strobeKey)}` : '',
+                    engine.strobeMidi != null ? `MIDI ${engine.strobeMidi}` : ''
+                  ]
+                    .filter(Boolean)
+                    .join(' ／ ') + ' 割当済（クリックで再割当・右クリックで解除）'
+                : 'キー / MIDI を割当'
           }
           onClick={(e) => {
             e.stopPropagation()
