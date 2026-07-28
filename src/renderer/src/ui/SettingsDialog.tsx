@@ -3,6 +3,7 @@ import { useStore } from '../state/store'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
 import { NumberField } from './NumberField'
 import { mmPerPx, stageWidthMeters, countFittableFixtures } from '../model/scale'
+import { OUT_DIVS, outDivOf, sendSize, dividesEvenly } from '../output/out-scale'
 
 const MAX_W = 4096
 const MAX_H = 2160
@@ -22,10 +23,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const setGlow = useStore((s) => s.setGlow)
   const setGlowAmount = useStore((s) => s.setGlowAmount)
   const setLedGlowPx = useStore((s) => s.setLedGlowPx)
+  const setOutDiv = useStore((s) => s.setOutDiv)
   const setStageWidthMeters = useStore((s) => s.setStageWidthMeters)
   const fitFixturesToScale = useStore((s) => s.fitFixturesToScale)
 
   const tooBig = chart.canvas.w > MAX_W || chart.canvas.h > MAX_H
+  const outDiv = outDivOf(chart) // 送出だけの縮小率（1=原寸）
+  const evenly = dividesEvenly(chart.canvas.w, chart.canvas.h, outDiv)
   const mmpp = mmPerPx(chart) // 校正済みなら mm/px、未校正は null
   const widthM = stageWidthMeters(chart) ?? ''
   const fitCount = countFittableFixtures(chart.shapes) // 実寸に直せる灯体の数
@@ -144,6 +148,38 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             over {MAX_W}×{MAX_H} — large canvas may be heavy.
           </div>
         )}
+
+        <Field label="送出の解像度">
+          <div style={{ display: 'flex', gap: 6 }}>
+            {OUT_DIVS.map((d) => {
+              const s = sendSize(chart.canvas.w, chart.canvas.h, d)
+              return (
+                <button
+                  key={d}
+                  style={{ ...buttonStyle({ active: outDiv === d }), flex: 1, padding: '10px 6px' }}
+                  onClick={() => setOutDiv(d)}
+                  title="Syphon / NDI へ出す画素数だけを減らします。チャートも絵も変わりません。小さいほど動きが滑らかになり、そのぶん精細さが落ちます。"
+                >
+                  {d === 1 ? '原寸' : `1/${d}`}
+                  <span style={{ opacity: 0.6, marginLeft: 6 }}>
+                    {s.w}×{s.h}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </Field>
+        <div
+          style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginTop: -6, marginBottom: 10 }}
+        >
+          出す画素数だけを減らします（チャート・絵はそのまま）。動きを優先したい時に下げてください。
+          {!evenly && (
+            <span style={{ color: C.amber }}>
+              {' '}
+              いまの縮小率だとキャンバスが割り切れず、端の1列が半端になります。
+            </span>
+          )}
+        </div>
 
         <Field label="Syphon の名前">
           <input

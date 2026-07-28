@@ -33,11 +33,24 @@ import {
   pattDiameter
 } from '../render/fixtures'
 import { groupShapesByGlow } from './glow'
+import { sendSize } from './out-scale'
 import { drawRoomLampLit, roomLampDiameter } from '../render/roomlamp'
 import { drawStreetLampLit, streetLampDiameter } from '../render/streetlamp'
 import { drawChandelierLit, chandelierDiameter } from '../render/chandelier'
 
 const ZEROS = new Uint8Array(512)
+
+/** アルファを掛け込む（Syphon の流儀）。縁やブルームが、黒背景に描いた時と同じ RGB になる。 */
+function premultiply(d: Uint8ClampedArray): Uint8ClampedArray {
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3]
+    if (a === 255 || a === 0) continue // opaque/empty: premultiply is a no-op
+    d[i] = (d[i] * a) / 255
+    d[i + 1] = (d[i + 1] * a) / 255
+    d[i + 2] = (d[i + 2] * a) / 255
+  }
+  return d
+}
 
 /**
  * Draws the live output frame: every patched shape on a transparent-black background
@@ -64,6 +77,8 @@ export class OutputRenderer {
   private noiseTile?: HTMLCanvasElement
   /** Frame timestamp (ms) — drives the star fields' subtle twinkle. */
   private frameTime = 0
+  /** 送出を縮める時の作業キャンバス（原寸=未使用・使い回す）。 */
+  private sendCv?: HTMLCanvasElement
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
@@ -369,15 +384,29 @@ export class OutputRenderer {
    *  the Syphon convention. Anti-aliased edges and bloom thus carry the same RGB an
    *  opaque-black background produced, so Resolume Add layers look exactly as before. */
   readRGBA(): Uint8ClampedArray {
-    const d = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data
-    for (let i = 0; i < d.length; i += 4) {
-      const a = d[i + 3]
-      if (a === 255 || a === 0) continue // opaque/empty: premultiply is a no-op
-      d[i] = (d[i] * a) / 255
-      d[i + 1] = (d[i + 1] * a) / 255
-      d[i + 2] = (d[i + 2] * a) / 255
-    }
-    return d
+    return premultiply(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data)
+  }
+
+  /** 送出用に整数分の1へ縮めた絵（div<=1 は原寸＝readRGBA と同じ）。
+   *  縮めるのは「描き上がった絵」なので、にじみ(グロー)も一緒に縮む＝見た目の比率は変わらない。
+   *  作業キャンバスは使い回す（毎コマ作ると重い）。 */
+  readRGBAScaled(div: number): { w: number; h: number; data: Uint8ClampedArray } {
+    const W = this.canvas.width
+    const H = this.canvas.height
+    if (!(div > 1)) return { w: W, h: H, data: this.readRGBA() }
+    const { w, h } = sendSize(W, H, div)
+    if (!this.sendCv) this.sendCv = document.createElement('canvas')
+    const cv = this.sendCv
+    if (cv.width !== w) cv.width = w
+    if (cv.height !== h) cv.height = h
+    const g = cv.getContext('2d', { willReadFrequently: true })
+    if (!g) return { w: W, h: H, data: this.readRGBA() } // 作れなければ原寸で送る（出力を止めない）
+    // copy＝前のコマを消しつつ透過をそのまま置き換える（clearRect と2度手間にしない）
+    g.globalCompositeOperation = 'copy'
+    g.imageSmoothingEnabled = true
+    g.imageSmoothingQuality = 'high'
+    g.drawImage(this.canvas, 0, 0, w, h)
+    return { w, h, data: premultiply(g.getImageData(0, 0, w, h).data) }
   }
 
   private drawShape(shape: Shape, rgb: RGB, ox = 0, oy = 0, rep = 0): void {

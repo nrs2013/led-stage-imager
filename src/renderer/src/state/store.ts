@@ -235,6 +235,8 @@ interface AppState {
   setGlowAmount: (px: number) => void
   /** 電飾のにじみ(グロー)の全体既定 px（0=なし）。図形側 glowPx が優先。 */
   setLedGlowPx: (px: number) => void
+  /** 送出(Syphon/NDI)だけを整数分の1に縮める（1=原寸 / 2 / 3）。チャート本体は原寸のまま。 */
+  setOutDiv: (div: number) => void
   /** 部品の連続配置モード：パレットのカードをクリック→キャンバスをクリック連打で
    *  置き続ける（Escで終了）。null=通常。ドラッグ&ドロップは従来どおり並存。 */
   placingPart: string | null
@@ -995,6 +997,8 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glowAmount: px } } })),
   setLedGlowPx: (px) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, ledGlowPx: px } } })),
+  setOutDiv: (div) =>
+    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, outDiv: div } } })),
   placingPart: null,
   setPlacingPart: (placingPart) => set({ placingPart }),
   setSyphonName: (name) => set((s) => ({ chart: { ...s.chart, syphon: { name } } })),

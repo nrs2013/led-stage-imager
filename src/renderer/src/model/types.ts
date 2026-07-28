@@ -157,5 +157,10 @@ export interface Chart {
      *  scale (1px = stageWidthMm / canvas.w mm) and parts drop at true physical size
      *  via model/scale.mmToCanvasPx. Absent = uncalibrated (parts use raw px). */
     stageWidthMm?: number
+    /** 送出（Syphon/NDI）だけを整数分の1に縮める。1/未設定=原寸（従来）・2=1/2・3=1/3。
+     *  チャート本体と描く絵は原寸のまま＝見た目は変わらず、外へ出す画素数だけ減る。
+     *  🔴 整数割りだけにしているのは、LEDの縦ラインが等間隔のまま残るようにするため
+     *  （半端な倍率だと、間引かれる列とされない列ができてラインがガタつく）。 */
+    outDiv?: number
   }
 }

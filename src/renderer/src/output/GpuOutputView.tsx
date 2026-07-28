@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useStore } from '../state/store'
 import { OutputRenderer } from './OutputRenderer'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
+import { outDivOf, sendSize } from './out-scale'
 import type { Chart } from '../model/types'
 
 interface DecorApi {
@@ -46,6 +47,9 @@ export function GpuOutputView(): React.JSX.Element {
     const canvas = canvasRef.current
     if (!canvas) return
     const renderer = new OutputRenderer(canvas)
+    // 送出を縮める時だけ使う「原寸の下描き」。原寸(既定)では作らない＝従来と同じ道を通る。
+    let fullCv: HTMLCanvasElement | null = null
+    let fullRenderer: OutputRenderer | null = null
     let lastErrLog = 0
     let lastTickAt = 0
     let lastW = 0
@@ -57,10 +61,12 @@ export function GpuOutputView(): React.JSX.Element {
         const st = useStore.getState()
         const { chart, dmxByUniverse } = st
         if (chart.canvas.w <= 0 || chart.canvas.h <= 0) return // 退化フレームはスキップ
-        // 窓サイズ＝出力解像度。チャートのキャンバスサイズに追従させる（mainが窓をリサイズ）。
-        if (chart.canvas.w !== lastW || chart.canvas.h !== lastH) {
-          lastW = chart.canvas.w
-          lastH = chart.canvas.h
+        const div = outDivOf(chart)
+        const out = sendSize(chart.canvas.w, chart.canvas.h, div)
+        // 窓サイズ＝出力解像度。チャートのサイズ＋縮小率に追従させる（mainが窓をリサイズ）。
+        if (out.w !== lastW || out.h !== lastH) {
+          lastW = out.w
+          lastH = out.h
           getApi()?.gpuOutputResize?.(lastW, lastH)
         }
         const dmx = effectiveDmxByUniverse(
@@ -69,7 +75,23 @@ export function GpuOutputView(): React.JSX.Element {
           chart.settings.holdOnTimeout,
           Date.now()
         )
-        renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
+        if (div <= 1) {
+          renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
+          return
+        }
+        // 縮める時: 原寸で描いてから、出来上がった絵を整数分の1で焼き込む
+        // （にじみ(グロー)も一緒に縮む＝原寸の時と見た目の比率が変わらない）。
+        if (!fullCv) fullCv = document.createElement('canvas')
+        if (!fullRenderer) fullRenderer = new OutputRenderer(fullCv)
+        fullRenderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
+        const g = canvas.getContext('2d')
+        if (!g) return
+        if (canvas.width !== out.w) canvas.width = out.w
+        if (canvas.height !== out.h) canvas.height = out.h
+        g.globalCompositeOperation = 'copy' // 前のコマを残さず、透過をそのまま置き換える
+        g.imageSmoothingEnabled = true
+        g.imageSmoothingQuality = 'high'
+        g.drawImage(fullCv, 0, 0, out.w, out.h)
       } catch (err) {
         const now = Date.now()
         if (now - lastErrLog > 2000) {
