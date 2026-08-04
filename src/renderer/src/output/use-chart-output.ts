@@ -2,9 +2,12 @@ import { useEffect } from 'react'
 import { useStore } from '../state/store'
 import { OutputRenderer } from './OutputRenderer'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
+import { outDivOf } from './out-scale'
 
 interface DecorApi {
   publishFrame?: (width: number, height: number, buffer: Uint8ClampedArray) => void
+  gpuOutputStatus?: () => Promise<boolean>
+  onGpuOutputActive?: (cb: (active: boolean) => void) => (() => void) | void
 }
 
 const FPS = 30
@@ -21,6 +24,15 @@ export function useChartOutput(): void {
     const renderer = new OutputRenderer(canvas)
     const api = (window as unknown as { api?: DecorApi }).api
     if (!api?.publishFrame) return // ブラウザ(UI確認用)では何もしない
+    // GPU直結出力（見えない出力専用窓）が生きている間はこちらのCPU読み出し経路を止める。
+    // GPU側が死んだら通知が来て自動再開＝互換フォールバック（2026-07-14 GPU出力設計）。
+    let gpuActive = false
+    void api.gpuOutputStatus?.().then((v) => {
+      gpuActive = !!v
+    })
+    const offGpu = api.onGpuOutputActive?.((v) => {
+      gpuActive = v
+    })
     let lastErrLog = 0
     let lastTickAt = 0 // 直近の描画時刻＝下の即描画のレート上限に使う
     const tick = (): void => {
@@ -28,6 +40,7 @@ export function useChartOutput(): void {
       // 1フレームの例外で出力が本番中ずっと固まらないよう、毎フレーム握って次へ進む。
       try {
         const st = useStore.getState()
+        if (gpuActive) return // GPU直結出力が publish 中＝二重出力しない
         if (st.imageLight) return // 画像照明モードが publish 中＝二重出力しない
         const { chart, dmxByUniverse } = st
         if (chart.canvas.w <= 0 || chart.canvas.h <= 0) return // 退化フレームはスキップ
@@ -39,7 +52,10 @@ export function useChartOutput(): void {
           Date.now()
         )
         renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
-        api.publishFrame!(chart.canvas.w, chart.canvas.h, renderer.readRGBA())
+        // 描くのは常に原寸。送出だけ設定「送出の解像度」で整数分の1に縮める（原寸=素通り）。
+        // 読み出し(getImageData)と NDI 送信の量がそのぶん減る＝ここが Windows の重さの本体。
+        const out = renderer.readRGBAScaled(outDivOf(chart))
+        api.publishFrame!(out.w, out.h, out.data)
       } catch (err) {
         const now = Date.now()
         if (now - lastErrLog > 2000) {
@@ -55,13 +71,16 @@ export function useChartOutput(): void {
       if (performance.now() - lastTickAt >= INTERVAL) tick()
     }, INTERVAL)
     // 卓の値が変わったら次の33ms枠を待たず即描画（変化時だけ・最短~60fpsに制限してSyphon読み出しの氾濫を防ぐ）。
+    // -4ms＝しきい値が1コマぴったりだと60Hz到着の揺らぎで拍がぶつかり実測40fps台に落ちる
+    // （2026-07-08診断・GpuOutputView には入っていたがこちらに入れ忘れていた）。
     const unsub = useStore.subscribe((s, prev) => {
-      if (s.dmxRev !== prev.dmxRev && performance.now() - lastTickAt >= 1000 / 60) tick()
+      if (s.dmxRev !== prev.dmxRev && performance.now() - lastTickAt >= 1000 / 60 - 4) tick()
     })
     tick()
     return () => {
       clearInterval(iv)
       unsub()
+      offGpu?.()
     }
   }, [])
 }

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Toolbar } from './editor/Toolbar'
-import { SubBar } from './editor/SubBar'
 import { EditorCanvas } from './editor/EditorCanvas'
 import { Inspector } from './editor/Inspector'
 import { PartsPalette } from './editor/PartsPalette'
 import { LayersPanel } from './editor/LayersPanel'
 import { PatchTable } from './editor/PatchTable'
 import { LiveView } from './output/LiveView'
+import { GpuOutputView } from './output/GpuOutputView'
+import { GpuILOutputView } from './output/GpuILOutputView'
 import { useChartOutput } from './output/use-chart-output'
 import { StatusBar } from './ui/StatusBar'
 import { StartScreen } from './ui/StartScreen'
@@ -21,39 +22,95 @@ import type { Chart } from './model/types'
 import { parseChart } from './io/chart-file'
 import { C, chrome } from './ui/tokens'
 
-const isOutput = typeof window !== 'undefined' && window.location.search.includes('output')
+// GPU直結出力の見えない窓（?syphon-output）。'output' を部分一致で含むので先に判定する。
+const isGpuOutput =
+  typeof window !== 'undefined' && window.location.search.includes('syphon-output')
+const isOutput =
+  !isGpuOutput && typeof window !== 'undefined' && window.location.search.includes('output')
 
 interface DecorApi {
   onPreviewActive?: (cb: (active: boolean) => void) => (() => void) | void
   sendChart?: (chart: unknown) => void
   onChartUpdate?: (cb: (chart: unknown) => void) => (() => void) | void
+  gpuOutputStatus?: () => Promise<boolean>
+  onGpuOutputActive?: (cb: (active: boolean) => void) => (() => void) | void
+  sendManual?: (m: unknown) => void
   onEditUndo?: (cb: () => void) => (() => void) | void
   onEditRedo?: (cb: () => void) => (() => void) | void
   onEditCopy?: (cb: () => void) => (() => void) | void
   onEditPaste?: (cb: () => void) => (() => void) | void
   nativeCopy?: () => void
   nativePaste?: () => void
-  onOpenChartPath?: (cb: (json: string) => void) => (() => void) | void
+  onOpenChartPath?: (cb: (json: string, path?: string) => void) => (() => void) | void
+  chartOpened?: (path: string) => void
   onOpenShowPath?: (cb: (p: { bytes: Uint8Array; path: string }) => void) => (() => void) | void
+  notifyReadyForOpen?: () => void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 
-/** Editor side: while the preview window is open, mirror chart changes to it. */
+/** Editor side: mirror chart changes to the preview window and to the invisible
+ *  GPU output window (?syphon-output). The GPU window also needs the TEST fader state
+ *  so its picture matches the editor's.
+ *  🔴 started（実チャートを持っている）時だけ送る: 編集ウィンドウの開き直し/リロード直後の
+ *  空チャートを送ると、GPU出力窓が持っている本番チャートを上書きして出力が消灯する（レビュー指摘）。 */
 function usePreviewMirror(): void {
-  const activeRef = useRef(false)
+  const activeRef = useRef(false) // fullscreen preview
+  const gpuRef = useRef(false) // GPU直結出力の見えない窓
   useEffect(() => {
     const a = getApi()
     if (!a?.onPreviewActive) return
+    // チャートは全量IPC（写真データURL込みだと重い）＝ドラッグ中の連射は100msに間引く。
+    // 末尾で必ず最新を送るので取りこぼしはない。
+    let chartTimer: ReturnType<typeof setTimeout> | null = null
+    const sendChartNow = (): void => {
+      a.sendChart?.(useStore.getState().chart)
+    }
+    const queueChart = (): void => {
+      if (chartTimer) return
+      chartTimer = setTimeout(() => {
+        chartTimer = null
+        sendChartNow()
+      }, 100)
+    }
+    const sendAll = (): void => {
+      const st = useStore.getState()
+      if (!st.started) return // 空チャートで本番出力を上書きしない
+      sendChartNow()
+      a.sendManual?.({ on: st.manualMode, byFixture: st.manualByFixture })
+    }
     const off = a.onPreviewActive((active) => {
       activeRef.current = active
-      if (active) a.sendChart?.(useStore.getState().chart)
+      if (active) sendAll()
+    })
+    // GPU出力窓は編集画面より先に生まれていることがある＝現状を一度聞いてから通知を購読
+    void a.gpuOutputStatus?.().then((v) => {
+      gpuRef.current = !!v
+      if (v) sendAll()
+    })
+    const offGpu = a.onGpuOutputActive?.((v) => {
+      gpuRef.current = v
+      if (v) sendAll()
     })
     const unsub = useStore.subscribe((state, prev) => {
-      if (activeRef.current && state.chart !== prev.chart) a.sendChart?.(state.chart)
+      const on = activeRef.current || gpuRef.current
+      if (!on || !state.started) return
+      if (state.started !== prev.started) {
+        // StartScreen から復元/開始した瞬間＝全量を即同期（チャート変更イベントより確実）
+        sendAll()
+        return
+      }
+      if (state.chart !== prev.chart) queueChart()
+      if (
+        gpuRef.current &&
+        (state.manualMode !== prev.manualMode || state.manualByFixture !== prev.manualByFixture)
+      )
+        a.sendManual?.({ on: state.manualMode, byFixture: state.manualByFixture })
     })
     return () => {
       off?.()
+      offGpu?.()
       unsub()
+      if (chartTimer) clearTimeout(chartTimer)
     }
   }, [])
 }
@@ -81,6 +138,29 @@ function OutputApp(): React.JSX.Element {
       <LiveView bare />
     </div>
   )
+}
+
+/** GPU直結出力の見えない窓（?syphon-output）。DMXは自分で受け、チャート/TESTフェーダー/
+ *  画像照明の状態は編集ウィンドウから IPC で届く。絵は mode に応じて GpuOutputView（電飾
+ *  チャート・自走）か GpuILOutputView（画像照明・編集側駆動）が 1:1 で描き、main が paint を
+ *  ゼロコピーで Syphon へ出す。 */
+function GpuOutputApp(): React.JSX.Element {
+  useDmxBridge()
+  const [mode, setMode] = useState<'chart' | 'imagelight'>('chart')
+  useEffect(() => {
+    const a = getApi() as
+      | {
+          onOutputMode?: (cb: (m: 'chart' | 'imagelight') => void) => (() => void) | void
+          gpuOutputHello?: () => Promise<'chart' | 'imagelight'>
+        }
+      | undefined
+    const off = a?.onOutputMode?.((m) => setMode(m))
+    // pull型ハンドシェイク: リスナー登録が済んだ「後」に現在モードを聞く＝ロード中に
+    // 届いて消えたモード切替を取り戻す（push だけだと空チャートのまま固まる・実測）
+    void a?.gpuOutputHello?.().then((m) => setMode(m))
+    return () => off?.()
+  }, [])
+  return mode === 'imagelight' ? <GpuILOutputView /> : <GpuOutputView />
 }
 
 /** Cmd+Z / Shift+Cmd+Z arrive via the app menu (the default menu would swallow them).
@@ -152,7 +232,7 @@ function useMenuUndo(): void {
 /** ダブルクリックで開かれた .ledimager（main から JSON が届く）を読み込んで表示する。 */
 function useOpenFile(): void {
   useEffect(() => {
-    const off = getApi()?.onOpenChartPath?.((json) => {
+    const off = getApi()?.onOpenChartPath?.((json, path) => {
       try {
         const c = parseChart(json)
         const st = useStore.getState()
@@ -165,7 +245,10 @@ function useOpenFile(): void {
         }
         st.setImageLight(false)
         st.setChart(c)
+        st.markChartFile(c.name || '名前なし', c) // 上のバーの表示を実態に合わせる
         st.setStarted(true)
+        // 実際に開けた時だけ ⌘S 上書き先を確定（キャンセル/失敗時はここに来ない＝別ファイル誤上書き防止）
+        if (path) getApi()?.chartOpened?.(path)
       } catch (e) {
         console.error('[open-file] parse failed', e)
       }
@@ -186,6 +269,7 @@ function useOpenShowFile(): void {
       })
       st.setImageLight(true)
     })
+    getApi()?.notifyReadyForOpen?.()
     return () => off?.()
   }, [])
 }
@@ -219,6 +303,19 @@ function EditorApp(): React.JSX.Element {
   useOpenFile()
   useOpenShowFile()
   useChartOutput() // 電飾の Syphon/NDI 出力は常時（Live廃止・照明モードと同じ作法）
+  // 出力方式（SETUPのトグル・localStorage永続）。互換を選んでいたら起動時に main へ伝えて
+  // GPU出力窓を止める（既定は高速(GPU)＝何も送らなくても main が起動している）。
+  useEffect(() => {
+    if (localStorage.getItem('gpu-output-method') === 'compat')
+      (getApi() as { setGpuOutputMethod?: (m: string) => void } | undefined)?.setGpuOutputMethod?.(
+        'compat'
+      )
+  }, [])
+  // 開発用フラグ: ?iltest で照明モードへ直行（性能実測用・通常起動では無効）
+  useEffect(() => {
+    if (window.location.search.includes('iltest')) setImageLight(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // 画像照明モード: エディタ/Liveに代えて全画面表示（自前でSyphonへpublish）。
   // hooks は全てこの分岐より前で呼ぶこと（条件付きreturnの後にhookは置けない）。
   if (imageLight) return <ImageLightingMode onExit={() => setImageLight(false)} />
@@ -237,7 +334,6 @@ function EditorApp(): React.JSX.Element {
       <Toolbar testOpen={testOpen} onToggleTest={() => setTestOpen((v) => !v)} />
       {mode === 'edit' ? (
         <>
-          <SubBar />
           <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
             <EditorCanvas />
             <div
@@ -279,6 +375,7 @@ function EditorApp(): React.JSX.Element {
 }
 
 function App(): React.JSX.Element {
+  if (isGpuOutput) return <GpuOutputApp />
   return isOutput ? <OutputApp /> : <EditorApp />
 }
 

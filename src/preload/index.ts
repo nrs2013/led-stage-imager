@@ -27,6 +27,72 @@ const api = {
     ipcRenderer.on('chart:update', h)
     return () => ipcRenderer.removeListener('chart:update', h)
   },
+  // ---- GPU直結出力（見えない出力専用窓・2026-07-14）
+  // 窓が生きているか（生きている間は editor の CPU 読み出し経路が黙る）
+  gpuOutputStatus: (): Promise<boolean> => ipcRenderer.invoke('gpu-output:status'),
+  onGpuOutputActive: (cb: (active: boolean) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, v: boolean): void => cb(v)
+    ipcRenderer.on('gpu-output:active', h)
+    return () => ipcRenderer.removeListener('gpu-output:active', h)
+  },
+  // 出力窓（?syphon-output）→ main: 窓サイズ＝出力解像度の変更要求
+  gpuOutputResize: (w: number, h: number): void => ipcRenderer.send('gpu-output:resize', w, h),
+  // TESTフェーダー状態の同期（editor → main → 出力窓）
+  sendManual: (m: unknown): void => ipcRenderer.send('manual:sync', m),
+  onManualUpdate: (cb: (m: unknown) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, m: unknown): void => cb(m)
+    ipcRenderer.on('manual:update', h)
+    return () => ipcRenderer.removeListener('manual:update', h)
+  },
+  // 画像照明モードの入退場を main へ（GPU出力窓の描き手を chart⇄imagelight に切替）
+  sendImageLightActive: (on: boolean): void => ipcRenderer.send('imagelight:active', on),
+  // 出力窓（?syphon-output）が受けるモード切替通知
+  onOutputMode: (cb: (mode: 'chart' | 'imagelight') => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, v: 'chart' | 'imagelight'): void => cb(v)
+    ipcRenderer.on('output:mode', h)
+    return () => ipcRenderer.removeListener('output:mode', h)
+  },
+  // 出力窓の準備完了ハンドシェイク: 現在モードが返り、main が最新状態を送り直す
+  gpuOutputHello: (): Promise<'chart' | 'imagelight'> => ipcRenderer.invoke('gpu-output:hello'),
+  // ---- 画像照明の状態同期（編集 → main → 出力窓）
+  // 公演まるごと（重い・メディアが変わった時だけ。media=null は「前回のメディアを使い回す」）
+  ilSyncShow: (json: string, media: { file: string; dataUrl: string }[] | null): void =>
+    ipcRenderer.send('il:sync-show', { json, media }),
+  // 毎フレームの軽い動的状態
+  ilSyncFrame: (frame: unknown): void => ipcRenderer.send('il:sync-frame', frame),
+  onIlSyncShow: (
+    cb: (p: { json: string; media: { file: string; dataUrl: string }[] | null }) => void
+  ): (() => void) => {
+    const h = (
+      _e: IpcRendererEvent,
+      p: { json: string; media: { file: string; dataUrl: string }[] | null }
+    ): void => cb(p)
+    ipcRenderer.on('il:sync-show', h)
+    return () => ipcRenderer.removeListener('il:sync-show', h)
+  },
+  onIlSyncFrame: (cb: (f: unknown) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, f: unknown): void => cb(f)
+    ipcRenderer.on('il:sync-frame', h)
+    return () => ipcRenderer.removeListener('il:sync-frame', h)
+  },
+  // 出力窓が（再）起動した時に main から届く「公演を再送して」の合図（編集側が受ける）
+  onIlResync: (cb: () => void): (() => void) => {
+    const h = (): void => cb()
+    ipcRenderer.on('il:resync', h)
+    return () => ipcRenderer.removeListener('il:resync', h)
+  },
+  // 出力窓→main: 実絵を1枚描いた（ここから Syphon 送出を CPU から出力窓へ切替してよい）
+  ilOutputReady: (): void => ipcRenderer.send('il:output-ready'),
+  // 出力窓→main: マウント直後に公演の再送を頼む（pull型ハンドシェイク・レース回復）
+  ilRequestShow: (): void => ipcRenderer.send('il:request-show'),
+  // 編集側: 出力窓が実絵を出したか/まだかの変化を受ける（CPU本番を続けるか止めるか判断）
+  onIlOutputReadyChanged: (cb: (ready: boolean) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, v: boolean): void => cb(v)
+    ipcRenderer.on('il:output-ready-changed', h)
+    return () => ipcRenderer.removeListener('il:output-ready-changed', h)
+  },
+  // 出力方式（SETUPのトグル）: fast=GPU直結（既定）／compat=従来のCPU経路
+  setGpuOutputMethod: (m: 'fast' | 'compat'): void => ipcRenderer.send('gpu-output:method', m),
   // Art-Net 受信機の生死通知（bind失敗＝ポート使用中など。今まで無言で死んでいた）
   onArtnetStatus: (cb: (st: { ok: boolean; detail: string }) => void): (() => void) => {
     const h = (_e: IpcRendererEvent, st: { ok: boolean; detail: string }): void => cb(st)
@@ -41,6 +107,8 @@ const api = {
     ipcRenderer.invoke('engine:status'),
   // renderer が検出した MIDI 入力ポート名をメインへ通知（ステータスバー表示用・Web MIDI 用の名残）
   reportMidiInputs: (names: string[]): void => ipcRenderer.send('midi:inputs', names),
+  /** MIDI をつなぎ直す。つながっている入力ポート名を返す。 */
+  restartMidi: (): Promise<string[]> => ipcRenderer.invoke('midi:restart'),
   // CoreMIDI(ネイティブ)からの MIDI メッセージ受信 [status, data1, data2]
   onMidiMessage: (cb: (msg: [number, number, number]) => void): (() => void) => {
     const h = (_e: IpcRendererEvent, msg: [number, number, number]): void => cb(msg)
@@ -77,18 +145,22 @@ const api = {
     ipcRenderer.invoke('chart:saveAs', json, name),
   chartNew: (): Promise<boolean> => ipcRenderer.invoke('chart:new'),
   openChartFile: (): Promise<string | null> => ipcRenderer.invoke('chart:open'),
-  // ダブルクリックで開かれたファイルの中身(JSON)がメインから届く
-  onOpenChartPath: (cb: (json: string) => void): (() => void) => {
-    const h = (_e: IpcRendererEvent, json: string): void => cb(json)
+  // ダブルクリックで開かれたファイルの中身(JSON)＋パスがメインから届く
+  onOpenChartPath: (cb: (json: string, path?: string) => void): (() => void) => {
+    const h = (_e: IpcRendererEvent, json: string, path?: string): void => cb(json, path)
     ipcRenderer.on('chart:open-path', h)
     return () => ipcRenderer.removeListener('chart:open-path', h)
   },
+  // 実際に開けた時だけ⌘S上書き先を確定（キャンセル/失敗時は呼ばない＝別ファイル誤上書き防止）
+  chartOpened: (path: string): void => ipcRenderer.send('chart:opened', path),
   // ダブルクリックで開かれた .ledshow（画像照明の公演・ZIPのバイト列＋パス）がメインから届く
   onOpenShowPath: (cb: (p: { bytes: Uint8Array; path: string }) => void): (() => void) => {
     const h = (_e: IpcRendererEvent, p: { bytes: Uint8Array; path: string }): void => cb(p)
     ipcRenderer.on('imagelight:open-path', h)
     return () => ipcRenderer.removeListener('imagelight:open-path', h)
   },
+  // 出力窓（renderer）マウント完了 → main に保留中の開くファイルを配送させる
+  notifyReadyForOpen: (): void => ipcRenderer.send('open-file:renderer-ready'),
   autosaveWrite: (json: string): Promise<boolean> =>
     ipcRenderer.invoke('chart:autosave-write', json),
   autosaveRead: (): Promise<string | null> => ipcRenderer.invoke('chart:autosave-read'),

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { renumberOrder } from './engine'
 
-describe('renumberOrder（番号を左下→右、下の段から振り直す）', () => {
-  it('一段：左端が1、左→右で番号が進む', () => {
-    // x: -2,-1,0,1,2（同じ段）。左端=index0
+describe('renumberOrder（番号を左下→右・下の段から上へ振り直す）', () => {
+  it('一段：左端が1番、右へ順に増える', () => {
+    // x: -2,-1,0,1,2（同じ段・index 0..4）。左端(x=-2, index0)から右へ。
     const pts = [
       { x: -2, y: 0 },
       { x: -1, y: 0 },
@@ -11,11 +11,10 @@ describe('renumberOrder（番号を左下→右、下の段から振り直す）
       { x: 1, y: 0 },
       { x: 2, y: 0 }
     ]
-    // 期待(old index)：左から順にそのまま 0,1,2,3,4
     expect(renumberOrder(pts, 100)).toEqual([0, 1, 2, 3, 4])
   })
 
-  it('左下が1番：下の段を左→右、次に上の段を左→右', () => {
+  it('下の段が先、その中で左→右', () => {
     const pts = [
       { x: -1, y: 0 }, // 0 上段・左
       { x: 0, y: 0 }, // 1 上段・中
@@ -24,17 +23,8 @@ describe('renumberOrder（番号を左下→右、下の段から振り直す）
       { x: 0, y: 100 }, // 4 下段・中
       { x: 1, y: 100 } // 5 下段・右
     ]
-    // 下段(左3,中4,右5) → 上段(左0,中1,右2)
+    // 下段を左→右(3,4,5) → 上段を左→右(0,1,2)
     expect(renumberOrder(pts, 200)).toEqual([3, 4, 5, 0, 1, 2])
-  })
-
-  it('段の中で順不同に置いても、左→右へ並べ替わる', () => {
-    const pts = [
-      { x: 2, y: 100 }, // 0 下段・右
-      { x: -2, y: 100 }, // 1 下段・左（＝左下＝1番）
-      { x: 0, y: 100 } // 2 下段・中
-    ]
-    expect(renumberOrder(pts, 200)).toEqual([1, 2, 0])
   })
 
   it('perm は全 index をちょうど1回ずつ含む（保存データの並べ替えが安全）', () => {

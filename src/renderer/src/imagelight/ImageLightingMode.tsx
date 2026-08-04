@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ImageLightEngine, LW, LH, IW, IH, MAX_BEAMS, type FxKey } from './engine'
+import { ImageLightEngine, LW, LH, IW, IH, MAX_BEAMS, type Beam, type FxKey, type FireKey } from './engine'
+import { GOBO_KINDS } from './gobo'
 import { COLORS, hexToRgb, rgbToHex, sameRgb, type RGB3 } from './colors'
 import { FX_BUTTONS, FX_LABEL, FX_PARAMS } from './fxdefs'
 import { DECOR_NONDIR } from './decor-pattern'
@@ -51,6 +52,15 @@ interface DecorApi {
     file: string
   ) => Promise<{ json: string; media: Record<string, string> } | null>
   onMidiMessage?: (cb: (msg: [number, number, number]) => void) => (() => void) | void
+  sendImageLightActive?: (on: boolean) => void
+  // GPU直結出力（見えない出力専用窓）との同期
+  gpuOutputStatus?: () => Promise<boolean>
+  onGpuOutputActive?: (cb: (active: boolean) => void) => (() => void) | void
+  onIlOutputReadyChanged?: (cb: (ready: boolean) => void) => (() => void) | void
+  ilSyncShow?: (json: string, media: { file: string; dataUrl: string }[] | null) => void
+  ilSyncFrame?: (frame: unknown) => void
+  onIlResync?: (cb: () => void) => (() => void) | void
+  setGpuOutputMethod?: (m: 'fast' | 'compat') => void
 }
 const getApi = (): DecorApi | undefined => (window as unknown as { api?: DecorApi }).api
 // パスからファイル名だけ取り出す（Mac は / ・Windows は \ 区切りどちらも）
@@ -137,6 +147,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     }
     window.addEventListener('pointerdown', mark, true)
     window.addEventListener('keydown', mark, true)
+    engine.onUserTouch = mark // MIDI のパッド/つまみだけ触ったセッションも保存対象にする
     // 写真をドラッグ&ドロップだけで入れたセッションも「触った」扱いにする
     //（これが無いと自動保存も閉じる時の確認も効かず、ドロップした公演が黙って消える）。
     window.addEventListener('drop', mark, true)
@@ -144,8 +155,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       window.removeEventListener('pointerdown', mark, true)
       window.removeEventListener('keydown', mark, true)
       window.removeEventListener('drop', mark, true)
+      engine.onUserTouch = null
     }
-  }, [])
+  }, [engine])
 
   // シーン名のインライン編集（null=非編集中）
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null)
@@ -158,9 +170,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     forceRenderRef.current = true // モード切替でマーカー表示が変わる→1回描き直す
   }, [uiMode])
 
-  // 検出した MIDI 入力名をメイン（下部バーの「MIDI IN」表示）へ通知する配線だけ用意。
-  // ※ initMidi() は起動時には呼ばない。Electron の requestMIDIAccess はユーザー操作(クリック)
-  //   起点でないと解決しないため、LEARN(◎)クリック時に初めて初期化する（engine 側で実行）。
+  // 検出した MIDI 入力名をメイン（下部バーの「MIDI IN」表示）へ通知する配線。
   useEffect(() => {
     engine.onMidiInputs = (names) => getApi()?.reportMidiInputs?.(names)
     // CoreMIDI(ネイティブ)から届く MIDI を engine の共通処理へ。LEARN も発火もこれで動く。
@@ -172,6 +182,43 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     }
   }, [engine])
 
+  // 🔴 Windows は Web MIDI が唯一の受け口なのに、これまで起動時に一度も掴みに行っていなかった。
+  // ＝ LEARN(◎) か上のバーの MIDI ランプを押すまで、卓のつまみ・パッドが完全に無反応
+  //   （のむさん 2026-07-28 現場「立ち上げ直すとすぐMIDIが壊れてる。さわってもできない」）。
+  // 開いた直後に掴みにいき、取れなければ2秒おきに数回だけ静かに再試行する。
+  // requestMIDIAccess がユーザー操作起点でないと解決しない環境のために、最初の操作でも一度試す。
+  // 🔴 Mac ではやらない: Mac は CoreMIDI 直読みが主経路なので、Web MIDI も掴むと同じ1メッセージを
+  //   2回処理してしまう（入/切のトグルが打ち消し合って「押しても効かない」事故になる）。
+  useEffect(() => {
+    let iv: ReturnType<typeof setInterval> | null = null
+    let cancelled = false
+    const stop = (): void => {
+      if (iv) clearInterval(iv)
+      iv = null
+    }
+    const onGesture = (): void => engine.initMidi()
+    void getApi()
+      ?.getStatus?.()
+      .then((s) => {
+        if (cancelled || s.platform === 'darwin') return
+        engine.initMidi()
+        let n = 0
+        iv = setInterval(() => {
+          if (engine.midiReady || ++n > 5) return stop()
+          engine.initMidi()
+        }, 2000)
+        window.addEventListener('pointerdown', onGesture, { once: true })
+        window.addEventListener('keydown', onGesture, { once: true })
+      })
+      .catch(() => {}) // 取れなくても本番は止めない（MIDIランプの手動つなぎ直しは従来どおり残る）
+    return () => {
+      cancelled = true
+      stop()
+      window.removeEventListener('pointerdown', onGesture)
+      window.removeEventListener('keydown', onGesture)
+    }
+  }, [engine])
+
   // 起動時は前回データを自動で開かない＝普通のアプリと同じ「開いたら真っ白」
   //（SHOW MODE と同じ作法・のむさん確定）。前回分は userData/il-autosave に残る＝消さない
   // （下の自動保存は“中身が空のうちは書かない”ので、触らなければ前回データは潰れない）。
@@ -179,6 +226,24 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   useEffect(() => {
     autoRestoredRef.current = true
   }, [])
+
+  // 開発用フラグ: DECOR_QUERY='iltest&cap3840&strobe' 等で起動すると照明モードへ直行し
+  //   前回データを開いて指定の負荷を掛ける（GPU出力の性能実測用・通常起動では無効）。
+  useEffect(() => {
+    const q = window.location.search
+    if (useStore.getState().pendingShowFile) return
+    void (async () => {
+      const d = await getApi()?.autosaveImageLightRead?.()
+      if (d) await engine.restoreShow(d.json, d.media)
+      if (q.includes('cap1920')) engine.setOutCap(1920)
+      if (q.includes('cap3840')) engine.setOutCap(3840)
+      if (q.includes('strobe')) engine.st.strobe = 'rnd'
+      if (q.includes('relief')) engine.setRelief(0.7) // 立体強調の同期をGPU/互換一致テストで確認する用
+      if (q.includes('blackout')) engine.st.master = 0 // 暗転→出力が透明になる（凍らない）ことの確認用
+      console.log('[iltest] ready', { outCap: engine.outCap, strobe: engine.st.strobe, relief: engine.relief })
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine])
 
   // ダブルクリックで開かれた .ledshow を取り込んで復元（App が pendingShowFile に積む）。
   // 既に照明モードに居る時に別ファイルを開いても効くよう、pendingShowFile を購読する。
@@ -301,6 +366,27 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // 出力(Syphon/NDI)送信も走らせない＝ピンチ中に本番出力へ負荷をかけない。
   const displayDirtyRef = useRef(false)
   const [renaming, setRenaming] = useState<{ i: number; value: string } | null>(null)
+  // SFXシーン（CUEタブの特効の段）: 保存待ち＋名前変更中
+  const [sfxArm, setSfxArm] = useState(false)
+  // 本番中の上書きロック: ONの間はシーン/SFXシーンの保存・名前変更・削除・LEARNを封じる（呼び出しと発射はそのまま）。
+  // 保存しない＝再起動で解除。ONにした瞬間、進行中の保存アームやLEARN待ちも解除する。
+  const [editLock, setEditLock] = useState(false)
+  const toggleEditLock = (): void => {
+    const next = !editLock
+    setEditLock(next)
+    if (next) {
+      if (engine.armedSave) engine.toggleArmSave()
+      setSfxArm(false)
+      setRenamingSfx(null)
+      setRenaming(null)
+      engine.setLearnPattern(null)
+      engine.setLearnSfxScene(null)
+      engine.setLearnGo(null) // GO/BACKのLEARN待ちも解除（残るとLOCK中の初キーが割当に化ける）
+      engine.setLearnFire(null)
+      engine.setLearnFx(null)
+    }
+  }
+  const [renamingSfx, setRenamingSfx] = useState<{ i: number; value: string } | null>(null)
 
   // ---- 表示ズーム（画面の見た目だけ拡大・縮小。Syphon/NDI出力には一切影響しない）
   // f=fit(全体表示)比の倍率、cx/cy=画面中央に見せる舞台(LW×LH)座標。
@@ -389,8 +475,23 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // DMX(Art-Net)受信ランプ：本番モードでも「卓の信号が届いているか・ユニバースが合っているか」を
   // ひと目で分かるように（今までは電飾モードに戻らないと確認できず、接続当日に詰む）。
   const [dmxLamp, setDmxLamp] = useState<{ on: boolean; note: string }>({ on: false, note: 'DMX受信なし' })
+  const [midiBusy, setMidiBusy] = useState(false) // MIDI つなぎ直し中
   const [showKeys, setShowKeys] = useState(false) // 操作キー一覧オーバーレイ
   const [presetOpen, setPresetOpen] = useState(false) // 設定コンソールの「設定（解像度/落ち込み）」を開くか
+  const [batchUniv, setBatchUniv] = useState(1) // 「全灯体のユニバースをまとめて」の入力値（1始まり表示）
+  // 出力方式（高速GPU/互換）。localStorage 永続。
+  // 既定: Mac=高速(GPU/Syphonで実績あり)・Windows/Linux=互換。Windowsの高速(GPU/NDI)経路は
+  // まだ不安定で「出力の光が凍る(ストロボが出ない)」事故があるため、既定を安全側の互換にする。
+  const [outMethod, setOutMethod] = useState<'fast' | 'compat'>(() => {
+    const saved = localStorage.getItem('gpu-output-method')
+    if (saved === 'compat' || saved === 'fast') return saved
+    return /Mac/i.test(navigator.userAgent) ? 'fast' : 'compat'
+  })
+  // 起動時に現在の方式を main へ伝える＝互換なら GPU 出力窓を確実に止める（トグルを押さなくても効く）
+  useEffect(() => {
+    getApi()?.setGpuOutputMethod?.(outMethod)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const showKeysRef = useRef(showKeys)
   useEffect(() => {
     showKeysRef.current = showKeys
@@ -415,10 +516,44 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   const [backupOpen, setBackupOpen] = useState(false) // バックアップ一覧の開閉
   const [showRigSize, setShowRigSize] = useState(false) // 照明モード: サイズ(出口幅/広がり/伸び)の折りたたみ。普段は隠す
   const hudTabRef = useRef(hudTab)
+  // タブ連動の選択制限: そのタブのものしか触れない（SFX=炎/火花・DECOR=飾り・他=照明）。
+  // クリック/囲み選択・⌘A・ALL すべてここを通す。ref を読むので古いクロージャからでも常に最新。
+  const tabAllows = (b: Pick<Beam, 'motif'>): boolean => {
+    const t = hudTabRef.current
+    if (t === 'sfx') return b.motif === 'flame' || b.motif === 'sparkler'
+    if (t === 'decor') return !!b.motif && b.motif !== 'flame' && b.motif !== 'sparkler'
+    // CUE(本番)タブは照明＋炎/火花マーク＝SFXシーンの「選んだ組だけ保存」をここで行うため
+    // （SFXタブで選んだ選択がCUEタブへ持ち越せないと、常に全マーク保存に落ちる退行になる）
+    if (t === 'cue') return !b.motif || b.motif === 'flame' || b.motif === 'sparkler'
+    return !b.motif
+  }
+  /** GOボタンに出す「次のステップ」の説明（位置＋メモ＋CUE/SFX番号）。 */
+  const goNextLabel = (): string => {
+    const n = engine.cueSheet[engine.cuePos + 1]
+    if (!n) return 'おわり（RESETで先頭へ）'
+    const parts: string[] = []
+    if (n.memo) parts.push(n.memo)
+    if (n.pattern != null) parts.push('CUE' + (n.pattern + 1))
+    if (n.sfx != null) parts.push('SFX' + (n.sfx + 1))
+    return `${engine.cuePos + 2}/${engine.cueSheet.length}｜${parts.join('・') || '（空の行）'}`
+  }
+  /** そのタブで触れる灯体が全部選ばれているか（ALLボタンの点灯判定）。 */
+  const isTabAllSelected = (): boolean => {
+    const idx = engine.beams.map((b, i) => (tabAllows(b) ? i : -1)).filter((i) => i >= 0)
+    return idx.length > 0 && idx.every((i) => engine.isSelected(i))
+  }
   useEffect(() => {
     hudTabRef.current = hudTab
+    engine.filterSelection(tabAllows) // タブ切替: そのタブで触れないものは選択から外す
     forceRenderRef.current = true // タブ切替で特効マーカー表示が変わる→1回描き直す
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hudTab])
+  // undo復元・削除後の自動選択・公演復元＝プログラムからの選択にも同じタブ制限を効かせる（engine側の門番）
+  useEffect(() => {
+    engine.selGuard = tabAllows
+    return () => { engine.selGuard = null }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine])
   useEffect(() => {
     const api = getApi()
     if (!api?.getStatus) return // getStatus が無くてもデフォルト true のまま＝送る
@@ -433,12 +568,20 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           s.platform === 'darwin'
             ? !!s.syphonAvailable && !!s.hasClients
             : !!(s as { ndiActive?: boolean }).ndiActive
-        setLive({ midiIn: (s.midiIn ?? 0) > 0, out })
+        // 中身が同じなら state を差し替えない＝1秒ごとに画面全体を作り直さない
+        // （実測: この再描画が つまみ操作中の 70ms 級の引っかかりの正体だった）
+        const nextLive = { midiIn: (s.midiIn ?? 0) > 0, out }
+        setLive((cur) =>
+          cur.midiIn === nextLive.midiIn && cur.out === nextLive.out ? cur : nextLive
+        )
       } catch {
         syphonReadyRef.current = true // 取得失敗 → 送る側に倒す
       }
       // DMXランプ：受信ユニバースと灯体のパッチを突き合わせて短い診断文を作る
       try {
+        // ランプの文言が同じなら state を差し替えない（同上）
+        const setLamp = (n: { on: boolean; note: string }): void =>
+          setDmxLamp((cur) => (cur.on === n.on && cur.note === n.note ? cur : n))
         const st = useStore.getState()
         const nowMs = Date.now()
         const recv = Object.keys(st.lastSeenByUniverse)
@@ -450,27 +593,27 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         ).sort((a, b) => a - b)
         const fmt = (a: number[]): string => a.map((u) => `U${u + 1}`).join(',')
         if (st.artnetError) {
-          setDmxLamp({ on: false, note: `受信エラー（${st.artnetError}）— 他のArt-Netアプリを閉じて再起動` })
+          setLamp({ on: false, note: `受信エラー（${st.artnetError}）— 他のArt-Netアプリを閉じて再起動` })
         } else if (recv.length === 0) {
-          setDmxLamp({
+          setLamp({
             on: false,
             note: pat.length ? `DMX受信なし（灯体は ${fmt(pat)} で待機中）` : 'DMX受信なし'
           })
         } else if (pat.length === 0) {
-          setDmxLamp({ on: true, note: `${fmt(recv)} を受信中（灯体は未パッチ）` })
+          setLamp({ on: true, note: `${fmt(recv)} を受信中（灯体は未パッチ）` })
         } else {
           const hit = recv.filter((u) => pat.includes(u))
           const missing = pat.filter((u) => !recv.includes(u))
           if (hit.length === 0) {
-            setDmxLamp({
+            setLamp({
               on: true,
               note: `${fmt(recv)} を受信中ですが灯体は ${fmt(pat)}＝ユニバースが合っていません（0始まり表示の卓では「アプリの番号−1」）`
             })
           } else if (missing.length === 0) {
-            setDmxLamp({ on: true, note: `${fmt(recv)} を受信中 → 灯体 ${fmt(pat)} に接続OK` })
+            setLamp({ on: true, note: `${fmt(recv)} を受信中 → 灯体 ${fmt(pat)} に接続OK` })
           } else {
             // 一部だけ届いている＝「半分暗い」状態。緑OKと言い切らず、欠けている番号を名指しする
-            setDmxLamp({
+            setLamp({
               on: true,
               note: `${fmt(hit)} は接続OK／${fmt(missing)} が未受信（卓の出力設定を確認）`
             })
@@ -485,6 +628,98 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     return () => clearInterval(iv)
   }, [])
 
+  // 画像照明モードの間は main へ知らせる＝GPU出力窓の描き手を imagelight に切替。
+  useEffect(() => {
+    getApi()?.sendImageLightActive?.(true)
+    return () => getApi()?.sendImageLightActive?.(false)
+  }, [])
+
+  // ---- GPU直結出力への状態同期（設計書 2026-07-14-gpu-output-design.md フェーズ2）
+  // gpuActiveRef: 出力窓が生きているか。ilReadyRef: 出力窓が実絵を1枚描いたか。
+  // 両方 true の時だけ「GPUが本番を担う」＝編集側は出力合成を省き CPU publish を止める。
+  // gpuActive だが !ilReady の間（モード切替/公演読込中）は編集側の CPU が本番＝黒落ち防止(finding14)。
+  const gpuActiveRef = useRef(false)
+  const ilReadyRef = useRef(false)
+  const lastSyncFrameAtRef = useRef(0) // 静止中でも2Hzで心拍を送る（見張り番の誤発火防止）
+  // 性能診断（?iltest 起動時のみ有効・console に5秒ごと）
+  const perfRef = useRef({ on: window.location.search.includes('iltest'), n: 0, render: 0, at: 0 })
+  useEffect(() => {
+    const api = getApi()
+    // 公演まるごと同期: 構造署名(showSignature=写真/動画/マスク/ワープ/切り抜き/画像灯体位置)が
+    // 変わった時だけ json を送る（灯体の gauge/色等は毎フレームの LiveFrame が運ぶ）。
+    // メディア本体署名(mediaSignature)が変わった時だけ blob を同梱＝ワープ調整では動画を再送しない。
+    let lastShowSig = ''
+    let lastMediaSig = ''
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let inflight = false
+    let dirty = false // inflight 中に来た要求＝完了後にもう一度送る（取りこぼし防止 finding7/11/16）
+    const sendShow = (force: boolean): void => {
+      if (!gpuActiveRef.current) return
+      if (inflight) {
+        dirty = true // 実行中の serialize が終わったら再送する
+        return
+      }
+      const showSig = engine.showSignature()
+      if (!force && showSig === lastShowSig) return
+      const mediaSig = engine.mediaSignature()
+      const withMedia = force || mediaSig !== lastMediaSig
+      inflight = true
+      dirty = false
+      void engine
+        .serializeShow({ media: withMedia })
+        .then(({ json, media }) => {
+          lastShowSig = showSig
+          lastMediaSig = mediaSig
+          api?.ilSyncShow?.(json, withMedia ? media : null) // media 不変なら null＝受信側キャッシュ再利用
+        })
+        .catch((err) => console.error('[il-sync] show sync failed', err))
+        .finally(() => {
+          inflight = false
+          if (dirty) sendShow(false) // 実行中に変更が入っていた＝最新を送り直す
+        })
+    }
+    // 編集(bump)のたびに署名を見て、変わっていたら1秒後にまとめて送る（ドラッグ連射の合体）
+    const offVer = engine.subscribe(() => {
+      if (!gpuActiveRef.current) return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => sendShow(false), 1000)
+    })
+    const onActive = (v: boolean): void => {
+      gpuActiveRef.current = v
+      engine.setRecordLiveEvents(v) // 単発発射（炎）を出力窓へも流す・OFF→ONで古いイベントは捨てる
+      if (v) {
+        lastShowSig = '' // 窓が(再)起動＝キャッシュ前提が崩れるので次回フル送信
+        lastMediaSig = ''
+        sendShow(true)
+      } else {
+        // GPU が死んだ/互換へ切替＝出力窓の絵が最後のコマで凍る。CPU 経路が即1コマ出せるよう
+        // 強制描画を立てる（静止シーンだと tick が描かず古い絵が残る・finding9）。
+        ilReadyRef.current = false
+        forceRenderRef.current = true
+      }
+    }
+    void api?.gpuOutputStatus?.().then((v) => onActive(!!v))
+    const offGpu = api?.onGpuOutputActive?.(onActive)
+    // 出力窓が実絵を出した/まだ の通知＝GPUが本番を担えるかの判定に使う
+    const offReady = api?.onIlOutputReadyChanged?.((ready) => {
+      ilReadyRef.current = ready
+      if (!ready) forceRenderRef.current = true // 本番がCPUへ戻る＝即1コマ出す
+    })
+    const offResync = api?.onIlResync?.(() => {
+      lastShowSig = '' // 出力窓の再起動＝全量再送
+      lastMediaSig = ''
+      sendShow(true)
+    })
+    return () => {
+      offVer()
+      offGpu?.()
+      offReady?.()
+      offResync?.()
+      if (timer) clearTimeout(timer)
+      engine.setRecordLiveEvents(false)
+    }
+  }, [engine])
+
   // ---- 30fps: 描画 → Syphon publish → 画面へ転写（＋BUILDだけマーカー）
   useEffect(() => {
     const cv = displayRef.current
@@ -493,13 +728,18 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     const api = getApi()
     let raf = 0
     let lastPublish = 0
+    // 送出1回の実測コスト(ms・移動平均)。読み出し(getImageData)は1コマごとに大きな配列を作る＝
+    // 速いマシン/低解像度では60fps、重い環境では自動で間引いてメモリのゴミ生成とGC詰まりを防ぐ。
+    let publishCost = 0
     let lastRender = 0
     let lastDmxRev = -1 // 前回描いた時の卓リビジョン。変わっていたら間引きを外して即描画する。
     // 出力(Syphon/NDI)の重い読み出し(getImageData)は、連続アニメ中は最大このfpsに間引く。
-    const PUBLISH_MIN_MS = 1000 / 30
-    // 描画(renderFrame)もアニメ中は上限fpsに間引く。灯体ごとの重い処理を半分にしてカクつき防止。
-    // 出力は元々30fpsなので体感は変わらず、操作プレビューだけ60→30になるが十分滑らか。
-    const RENDER_MIN_MS = 1000 / 30
+    // 60fps＝ストロボ(ROBE実機20〜25Hz)がLED出力でもカクつかないため（2026-07-13・30fpsだと15Hz上限）。
+    // 読み出しが重いマシンでは rAF が自然に遅くなるだけ（スパイラルしない）。
+    const PUBLISH_MIN_MS = 1000 / 60
+    // 描画(renderFrame)のアニメ中上限。旧30fps間引きはストロボが15Hz上限＋33ms刻みでカクつく
+    // 原因だった（2026-07-08診断）。60fpsに上げ、重いシーンでは rAF が自然に落ちる設計のまま。
+    const RENDER_MIN_MS = 1000 / 60
     // 画面キャンバスへの貼り直し（描画済みの engine.frame を今の view で貼るだけ＝軽い）。
     const blit = (): void => {
       const { scale, ox, oy } = viewRef.current
@@ -553,21 +793,33 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         engine.isAnimating() ||
         rubberRef.current != null ||
         pieceCreateRef.current != null
+      // GPUが「本番を担っている」＝出力窓が生きて実絵も出した時だけ。gpuActiveだが実絵前（bridge）は
+      // まだCPUが本番なので、静止でも描画+CPU publish を続ける（handoff中の黒落ち/停止防止 finding14）。
+      const gpuAuthoritative = gpuActiveRef.current && ilReadyRef.current
+      const bridge = gpuActiveRef.current && !ilReadyRef.current
       // 卓の値が変わったフレームは間引きを外して即描画（DMXパッチ灯体がある時だけ意味を持つ）。
       const dmxRev = useStore.getState().dmxRev
       const dmxDirty = engine.hasDmxPatched() && dmxRev !== lastDmxRev
-      if (!animating && v === lastVRef.current && !forceRenderRef.current) {
+      if (!animating && v === lastVRef.current && !forceRenderRef.current && !bridge) {
         // 表示ズーム/パンだけの変化＝前回の絵を今の view で貼り直すだけ。
         // エンジン再計算も出力(Syphon/NDI)送信もしない＝本番出力へ負荷ゼロ。
         if (displayDirtyRef.current) {
           displayDirtyRef.current = false
           blit()
         }
+        // GPU出力窓には静止中も2Hzで心拍（状態だけ・描き直しなし）＝出力窓側が同じ絵を保ち、
+        // mainの見張り番（paint 6秒監視）が静止シーンで誤発火しない。
+        if (gpuActiveRef.current && now - lastSyncFrameAtRef.current > 500) {
+          lastSyncFrameAtRef.current = now
+          api?.ilSyncFrame?.(engine.getLiveFrame(now))
+        }
         return
       }
       // 連続アニメ中は描画を上限fpsに間引く（単発変更・強制描画・卓の値変化は即描く）。
-      if (animating && !forceRenderRef.current && !dmxDirty && now - lastRender < RENDER_MIN_MS) return
-      lastRender = now
+      // -4ms の余裕＝しきい値が1コマぴったりだと rAF の揺らぎで拍がぶつかりコマ落ち（実測40fps）。
+      // lastRender は「+1コマ」で進める＝平均はきっちり60fps（144Hz等の高リフレッシュでも60を超えない）。
+      if (animating && !forceRenderRef.current && !dmxDirty && now - lastRender < RENDER_MIN_MS - 4) return
+      lastRender = animating ? Math.max(lastRender + RENDER_MIN_MS, now - RENDER_MIN_MS) : now
       lastDmxRev = dmxRev
       forceRenderRef.current = false
       displayDirtyRef.current = false // 本描画に含まれるので消しておく
@@ -587,16 +839,56 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           st.chart.settings.gamma ?? false
         )
       }
+      // このフレームを CPU経路で実際に送出するか（＝重い出力合成が要るか）を、描画の前に決める。
+      // 送出間隔は「60fps上限」かつ「送出コストの2倍以上」＝重い環境（高精細出力・遅いマシン）では
+      // 自動で間引き、描画60fpsと応答性を死守する。速い環境ではそのまま60fps送出。
+      // -4ms は rAF の揺らぎ許容・「+1コマ」進行で平均を正確に保つ（60を超えない）。
+      const pubMin = Math.max(PUBLISH_MIN_MS, publishCost * 2)
+      const willPublish =
+        !gpuAuthoritative &&
+        syphonReadyRef.current &&
+        !!api?.publishFrame &&
+        (!animating || dmxDirty || now - lastPublish >= pubMin - 4)
+      // 出力合成(composeOutput・3840で重い)は「このコマを送る時」だけやる。
+      // GPUが本番を担っている間は willPublish=false＝従来どおり省く。
+      // 互換 or bridge（実絵前）はCPU publish のため合成が要る＝送るコマでは必ず走る（finding14）。
+      // 🔴 Windows の互換経路は送出が自動間引き（3840で実測35ms超＝約12fps）される一方、
+      // 合成は毎コマ走っていた＝5/6が捨てられていた。ここを揃えるとカクつきが減る。
+      engine.skipCompose = !willPublish
+      const perfT0 = performance.now()
       engine.renderFrame(now)
+      const perfT1 = performance.now()
       // まず画面へ（軽い・毎フレーム）。重い出力読み出しは後で間引いて行う。
       blit()
-      // 出力(Syphon/NDI)の重い読み出しは、連続アニメ中は最大30fpsに間引く（単発変更・卓の値変化は即送る）。
-      // フェイルオープン：未接続が確証できる時だけ省く。
-      if (syphonReadyRef.current && api?.publishFrame) {
-        if (!animating || dmxDirty || now - lastPublish >= PUBLISH_MIN_MS) {
-          lastPublish = now
-          api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
+      // GPU直結出力が生きている間: 軽い動的状態(LiveFrame・数KB)を送るだけ＝出力窓が同じ絵を
+      // 描いて main がゼロコピーで Syphon へ。重い readOutputRGBA はもう呼ばない（フェーズ2の眼目）。
+      if (gpuActiveRef.current) {
+        lastSyncFrameAtRef.current = now
+        api?.ilSyncFrame?.(engine.getLiveFrame(now))
+        // 性能診断（?iltest 起動時のみ・5秒ごと）: 描画レートと renderFrame 実コスト
+        if (perfRef.current.on) {
+          const p = perfRef.current
+          p.n++
+          p.render += perfT1 - perfT0
+          if (now - p.at > 5000) {
+            console.log(
+              `[il perf] ${(p.n / ((now - p.at) / 1000)).toFixed(1)}fps render平均${(p.render / p.n).toFixed(1)}ms`
+            )
+            p.n = 0
+            p.render = 0
+            p.at = now
+          }
         }
+      }
+      // CPU経路: GPUが本番を担っていない時（互換 or 出力窓の実絵前 bridge or 死亡）は従来どおり
+      // 読み出して publish＝main 側で本番として採用される（黒落ち防止 finding14）。
+      // フェイルオープン：未接続が確証できる時だけ省く。
+      // 送るコマかどうかは描画前に決めてある（willPublish）＝合成済みのものを読み出して送るだけ。
+      if (willPublish && api?.publishFrame) {
+        lastPublish = animating ? Math.max(lastPublish + pubMin, now - pubMin) : now
+        const t0 = performance.now()
+        api.publishFrame(engine.outW, engine.outH, engine.readOutputRGBA())
+        publishCost = publishCost * 0.8 + (performance.now() - t0) * 0.2
       }
     }
     raf = requestAnimationFrame(tick)
@@ -605,8 +897,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 
   // ---- デモ画像は入れない（空で始める）。素材はのむさんがドロップ／＋から読み込む
   useEffect(() => {
-    if (import.meta.env.DEV)
-      (window as unknown as { __ilEngine?: ImageLightEngine }).__ilEngine = engine
+    // デバッグの覗き窓（debug-bridge/検証）用にエンジンを常時露出（ローカルwindowのみ・無害）。
+    // 退出時は必ず外す＝チャートモードだけで運用中に「最後の公演の全写真dataURL＋各キャンバス」を
+    // グローバル参照でGC不能のままピン留めしない（レビュー指摘 finding17）。
+    ;(window as unknown as { __ilEngine?: ImageLightEngine | null }).__ilEngine = engine
+    return () => {
+      ;(window as unknown as { __ilEngine?: ImageLightEngine | null }).__ilEngine = null
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -666,7 +963,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     const onKey = (e: KeyboardEvent): void => {
       if (e.defaultPrevented) return // 先に処理済み（psheet/入力欄など）のキーを二重処理しない
       const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      // フェーダー(range)等はキーを吸わせない。ただし SELECT は矢印/文字が本来の操作なので入力欄扱いに戻す
+      // （外すと、ドロップダウンにフォーカスが残ったまま矢印を押して灯体が動く＝位置データが変わる）。
+      const isRangeTarget = !!t && t.tagName === 'INPUT' && /^range$/i.test((t as HTMLInputElement).type || 'text')
+      const isTextTarget = !!t && ((t.tagName === 'INPUT' && !/^(range|checkbox|radio|button|submit|reset|color|file)$/i.test((t as HTMLInputElement).type || 'text')) || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       // ⌘+S（Ctrl+S）＝上書き保存／⇧⌘S＝別名保存。どのモードでも効く（ブラウザ既定の保存は止める）。
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault()
@@ -694,28 +994,44 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
-      // シーン LEARN 待機中：Esc で中止だけ受ける（割当は MIDI 入力のみ）
+      // シーン LEARN 待機中：Esc で中止、それ以外のキーでそのシーンに割当
+      // （のむさん 2026-07-28「割り振れるのと割り振れないのがある」＝ここは MIDI 専用だった）
       if (engine.learnScene != null) {
         if (e.key === 'Escape') {
           engine.setLearnScene(null)
           e.preventDefault()
+          return
         }
+        const lc = shortcutCode(e)
+        if (!lc) return // 修飾キー単体は無視して待ち続ける
+        engine.assignSceneKey(engine.learnScene, lc)
+        e.preventDefault()
         return
       }
-      // 特別ストロボ LEARN 待機中：Esc で中止（割当は MIDI ノートのみ）。
+      // 特別ストロボ LEARN 待機中：Esc で中止、それ以外のキーで割当
       if (engine.learnStrobe) {
         if (e.key === 'Escape') {
           engine.setLearnStrobe(false)
           e.preventDefault()
+          return
         }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignStrobeKey(lc)
+        e.preventDefault()
         return
       }
-      // モチーフチェイス LEARN 待機中：Esc で中止（割当は MIDI ノートのみ）。
+      // モチーフチェイス LEARN 待機中：Esc で中止、それ以外のキーで割当
       if (engine.learnMotifChase) {
         if (e.key === 'Escape') {
           engine.setLearnMotifChase(false)
           e.preventDefault()
+          return
         }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignMotifChaseKey(lc)
+        e.preventDefault()
         return
       }
       // FX LEARN 待機中：Esc で中止、それ以外のキーでそのFXに割当
@@ -731,6 +1047,49 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
+      // GO/BACK LEARN 待機中：Esc で中止、それ以外のキーで割当
+      if (engine.learnGo != null) {
+        if (e.key === 'Escape') {
+          engine.setLearnGo(null)
+          e.preventDefault()
+          return
+        }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignGoShortcut(engine.learnGo, lc, null)
+        e.preventDefault()
+        return
+      }
+      // 発射ボタン LEARN 待機中：Esc で中止、それ以外のキーで割当
+      if (engine.learnFire != null) {
+        if (e.key === 'Escape') {
+          engine.setLearnFire(null)
+          e.preventDefault()
+          return
+        }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignFireShortcut(engine.learnFire, lc, null)
+        e.preventDefault()
+        return
+      }
+      // SFXシーン LEARN 待機中：Esc で中止、それ以外のキーで割当
+      if (engine.learnSfxScene != null) {
+        if (e.key === 'Escape') {
+          engine.setLearnSfxScene(null)
+          e.preventDefault()
+          return
+        }
+        const lc = shortcutCode(e)
+        if (!lc) return
+        engine.assignSfxSceneShortcut(engine.learnSfxScene, lc, null)
+        e.preventDefault()
+        return
+      }
+      if (isTextTarget) return
+      // フェーダーにフォーカスがある間の矢印は、そのつまみ自身の微調整に任せる
+      // （灯体の微調整・マスター明るさ・写真送りに横取りさせない）
+      if (isRangeTarget && e.code.startsWith('Arrow')) return
       if (e.key === '?') {
         setShowKeys(true)
         e.preventDefault()
@@ -754,30 +1113,28 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         return
       }
       // BUILD: Delete / Backspace で選択中の灯体を削除（PLAY中・全選択(ALL)時は無効＝誤爆防止）
+      // 全選択の判定はタブ連動（isTabAllSelected）＝⌘A/ALLがタブ絞りになった今も「ALL→Deleteの一括消滅」を防ぐ。
+      // ただし1個だけの選択は「全選択」でも消せる（最後の1個の炎/飾りがどこでも消せなくなる袋小路を防ぐ）
       if (
         (e.code === 'Delete' || e.code === 'Backspace') &&
         uiModeRef.current === 'build' &&
         engine.selected.length > 0 &&
-        !engine.isAllSelected()
+        !(isTabAllSelected() && engine.selected.length > 1)
       ) {
         engine.removeSelected()
         e.preventDefault()
         return
       }
-      // 入力欄で文字編集中は奪わない（名前入力など）。
-      const tgt = e.target as HTMLElement | null
-      const typing =
-        !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)
-      // BUILD: ⌘A / Ctrl+A で灯体を全選択
-      if (!typing && uiModeRef.current === 'build' && (e.metaKey || e.ctrlKey) && e.code === 'KeyA') {
-        engine.selectAll()
+      // 文字入力欄・SELECT は上の isTextTarget で既に return 済み。フェーダーの矢印も上で返している。
+      // BUILD: ⌘A / Ctrl+A で全選択（タブ連動＝そのタブのものだけ。SFXタブなら炎/火花だけ）
+      if (uiModeRef.current === 'build' && (e.metaKey || e.ctrlKey) && e.code === 'KeyA') {
+        engine.selectWhere(tabAllows)
         e.preventDefault()
         return
       }
       // BUILD: 矢印キーで選択中の灯体を微調整（Shiftで大きく＝10px）。
       // PLAY では従来通り ↑↓=マスター明るさ / ←→=写真切替。
       if (
-        !typing &&
         uiModeRef.current === 'build' &&
         (e.code === 'ArrowUp' ||
           e.code === 'ArrowDown' ||
@@ -802,7 +1159,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         ? (Object.keys(engine.fxKey) as FxKey[]).find((k) => engine.fxKey[k] === code)
         : undefined
       if (fk) {
-        engine.fxToggle(fk)
+        if (!e.repeat) engine.fxToggle(fk)
         e.preventDefault()
         return
       }
@@ -813,8 +1170,51 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         e.preventDefault()
         return
       }
+      // 割り当て済みのキーで特効の発射ボタン/SFXシーン
+      const fireK = code
+        ? (Object.keys(engine.fireKeyMap) as FireKey[]).find((k) => engine.fireKeyMap[k] === code)
+        : undefined
+      if (fireK) {
+        // 押しっぱなしのOSリピートで発射がON/OFF高速反転（点滅）するのを防ぐ＝FXと同じ扱い
+        if (!e.repeat) engine.toggleFire(fireK)
+        e.preventDefault()
+        return
+      }
+      const sxi = code ? engine.sfxScenes.findIndex((s) => s && s.key === code) : -1
+      if (sxi >= 0) {
+        engine.applySfxScene(sxi)
+        e.preventDefault()
+        return
+      }
+      // 割り当て済みのキーで GO / BACK（押しっぱなしのリピートは無視＝連打誤進行防止）
+      const goW = code ? (['go', 'back'] as const).find((w) => engine.goKeyMap[w] === code) : undefined
+      if (goW) {
+        if (!e.repeat) (goW === 'go' ? engine.goNext() : engine.goBack())
+        e.preventDefault()
+        return
+      }
+      // 割り当て済みのキーでシーン（写真）を呼ぶ
+      const sci = code ? engine.scenes.findIndex((s) => s.key === code) : -1
+      if (sci >= 0) {
+        engine.selectScene(sci)
+        e.preventDefault()
+        return
+      }
+      // 割り当て済みのキーで特別ストロボ／モチーフチェイスを入切
+      // （OSのキーリピートで高速反転＝ストロボ化しないよう FX と同じく e.repeat を除外）
+      if (code && engine.strobeKey === code) {
+        if (!e.repeat) engine.toggleStrobeOverride()
+        e.preventDefault()
+        return
+      }
+      if (code && engine.motifChaseKey === code) {
+        if (!e.repeat) engine.setMotifChase(!engine.motifChase)
+        e.preventDefault()
+        return
+      }
       if (e.key === 'Escape') engine.panicFade()
-      else if (e.code === 'Digit0' || e.code === 'Numpad0') engine.blackout()
+      // e.repeat 除外＝押しっぱなしのOSリピートで暗転⇄復帰が高速反転（ストロボ化）するのを防ぐ
+      else if ((e.code === 'Digit0' || e.code === 'Numpad0') && !e.repeat) engine.blackoutToggle()
       else if (e.code === 'KeyF') engine.fullOn()
       else if (e.code === 'ArrowUp') {
         engine.setMaster(engine.st.master + 0.05)
@@ -840,14 +1240,11 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     const n = engine.beams.length
     if (n === 0) return
     const cur = engine.selected.length === 1 ? engine.selected[0] : -1
-    const next =
-      e.code === 'ArrowDown'
-        ? cur < 0
-          ? 0
-          : Math.min(n - 1, cur + 1)
-        : cur < 0
-          ? n - 1
-          : Math.max(0, cur - 1)
+    // タブ連動: 表に出ていない（そのタブで触れない）行は飛ばして次へ
+    const dir = e.code === 'ArrowDown' ? 1 : -1
+    let next = cur < 0 ? (dir === 1 ? 0 : n - 1) : cur + dir
+    while (next >= 0 && next < n && !tabAllows(engine.beams[next])) next += dir
+    if (next < 0 || next >= n) return
     engine.selectBeam(next)
     e.preventDefault()
     e.stopPropagation()
@@ -950,6 +1347,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     // 番号下のM/S（クリックでトグル）
     for (let i = beams.length - 1; i >= 0; i--) {
       const b = beams[i]
+      if (!tabAllows(b)) continue // タブ連動: M/Sバッジもそのタブのものしか触れない
       if (Math.abs(p.y - (b.y + 17)) < 11 / zf) {
         if (Math.abs(p.x - (b.x - 11)) < 10 / zf) {
           engine.selectBeam(i)
@@ -984,6 +1382,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     let hit = -1
     for (let i = beams.length - 1; i >= 0; i--) {
       const b = beams[i]
+      if (!tabAllows(b)) continue // タブ連動: そのタブのものしか触れない
       if (engine.isSelected(i) && hitTest(b)) {
         hit = i
         break
@@ -992,6 +1391,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     if (hit < 0)
       for (let i = beams.length - 1; i >= 0; i--) {
         const b = beams[i]
+        if (!tabAllows(b)) continue // タブ連動: そのタブのものしか触れない
         if (hitTest(b)) {
           hit = i
           break
@@ -1130,7 +1530,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const maxY = Math.max(rb.y0, rb.y1)
       if (maxX - minX > 6 || maxY - minY > 6) {
         const ids = engine.beams
-          .map((b, i) => (b.x >= minX && b.x <= maxX && b.y >= minY && b.y <= maxY ? i : -1))
+          .map((b, i) =>
+            tabAllows(b) && b.x >= minX && b.x <= maxX && b.y >= minY && b.y <= maxY ? i : -1
+          ) // タブ連動: 囲み選択もそのタブのものだけ
           .filter((i) => i >= 0)
         engine.setSelection(ids, rb.add)
       } else if (!rb.add) {
@@ -1411,13 +1813,26 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
           <i className={dmxLamp.on ? 'on' : ''} />
           DMX
         </span>
-        <span
+        {/* 抜き差しで効かなくなった時の出口。ランプ自体を押せる＝迷わない（割当は消えない）。 */}
+        <button
           className="il-lamp"
-          title={live.midiIn ? 'MIDI入力：受信中' : 'MIDI入力：なし（卓/ケーブルを確認）'}
+          style={{ background: 'none', border: 'none', padding: '4px 2px', cursor: 'pointer' }}
+          title={
+            midiBusy
+              ? 'つなぎ直しています…'
+              : (live.midiIn ? 'MIDI入力：受信中' : 'MIDI入力：なし（卓/ケーブルを確認）') +
+                '\nクリックでつなぎ直します（機器を抜き差しした後に効かなくなった時／割当は消えません）' +
+                (engine.midiInputs.length ? '\n見えている機器: ' + engine.midiInputs.join(', ') : '')
+          }
+          onClick={() => {
+            if (midiBusy) return
+            setMidiBusy(true)
+            void engine.reconnectMidi().finally(() => setMidiBusy(false))
+          }}
         >
           <i className={live.midiIn ? 'on' : ''} />
-          MIDI
-        </span>
+          {midiBusy ? 'MIDI…' : 'MIDI'}
+        </button>
         <span
           className="il-lamp"
           title={
@@ -1564,14 +1979,19 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   <span
                     className={
                       'il-sc-learn' + (engine.learnScene === i ? ' on' : '') +
-                      (s.midiNote != null && engine.learnScene !== i ? ' assigned' : '')
+                      ((s.midiNote != null || s.key) && engine.learnScene !== i ? ' assigned' : '')
                     }
                     title={
                       engine.learnScene === i
-                        ? 'MIDI 入力待ち中（クリックで中止）'
-                        : s.midiNote != null
-                        ? `MIDI Note ${s.midiNote} 割当済（クリックで再 LEARN）`
-                        : 'LEARN — このシーンを呼ぶ MIDI を覚えさせる'
+                        ? '待機中… キーを押すか MIDI を入力（Escで中止）'
+                        : s.midiNote != null || s.key
+                          ? [
+                              s.key ? `キー ${codeLabel(s.key)}` : '',
+                              s.midiNote != null ? `MIDI Note ${s.midiNote}` : ''
+                            ]
+                              .filter(Boolean)
+                              .join(' ／ ') + ' 割当済（クリックで再 LEARN）'
+                          : 'LEARN — このシーンを呼ぶキー / MIDI を覚えさせる'
                     }
                     onClick={(e) => {
                       e.stopPropagation()
@@ -1647,8 +2067,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             </div>
             <div className="il-livebtns">
               <button
-                className="il-livebtn blackout"
-                onClick={() => engine.blackout()}
+                className={'il-livebtn blackout' + (engine.blackedOut ? ' on' : '')}
+                onClick={() => engine.blackoutToggle()}
                 title="即座に暗転（キー: 0）"
               >
                 暗転
@@ -1733,6 +2153,17 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
             )}
               </>
             )}
+            {!lightingOnly && engine.cueSheet.length > 0 && (
+              <button
+                className="il-livebtn big"
+                style={{ width: '100%', minHeight: 64, marginBottom: 6 }}
+                disabled={engine.cuePos >= engine.cueSheet.length - 1}
+                onClick={() => engine.goNext()}
+                title="次のステップへ（進行表の順に明かりと特効を呼ぶ）"
+              >
+                GO　{goNextLabel()}
+              </button>
+            )}
             {!lightingOnly && (
             <div className="il-playpats">
               {engine.patterns.map((p, i) => (
@@ -1814,9 +2245,15 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     className={'il-mini' + (engine.learnMotifChase ? ' learnon' : '')}
                     style={{ flexShrink: 0, padding: '2px 8px', fontSize: 11 }}
                     onClick={(e) => e.shiftKey ? engine.clearMotifChaseShortcut() : engine.setLearnMotifChase(!engine.learnMotifChase)}
-                    title="MIDIのパッドでチェイスを入/切。押して待機→パッドを叩くと割当（Shift+クリックで解除）"
+                    title="キーかMIDIのパッドでチェイスを入/切。押して待機→キーを押すかパッドを叩くと割当（Shift+クリックで解除）"
                   >
-                    {engine.learnMotifChase ? '待機…' : engine.motifChaseMidi != null ? 'MIDI ' + engine.motifChaseMidi : 'MIDI'}
+                    {engine.learnMotifChase
+                      ? '待機…'
+                      : engine.motifChaseKey
+                        ? codeLabel(engine.motifChaseKey)
+                        : engine.motifChaseMidi != null
+                          ? 'MIDI ' + engine.motifChaseMidi
+                          : 'LEARN'}
                   </button>
                 </div>
                 {engine.beams.map((b, i) => {
@@ -1995,6 +2432,17 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                         <PoseRow label="TILT" min={-180} max={180} value={engine.selectedSfxTilt}
                           fmt={(v) => v + '°'} onChange={(v) => engine.setTilt(v)} engine={engine} learnId="pose.tilt" />
                       )}
+                      <div className="il-lbl" style={{ marginTop: 8 }}>ALIGN（選んだ炎/火花をそろえる）</div>
+                      <div className="il2-act il-alignrow" style={{ flexWrap: 'nowrap', gap: 3 }}>
+                        <button className="il-mini il-icn" title="左ぞろえ" onClick={() => engine.alignLeft()}><AlignIcon kind="left" /></button>
+                        <button className="il-mini il-icn" title="左右中央でそろえる" onClick={() => engine.alignCenterX()}><AlignIcon kind="cx" /></button>
+                        <button className="il-mini il-icn" title="右ぞろえ" onClick={() => engine.alignRight()}><AlignIcon kind="right" /></button>
+                        <button className="il-mini il-icn" title="上ぞろえ" onClick={() => engine.alignTop()}><AlignIcon kind="top" /></button>
+                        <button className="il-mini il-icn" title="上下中央でそろえる" onClick={() => engine.alignMiddle()}><AlignIcon kind="my" /></button>
+                        <button className="il-mini il-icn" title="下ぞろえ" onClick={() => engine.alignBottom()}><AlignIcon kind="bottom" /></button>
+                        <button className="il-mini il-icn" title="横に等間隔（3つ以上選ぶ）" onClick={() => engine.distributeX()}><AlignIcon kind="dx" /></button>
+                        <button className="il-mini il-icn" title="縦に等間隔（3つ以上選ぶ）" onClick={() => engine.distributeY()}><AlignIcon kind="dy" /></button>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -2086,7 +2534,110 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 <div className="il2-eb">
                   <span className="il2-kind">本番</span>
                   <b>CUE</b>
+                  <button
+                    className={'il-mini' + (editLock ? ' learnon' : '')}
+                    style={{ marginLeft: 'auto' }}
+                    title="本番ロック — ONの間は保存・名前変更・削除・LEARNを押せない（シーン呼び出しと発射はそのまま）"
+                    onClick={toggleEditLock}
+                  >
+                    {editLock ? 'LOCKED' : 'LOCK'}
+                  </button>
                 </div>
+                {/* GO進行: 曲順の進行表に沿ってワンボタンで次へ（編集は下の表・実行はGO/BACK） */}
+                <div className="il-lbl">GO進行（曲順に並べて、本番はGOだけ）</div>
+                <div className="il2-act" style={{ gap: 4, alignItems: 'stretch' }}>
+                  <button
+                    className={'il-livebtn big' + (engine.cueSheet.length && engine.cuePos < engine.cueSheet.length - 1 ? '' : ' dim')}
+                    style={{ flex: '1 1 auto', minHeight: 52 }}
+                    disabled={!engine.cueSheet.length || engine.cuePos >= engine.cueSheet.length - 1}
+                    onClick={() => engine.goNext()}
+                    title="次のステップへ（進行表の順に明かりと特効を呼ぶ）"
+                  >
+                    GO　{engine.cueSheet.length ? goNextLabel() : '（進行表が空＝下の＋で作る）'}
+                  </button>
+                  <button className="il-mini" disabled={engine.cuePos <= 0} onClick={() => engine.goBack()} title="1つ戻って適用（押し間違い用）">
+                    BACK
+                  </button>
+                  <button
+                    className={'il-ic' + (engine.learnGo === 'back' ? ' learnon' : (engine.goKeyMap.back || engine.goMidiMap.back != null) ? ' assigned' : '')}
+                    disabled={editLock}
+                    title={engine.learnGo === 'back' ? '割当待ち（キーかMIDIを押す・もう一度で中止）' : 'LEARN — BACKを押すキー/MIDIを覚えさせる'}
+                    onClick={() => engine.setLearnGo(engine.learnGo === 'back' ? null : 'back')}
+                  >
+                    {engine.learnGo === 'back'
+                      ? '◎'
+                      : engine.goKeyMap.back || engine.goMidiMap.back != null
+                        ? [codeLabel(engine.goKeyMap.back ?? null), engine.goMidiMap.back != null ? 'N' + engine.goMidiMap.back : ''].filter(Boolean).join(' ')
+                        : '○'}
+                  </button>
+                  <button className="il-mini" disabled={engine.cuePos < 0} onClick={() => engine.goReset()} title="進行位置を先頭前へ（明かりは変えない）">
+                    RESET
+                  </button>
+                  <button
+                    className={'il-ic' + (engine.learnGo === 'go' ? ' learnon' : (engine.goKeyMap.go || engine.goMidiMap.go != null) ? ' assigned' : '')}
+                    disabled={editLock}
+                    title={engine.learnGo === 'go' ? '割当待ち（キーかMIDIを押す・もう一度で中止）' : 'LEARN — GOを押すキー/MIDIを覚えさせる'}
+                    onClick={() => engine.setLearnGo(engine.learnGo === 'go' ? null : 'go')}
+                  >
+                    {engine.learnGo === 'go'
+                      ? '◎'
+                      : engine.goKeyMap.go || engine.goMidiMap.go != null
+                        ? [codeLabel(engine.goKeyMap.go ?? null), engine.goMidiMap.go != null ? 'N' + engine.goMidiMap.go : ''].filter(Boolean).join(' ')
+                        : '○'}
+                  </button>
+                </div>
+                <div className="il-buildpats" style={{ marginTop: 4 }}>
+                  {engine.cueSheet.map((st, i) => (
+                    <div key={i} className={'il-patrow' + (engine.cuePos === i ? ' on' : '')}>
+                      <span className="pn">{i + 1}</span>
+                      <select
+                        disabled={editLock}
+                        value={st.pattern ?? -1}
+                        onChange={(e) => engine.updateCueStep(i, { pattern: +e.target.value < 0 ? null : +e.target.value })}
+                        title="このステップで呼ぶ明かり（シーン）"
+                        style={{ maxWidth: 88 }}
+                      >
+                        <option value={-1}>明かり—</option>
+                        {engine.patterns.map((p, pi) => (
+                          <option key={pi} value={pi}>{'CUE' + (pi + 1) + (p?.name ? ' ' + p.name : '')}</option>
+                        ))}
+                      </select>
+                      <select
+                        disabled={editLock}
+                        value={st.sfx ?? -1}
+                        onChange={(e) => engine.updateCueStep(i, { sfx: +e.target.value < 0 ? null : +e.target.value })}
+                        title="このステップで撃つ特効シーン"
+                        style={{ maxWidth: 78 }}
+                      >
+                        <option value={-1}>特効—</option>
+                        {engine.sfxScenes.map((s, si) => (
+                          <option key={si} value={si}>{'SFX' + (si + 1) + (s?.name ? ' ' + s.name : '')}</option>
+                        ))}
+                      </select>
+                      <input
+                        key={i + ':' + st.memo}
+                        disabled={editLock}
+                        defaultValue={st.memo}
+                        placeholder="メモ（曲名など）"
+                        style={{ flex: 1, minWidth: 40 }}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        onBlur={(e) => { if (e.target.value !== st.memo) engine.updateCueStep(i, { memo: e.target.value }) }}
+                      />
+                      <button className="il-ic" disabled={editLock || i === 0} title="上へ" onClick={() => engine.moveCueStep(i, -1)}>↑</button>
+                      <button className="il-ic" disabled={editLock || i === engine.cueSheet.length - 1} title="下へ" onClick={() => engine.moveCueStep(i, 1)}>↓</button>
+                      <button className="il-ic" disabled={editLock} title="この行を消す（⌘Zで戻せる）" onClick={() => engine.removeCueStep(i)}>×</button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="il-mini"
+                  disabled={editLock || engine.cueSheet.length >= 200}
+                  title={engine.cueSheet.length >= 200 ? '進行表は最大200行' : ''}
+                  style={{ marginTop: 4 }}
+                  onClick={() => engine.addCueStep()}
+                >
+                  ＋ 行を追加
+                </button>
                 <div className="il-playpats">
                   {engine.patterns.map((p, i) => (
                     <button
@@ -2155,12 +2706,175 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       className={'il-mini' + (engine.learnMotifChase ? ' learnon' : '')}
                       style={{ flexShrink: 0, padding: '2px 8px', fontSize: 11 }}
                       onClick={(e) => e.shiftKey ? engine.clearMotifChaseShortcut() : engine.setLearnMotifChase(!engine.learnMotifChase)}
-                      title="MIDIのパッドでチェイスを入/切。押して待機→パッドを叩くと割当（Shift+クリックで解除）"
+                      title="キーかMIDIのパッドでチェイスを入/切。押して待機→キーを押すかパッドを叩くと割当（Shift+クリックで解除）"
                     >
-                      {engine.learnMotifChase ? '待機…' : engine.motifChaseMidi != null ? 'MIDI ' + engine.motifChaseMidi : 'MIDI'}
+                      {engine.learnMotifChase
+                      ? '待機…'
+                      : engine.motifChaseKey
+                        ? codeLabel(engine.motifChaseKey)
+                        : engine.motifChaseMidi != null
+                          ? 'MIDI ' + engine.motifChaseMidi
+                          : 'LEARN'}
                     </button>
                   </div>
                 )}
+              </div>
+              <div className="il2-sec">
+                <div className="il2-eb">
+                  <span className="il2-kind">特効</span>
+                  <b>SFX FIRE</b>
+                </div>
+                {/* 発射ボタン（キッカケで押す大ボタン）。照明のCUEとは完全に独立 */}
+                <div className="il-firegrid">
+                  {(['flame', 'sparkler', 'smoke', 'rain'] as const).map((k) => {
+                    const assigned = engine.fireKeyMap[k] || engine.fireMidiMap[k] != null
+                    return (
+                      <div key={k} className="il-firecell">
+                        <button
+                          className={'il-firebtn' + (engine.fireOn(k) ? ' on' : '')}
+                          onClick={() => engine.toggleFire(k)}
+                          title={
+                            k === 'flame' ? '炎の発射ゲート。OFFの間は炎が一切出ない（誤発防止）'
+                            : k === 'sparkler' ? '火花の発射ゲート。OFFの間は火花が一切出ない（誤発防止）'
+                            : k === 'smoke' ? 'ロースモークの入/切（SFXタブのONと同じ）'
+                            : '雨/雪の入/切（SFXタブのONと同じ）'
+                          }
+                        >
+                          {k === 'flame' ? 'FLAME' : k === 'sparkler' ? 'SPARKLER' : k === 'smoke' ? 'SMOKE' : 'RAIN'}
+                        </button>
+                        <button
+                          className={'il-ic' + (engine.learnFire === k ? ' learnon' : assigned ? ' assigned' : '')}
+                          title={engine.learnFire === k ? '割当待ち（キーかMIDIを押す・もう一度で中止）' : 'LEARN — このボタンを押すキー/MIDIを覚えさせる（右クリックで解除）'}
+                          onClick={() => engine.setLearnFire(engine.learnFire === k ? null : k)}
+                          onContextMenu={(e) => { e.preventDefault(); engine.clearFireShortcut(k) }}
+                        >
+                          {engine.learnFire === k
+                            ? '◎'
+                            : assigned
+                              ? [codeLabel(engine.fireKeyMap[k] ?? null), engine.fireMidiMap[k] != null ? 'N' + engine.fireMidiMap[k] : ''].filter(Boolean).join(' ')
+                              : '○'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+                {/* SFXシーン＝どの炎/火花マークが撃つかの組み合わせ。呼出はクリック/キー/MIDI */}
+                <div className="il-lbl" style={{ marginTop: 10 }}>炎・火花のシーン</div>
+                {(() => {
+                  // 保存されるのは「選択中の炎/火花」（無選択なら置いてある全部）＝saveSfxSceneと同じ数え方を表示
+                  const selMarks = engine.selectedBeams.filter(
+                    (b) => b.motif === 'flame' || b.motif === 'sparkler'
+                  ).length
+                  const allMarks = engine.beams.filter(
+                    (b) => b.motif === 'flame' || b.motif === 'sparkler'
+                  ).length
+                  const what = selMarks > 0 ? `選択中の${selMarks}発` : `置いてある全部の${allMarks}発`
+                  return (
+                    <button
+                      className={'il-mini' + (sfxArm ? ' learnon' : '')}
+                      style={{ width: '100%', textAlign: 'center', marginBottom: 6 }}
+                      disabled={editLock}
+                      onClick={() => setSfxArm(!sfxArm)}
+                      title="撃ちたい炎/火花マークをキャンバスで選んでから押し、保存する番号をクリック（何も選んでいなければ置いてある全部を記憶）"
+                    >
+                      {sfxArm
+                        ? `↓ 保存する番号をクリック — ${what}（取消はもう一度）`
+                        : `● 炎/火花をシーンへ保存（今なら${what}）`}
+                    </button>
+                  )
+                })()}
+                <div className="il-buildpats">
+                  {engine.sfxScenes.map((s, i) => (
+                    <div
+                      key={i}
+                      className={'il-patrow il-sfxrow' + (sfxArm ? ' armed' : '') + (engine.activeSfxScene === i ? ' on' : '')}
+                      onClick={() => {
+                        if (sfxArm) {
+                          engine.saveSfxScene(i)
+                          setSfxArm(false)
+                          return
+                        }
+                        if (s) engine.applySfxScene(i)
+                      }}
+                    >
+                      <span className="pn">{i + 1}</span>
+                      {/* 保存待ち(sfxArm)中は名前の上のクリックも行に通す＝一番広い場所で保存できる */}
+                      <span className="pname" onClick={(e) => { if (renamingSfx?.i === i || !sfxArm) e.stopPropagation() }}>
+                        {renamingSfx?.i === i ? (
+                          <input
+                            autoFocus
+                            value={renamingSfx.value}
+                            onChange={(e) => setRenamingSfx({ i, value: e.target.value })}
+                            onKeyDown={(e) => {
+                              e.stopPropagation()
+                              if (e.key === 'Enter') {
+                                engine.renameSfxScene(i, renamingSfx.value)
+                                setRenamingSfx(null)
+                              } else if (e.key === 'Escape') setRenamingSfx(null)
+                            }}
+                            onBlur={() => {
+                              engine.renameSfxScene(i, renamingSfx.value)
+                              setRenamingSfx(null)
+                            }}
+                          />
+                        ) : (
+                          <span
+                            style={{ cursor: s ? 'text' : 'default' }}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation()
+                              if (s && !editLock) setRenamingSfx({ i, value: s.name })
+                            }}
+                          >
+                            {s ? s.name + '（' + s.ids.length + '発）' : '（空き）'}
+                          </span>
+                        )}
+                      </span>
+                      <button
+                        className={
+                          'il-ic' +
+                          (engine.learnSfxScene === i ? ' learnon' : '') +
+                          (s && (s.key || s.midi != null) && engine.learnSfxScene !== i ? ' assigned' : '')
+                        }
+                        title={
+                          engine.learnSfxScene === i
+                            ? '割当待ち（キーかMIDIを押す・もう一度で中止）'
+                            : 'LEARN — このシーンを呼ぶキー/MIDIを覚えさせる'
+                        }
+                        disabled={editLock}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!s) return
+                          engine.setLearnSfxScene(engine.learnSfxScene === i ? null : i)
+                        }}
+                      >
+                        {engine.learnSfxScene === i
+                          ? '◎'
+                          : s && (s.key || s.midi != null)
+                            ? [codeLabel(s.key), s.midi != null ? 'N' + s.midi : ''].filter(Boolean).join(' ')
+                            : '○'}
+                      </button>
+                      <button
+                        className="il-ic"
+                        title="このシーンを消す"
+                        disabled={editLock}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          engine.removeSfxScene(i)
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="il-mini"
+                  style={{ width: '100%', textAlign: 'center', marginTop: 6 }}
+                  onClick={() => engine.clearSfxArm()}
+                  title="シーンの絞り込みを外して、置いてある炎/火花マーク全部が撃てる状態に戻す"
+                >
+                  ALL（全部撃てる状態に戻す）
+                </button>
               </div>
               <div className="il2-sec">
                 <div className="il2-eb">
@@ -2413,6 +3127,22 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                       />
                       <div className="il-val big">{ref.motifDiam ?? 200}px</div>
                     </div>
+                    {ref.motif === 'stars' && (
+                      <>
+                        <div className="il-lbl" style={{ marginTop: 8 }}>星の粒の大きさ（STAR DOT）</div>
+                        <div className="il-frow">
+                          <input
+                            type="range"
+                            min={0.5}
+                            max={30}
+                            step={0.5}
+                            value={ref.motifStarSize ?? 3}
+                            onChange={(e) => engine.setMotifStarSize(+e.target.value)}
+                          />
+                          <div className="il-val big">{ref.motifStarSize ?? 3}</div>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
                 <button
@@ -2707,6 +3437,30 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                         ))}
                       </div>
                     </div>
+                    <div className="il2-segrow">
+                      <span className="il2-seglbl">OUTPUT</span>
+                      <div className="il2-seg">
+                        {(
+                          [
+                            { label: '高速(GPU)', m: 'fast' },
+                            { label: '互換', m: 'compat' }
+                          ] as const
+                        ).map(({ label, m }) => (
+                          <button
+                            key={m}
+                            className={'il2-segbtn' + (outMethod === m ? ' on' : '')}
+                            onClick={() => {
+                              setOutMethod(m)
+                              localStorage.setItem('gpu-output-method', m)
+                              getApi()?.setGpuOutputMethod?.(m)
+                            }}
+                            title="出力(Syphon/NDI)の方式。高速(GPU)=コピーなしの新方式・高精細でも60コマ（既定）／互換=従来方式（出力の見た目がおかしい時の避難先）"
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2800,8 +3554,8 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 >
                   <div className="il-pshd">
                     <button
-                      className={'il-fxall' + (engine.isAllSelected() ? ' on' : '')}
-                      onClick={() => engine.selectAll()}
+                      className={'il-fxall' + (isTabAllSelected() ? ' on' : '')}
+                      onClick={() => engine.selectWhere(tabAllows)}
                       title="全灯まとめて"
                     >
                       <span className="nm">ALL</span>
@@ -2809,6 +3563,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <span className="il-pscol"><span>FID</span><span>Addr</span><span>Mode</span></span>
                   </div>
                   {engine.beams.map((b, i) => {
+                    if (!tabAllows(b)) return null // タブ連動: パッチ表もそのタブのものだけ（番号は元のまま飛ぶ）
                     const psSel = engine.isSelected(i)
                     const psClash = dmxClash.includes(i + 1)
                     return (
@@ -2942,13 +3697,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               ) : (
               <div className="il-strip">
                 <button
-                  className={'il-fxall' + (engine.isAllSelected() ? ' on' : '')}
-                  onClick={() => engine.selectAll()}
+                  className={'il-fxall' + (isTabAllSelected() ? ' on' : '')}
+                  onClick={() => engine.selectWhere(tabAllows)}
                   title="全灯まとめて"
                 >
                   <span className="nm">ALL</span>
                 </button>
-                {engine.beams.map((b, i) => (
+                {engine.beams.map((b, i) => tabAllows(b) && (
                   <button
                     key={i}
                     className={
@@ -3043,9 +3798,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 className="il-mini"
                 style={{ width: '100%', textAlign: 'center' }}
                 onClick={() => engine.renumberByPosition()}
-                title="灯体の番号を配置で振り直す：左下を1番に、下の段を左→右、終わったら一つ上の段もまた左→右へ。各シーン/パターンの保存もズレないよう一緒に並べ替えます（⌘Zで戻せる）。"
+                title="灯体の番号を配置で振り直す：左下を1番に、各段は左から右へ、下の段から上の段へ。各シーン/パターンの保存もズレないよう一緒に並べ替えます（⌘Zで戻せる）。"
               >
-                番号を振り直す（左下 → 右へ、下の段から）
+                番号を振り直す（左下 → 右 → 上の段）
               </button>
               {(lightingOnly || dmxPatched) && (
                 <>
@@ -3058,6 +3813,47 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   >
                     全灯体に一括で割り当てる（DMX）
                   </button>
+                  <div className="il-lbl" style={{ marginTop: 8 }}>全灯体のモードをまとめて</div>
+                  <div className="il2-act" style={{ gap: 4 }}>
+                    <button
+                      className="il-mini"
+                      style={{ flex: 1 }}
+                      onClick={() => engine.setAllPatchedMode('beam8')}
+                      title="置いてある全灯体の DMX モードを beam8（8ch: P/T/Dim/Sh/RGB/Zoom）にします。この後で上の「一括で割り当てる」を押すと、アドレスが 8ch ずつ（1・9・17…）に並び直ります。⌘Z で戻せる。"
+                    >
+                      全部 beam8
+                    </button>
+                    <button
+                      className="il-mini"
+                      style={{ flex: 1 }}
+                      onClick={() => engine.setAllPatchedMode('beam9')}
+                      title="置いてある全灯体の DMX モードを beam9（9ch: 白入り）にします。この後で上の「一括で割り当てる」を押すと、アドレスが 9ch ずつ（1・10・19…）に並び直ります。⌘Z で戻せる。"
+                    >
+                      全部 beam9
+                    </button>
+                  </div>
+                  <div className="il-lbl" style={{ marginTop: 8 }}>全灯体のユニバースをまとめて</div>
+                  <div className="il2-act" style={{ gap: 4 }}>
+                    <input
+                      className="il2-dmxnum"
+                      type="number"
+                      min={1}
+                      max={32768}
+                      value={batchUniv}
+                      title="1始まりで表示（卓が0始まり表示の機種では「ここの数字−1」を卓に設定）"
+                      onChange={(e) =>
+                        setBatchUniv(Math.max(1, Math.min(32768, Math.floor(+e.target.value) || 1)))
+                      }
+                    />
+                    <button
+                      className="il-mini"
+                      style={{ flex: 1 }}
+                      onClick={() => engine.setAllPatchedUniverse(batchUniv - 1)}
+                      title="置いてある全灯体を、このユニバースにまとめます（アドレス＝ADDR はそのまま）。⌘Z で戻せる。"
+                    >
+                      全部このユニバースに
+                    </button>
+                  </div>
                   {dmxClash.length > 0 && (
                     <div className="il2-dmxwarn">
                       アドレス重複：灯体 {dmxClash.join(', ')} が同じアドレスです（卓で取り合いになります）。上のボタンか各灯体の AUTO で直せます。
@@ -3089,6 +3885,22 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   />
                   <div className="il-val big">{ref.motifDiam ?? 200}px</div>
                 </div>
+                {ref.motif === 'stars' && (
+                  <>
+                    <div className="il-lbl">星の粒の大きさ（STAR DOT）</div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={30}
+                        step={0.5}
+                        value={ref.motifStarSize ?? 3}
+                        onChange={(e) => engine.setMotifStarSize(+e.target.value)}
+                      />
+                      <div className="il-val big">{ref.motifStarSize ?? 3}</div>
+                    </div>
+                  </>
+                )}
                 {ref.motif === 'marquee' && (
                   <>
                     <div className="il-lbl">
@@ -3191,6 +4003,55 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                         onChange={(e) => engine.setFrontAmp(+e.target.value)}
                       />
                       <div className="il-val big">{Math.round(ref.frontAmp ?? 320)}px</div>
+                    </div>
+                  </>
+                )}
+                {/* ゴボは「動き」と無関係に描かれるので、UIも動きの条件の外に置く（止でも設定/解除できる） */}
+                <div className="il-lbl">ゴボ（光の柄）</div>
+                <div className="il2-act" style={{ flexWrap: 'wrap', gap: 4 }}>
+                  <button
+                    className={'il-mini' + (!ref.gobo ? ' learnon' : '')}
+                    onClick={() => engine.setGobo(null)}
+                    title="柄なし（今までどおりの丸い光）"
+                  >
+                    なし
+                  </button>
+                  {GOBO_KINDS.map((gk) => (
+                    <button
+                      key={gk.kind}
+                      className={'il-mini' + (ref.gobo === gk.kind ? ' learnon' : '')}
+                      onClick={() => engine.setGobo(gk.kind)}
+                      title={gk.title}
+                    >
+                      {gk.label}
+                    </button>
+                  ))}
+                </div>
+                {ref.gobo && (
+                  <>
+                    <div className="il-lbl">柄のくっきり度</div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={ref.goboSharp ?? 0.65}
+                        onChange={(e) => engine.setGoboSharp(+e.target.value)}
+                      />
+                      <div className="il-val big">{(ref.goboSharp ?? 0.65).toFixed(2)}</div>
+                    </div>
+                    <div className="il-lbl">柄の回転（速さ）</div>
+                    <div className="il-frow">
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={ref.goboSpd ?? 0.3}
+                        onChange={(e) => engine.setGoboSpd(+e.target.value)}
+                      />
+                      <div className="il-val big">{(ref.goboSpd ?? 0.3).toFixed(2)}</div>
                     </div>
                   </>
                 )}
@@ -3386,6 +4247,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                 borderColor: engine.armedSave ? 'var(--il-amber)' : '',
                 color: engine.armedSave ? 'var(--il-amber)' : ''
               }}
+              disabled={editLock}
               onClick={() => engine.toggleArmSave()}
             >
               {engine.armedSave
@@ -3432,7 +4294,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                         style={{ cursor: p ? 'text' : 'default' }}
                         onDoubleClick={(e) => {
                           e.stopPropagation()
-                          if (p) setRenaming({ i, value: p.name })
+                          if (p && !editLock) setRenaming({ i, value: p.name })
                         }}
                       >
                         {p ? p.name : '（空き）'}
@@ -3461,6 +4323,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                           ? '割当済み（クリックで再割当）'
                           : 'LEARN — このシーンを呼ぶキー/MIDIを覚えさせる'
                     }
+                    disabled={editLock}
                     onClick={(e) => {
                       e.stopPropagation()
                       if (!p) return
@@ -3477,6 +4340,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                   </button>
                   <button
                     className="il-ic"
+                    disabled={editLock}
                     onClick={(e) => {
                       e.stopPropagation()
                       if (p) setRenaming({ i, value: p.name })
@@ -3488,6 +4352,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
                     <button
                       className="il-ic del"
                       title="この明かりを消す（⌘Zで戻せる）"
+                      disabled={editLock}
                       onClick={(e) => {
                         e.stopPropagation()
                         if (window.confirm(`番号 ${i + 1} の明かりを消しますか？（⌘Zで戻せます）`))
@@ -3501,12 +4366,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               ))}
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-              <button className="il-mini" onClick={() => engine.addSceneSlot()}>
+              <button className="il-mini" disabled={editLock} onClick={() => engine.addSceneSlot()}>
                 ＋ シーンを追加
               </button>
               {engine.patterns.length > 9 &&
                 engine.patterns[engine.patterns.length - 1] === null && (
-                  <button className="il-mini" onClick={() => engine.removeLastSceneSlot()}>
+                  <button className="il-mini" disabled={editLock} onClick={() => engine.removeLastSceneSlot()}>
                     − 空きを減らす
                   </button>
                 )}
@@ -3533,9 +4398,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
               )}
               <div className="il-livebtns">
                 <button
-                  className="il-livebtn blackout"
-                  onClick={() => engine.blackout()}
-                  title="即座に暗転（キー: 0）"
+                  className={'il-livebtn blackout' + (engine.blackedOut ? ' on' : '')}
+                  onClick={() => engine.blackoutToggle()}
+                  title="即座に暗転・もう一度で直前の明かりへ復帰（キー: 0）"
                 >
                   暗転
                 </button>
@@ -3589,7 +4454,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
 function StrobeSpecial({ engine }: { engine: ImageLightEngine }): React.JSX.Element {
   const on = engine.strobeOverride
   const learning = engine.learnStrobe
-  const assigned = engine.strobeMidi != null
+  const assigned = engine.strobeMidi != null || !!engine.strobeKey
   return (
     <>
       <div className="il-strobebox">
@@ -3604,10 +4469,15 @@ function StrobeSpecial({ engine }: { engine: ImageLightEngine }): React.JSX.Elem
           className={'il-fx-learn' + (learning ? ' on' : assigned ? ' assigned' : '')}
           title={
             learning
-              ? '待機中… MIDIノートを入力（Escで中止）'
+              ? '待機中… キーを押すか MIDI を入力（Escで中止）'
               : assigned
-                ? 'MIDI割当済み（クリックで再割当・右クリックで解除）'
-                : 'MIDIを割当'
+                ? [
+                    engine.strobeKey ? `キー ${codeLabel(engine.strobeKey)}` : '',
+                    engine.strobeMidi != null ? `MIDI ${engine.strobeMidi}` : ''
+                  ]
+                    .filter(Boolean)
+                    .join(' ／ ') + ' 割当済（クリックで再割当・右クリックで解除）'
+                : 'キー / MIDI を割当'
           }
           onClick={(e) => {
             e.stopPropagation()
@@ -3908,8 +4778,10 @@ export const SFX_PARAMS: Record<'flame' | 'sparkler' | 'rain' | 'smoke', { core:
       sp('sfx.smoke.top', 'HEIGHT', 0.03, 0.6, 0.01, (e) => e.getLowSmokeParams().top, (e, v) => e.setLowSmokeParams({ top: v }))
     ],
     more: [
-      sp('sfx.smoke.billow', 'BILLOW', 0, 0.4, 0.01, (e) => e.getLowSmokeParams().billow, (e, v) => e.setLowSmokeParams({ billow: v })),
-      sp('sfx.smoke.speed', 'DRIFT', 0.2, 2.5, 0.05, (e) => e.getLowSmokeParams().speed, (e, v) => e.setLowSmokeParams({ speed: v }))
+      sp('sfx.smoke.billow', 'BILLOW', 0, 0.6, 0.01, (e) => e.getLowSmokeParams().billow, (e, v) => e.setLowSmokeParams({ billow: v })),
+      sp('sfx.smoke.speed', 'DRIFT', 0.2, 2.5, 0.05, (e) => e.getLowSmokeParams().speed, (e, v) => e.setLowSmokeParams({ speed: v })),
+      sp('sfx.smoke.spill', 'SPILL', 0, 1, 0.02, (e) => e.getLowSmokeParams().spill ?? 0.55, (e, v) => e.setLowSmokeParams({ spill: v })),
+      sp('sfx.smoke.tear', 'TEAR', 0, 1, 0.02, (e) => e.getLowSmokeParams().tear ?? 0.35, (e, v) => e.setLowSmokeParams({ tear: v }))
     ]
   }
 }
@@ -4375,6 +5247,13 @@ const IL_CSS = `
 .il-buildpats{display:flex;flex-direction:column;gap:6px;}
 .il-patrow{display:flex;align-items:center;gap:6px;background:var(--il-inset);border:0.5px solid var(--il-line);border-radius:6px;padding:8px 9px;cursor:pointer;}
 .il-patrow.armed{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,.3) inset;}
+.il-firegrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;}
+.il-firecell{display:flex;gap:6px;align-items:stretch;}
+.il-firebtn{flex:1;padding:16px 4px;font-size:12px;letter-spacing:.14em;color:#fff;background:rgba(255,255,255,.06);border:0.5px solid rgba(255,255,255,.5);border-radius:6px;cursor:pointer;font-family:'Bebas Neue',sans-serif;}
+.il-firebtn:hover{background:rgba(255,255,255,.12);}
+.il-firebtn.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,.10);box-shadow:0 0 0 1px rgba(251,191,36,.35) inset;}
+.il-sfxrow{min-height:38px;}
+.il-sfxrow.on{border-color:var(--il-amber);box-shadow:0 0 0 1px rgba(251,191,36,.3) inset;}
 .il-patrow .pn{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--il-dim);width:12px;}
 .il-patrow .pname{flex:1;font-size:11.5px;}
 .il-patrow .pname input{width:100%;background:#15130f;border:0.5px solid var(--il-line);color:var(--il-txt);font-size:11.5px;border-radius:4px;padding:2px 4px;font-family:inherit;}
@@ -4389,6 +5268,7 @@ const IL_CSS = `
 .il-mini{background:var(--il-inset);border:0.5px solid var(--il-line);color:var(--il-dim);padding:6px 11px;border-radius:5px;cursor:pointer;font-size:10.5px;font-family:inherit;}
 .il-mini:hover{border-color:var(--il-dim);color:var(--il-txt);}
 .il-mini:disabled{opacity:0.4;cursor:default;}
+.il-ic:disabled{opacity:0.35;cursor:default;}
 .il-mini.learnon{border-color:var(--il-cyan);color:var(--il-cyan);}
 /* 整列の絵アイコンボタン（揃った形を描画）。横一列に均等配置＝はみ出さず1行に収める。 */
 .il-alignrow{align-items:stretch;}
@@ -4476,6 +5356,7 @@ const IL_CSS = `
 .il-livebtn{background:rgba(255,255,255,0.02);border:0.5px solid var(--il-line);color:var(--il-txt);border-radius:7px;padding:13px 4px;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:0.06em;min-height:46px;}
 .il-livebtn:hover{border-color:var(--il-dim);}
 .il-livebtn.blackout:hover{border-color:var(--il-amber);color:var(--il-amber);}
+.il-livebtn.blackout.on{border-color:var(--il-amber);color:var(--il-amber);background:rgba(251,191,36,.10);box-shadow:0 0 0 1px rgba(251,191,36,.35) inset;}
 .il-livebtn.panic:hover{border-color:var(--il-red);color:var(--il-red);}
 .il-livebtn.full:hover{border-color:var(--il-dim);color:var(--il-dim);}
 .il-livebtn.undo:hover{border-color:var(--il-dim);color:var(--il-dim);}

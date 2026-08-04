@@ -113,6 +113,13 @@ interface AppState {
    *  the chart is show artwork with the decoration areas punched out (invert OFF). */
   applyChartImage: (dataUrl: string, w: number, h: number) => void
   setChart: (c: Chart) => void
+  /** 今どのファイルを触っているか（上のバーの表示用・null=まだファイルにしていない）。
+   *  EditorMenus のローカル state だと StartScreen 経由/ダブルクリック/モード往復で
+   *  「未保存」と嘘をつくので store に置く（main が持つ上書き先と歩調を合わせる）。 */
+  chartFileName: string | null
+  /** 最後に保存した時の chart。これと今の chart が違えば未保存（オブジェクト同一性で見る）。 */
+  savedChart: Chart | null
+  markChartFile: (name: string | null, saved: Chart | null) => void
   setMode: (m: Mode) => void
   setTool: (t: Tool) => void
   select: (id: string | null) => void
@@ -139,6 +146,13 @@ interface AppState {
   alignShapes: (edge: AlignEdge) => void
   /** 選択中の図形を等間隔に散らす（3個以上で有効・両端は固定して間を均す）。 */
   distributeShapes: (axis: 'h' | 'v') => void
+  /** 選んだ図形を、選択全体の中心で左右(h)／上下(v)に反転する。コピーは作らずその場で反転。
+   *  複数選ぶと位置関係を保ったまま1つの固まりとして反転する（1手で ⌘Z）。 */
+  mirrorShapes: (axis: 'h' | 'v') => void
+  /** 選択中の電飾に、左上から順（上の行→下の行）で番地を連番でふり直す。
+   *  すでに番地がある物はその一番小さい番地から、無ければ 1.001 から。1手で ⌘Z。
+   *  連番パッチ(stepPatch)は「これから描く物」用なので、既に置いた物にはこれを使う。 */
+  renumberSelection: () => void
   updateShape: (id: string, patch: Partial<Shape>) => void
   addShape: (init: { type: Shape['type']; points: Shape['points'] } & Partial<Shape>) => string
   removeShape: (id: string) => void
@@ -221,6 +235,8 @@ interface AppState {
   setGlowAmount: (px: number) => void
   /** 電飾のにじみ(グロー)の全体既定 px（0=なし）。図形側 glowPx が優先。 */
   setLedGlowPx: (px: number) => void
+  /** 送出(Syphon/NDI)だけを整数分の1に縮める（1=原寸 / 2 / 3）。チャート本体は原寸のまま。 */
+  setOutDiv: (div: number) => void
   /** 部品の連続配置モード：パレットのカードをクリック→キャンバスをクリック連打で
    *  置き続ける（Escで終了）。null=通常。ドラッグ&ドロップは従来どおり並存。 */
   placingPart: string | null
@@ -408,7 +424,13 @@ export const useStore = create<AppState>()((set, get) => ({
       }
     }))
   },
-  setChart: (chart) => set({ chart, selectedId: null, selectedIds: [] }),
+  // 履歴も切る＝新規/別ファイルを開いた直後の ⌘Z で「前の作品」が戻ってきて、
+  // そのまま保存すると開いたファイルを別作品で上書きしてしまう事故を防ぐ。
+  setChart: (chart) =>
+    set({ chart, selectedId: null, selectedIds: [], history: [], future: [], histTag: null }),
+  chartFileName: null,
+  savedChart: null,
+  markChartFile: (chartFileName, savedChart) => set({ chartFileName, savedChart }),
   setMode: (mode) => set({ mode }),
   setTool: (tool) => set({ tool }),
   select: (selectedId) => set({ selectedId, selectedIds: selectedId ? [selectedId] : [] }),
@@ -555,6 +577,94 @@ export const useStore = create<AppState>()((set, get) => ({
         shapes: state.chart.shapes.map((s) => {
           const m = d.get(s.id)
           return m ? { ...s, points: s.points.map((p) => ({ x: p.x + m.x, y: p.y + m.y })) } : s
+        })
+      }
+    }))
+  },
+
+  renumberSelection: () => {
+    const st = get()
+    const ids = st.selectedIds
+    const sel = st.chart.shapes.filter((sh) => ids.includes(sh.id) && !sh.locked)
+    if (sel.length < 2) return
+    // 左上から順＝チャートを読む順（行が変わったら次の行へ）。行の判定は高さの半分。
+    const withBounds = sel.map((sh) => ({ sh, b: shapeArrayBounds(sh) }))
+    const rowH = Math.max(8, Math.min(...withBounds.map((x) => Math.max(8, x.b.h))))
+    const ordered = withBounds
+      .slice()
+      .sort((p, q) => {
+        const pr = Math.floor(p.b.y / rowH),
+          qr = Math.floor(q.b.y / rowH)
+        return pr !== qr ? pr - qr : p.b.x - q.b.x
+      })
+      .map((x) => x.sh)
+    // 開始番地＝選択の中で一番小さい既存番地（無ければ 1.001）
+    const selFx = st.chart.fixtures.filter((f) => ids.includes(f.shapeId))
+    let addr = selFx.length
+      ? selFx.reduce(
+          (m, f) => (f.universe * 512 + f.start < m.universe * 512 + m.start ? f : m),
+          selFx[0]
+        )
+      : { universe: 0, start: 1 }
+    let cur = { universe: addr.universe, start: addr.start }
+    get().beginHistory()
+    set((state) => {
+      const fixtures = [...state.chart.fixtures]
+      const shapes = [...state.chart.shapes]
+      for (const sh of ordered) {
+        const i = fixtures.findIndex((f) => f.shapeId === sh.id)
+        const defMode: ChannelMode =
+          (sh.family ?? familyOfType(sh.type)) === 'light' ? 'beam8' : 'rgb'
+        const base: Fixture =
+          i >= 0
+            ? { ...fixtures[i], universe: cur.universe, start: cur.start }
+            : {
+                id: newId('fx'),
+                shapeId: sh.id,
+                universe: cur.universe,
+                start: cur.start,
+                mode: defMode
+              }
+        if (i >= 0) fixtures[i] = base
+        else {
+          fixtures.push(base)
+          const si = shapes.findIndex((x) => x.id === sh.id)
+          if (si >= 0) shapes[si] = { ...shapes[si], fixtureId: base.id }
+        }
+        cur = nextAddressAfter(base, repeatCount(sh))
+      }
+      return { chart: { ...state.chart, shapes, fixtures } }
+    })
+  },
+
+  mirrorShapes: (axis) => {
+    const ids = get().selectedIds
+    const sel = get().chart.shapes.filter((s) => ids.includes(s.id) && !s.locked)
+    if (!sel.length) return
+    get().beginHistory()
+    // 反転の軸＝選択全体の外枠の中心。1個だけならその図形の中心＝その場で裏返る。
+    const bs = sel.map((s) => shapeArrayBounds(s))
+    const lo = Math.min(...bs.map((b) => (axis === 'h' ? b.x : b.y)))
+    const hi = Math.max(...bs.map((b) => (axis === 'h' ? b.x + b.w : b.y + b.h)))
+    const sum = lo + hi // 反転後の座標 = (lo+hi) − 元の座標
+    const on = new Set(sel.map((s) => s.id))
+    set((state) => ({
+      chart: {
+        ...state.chart,
+        shapes: state.chart.shapes.map((s) => {
+          if (!on.has(s.id)) return s
+          const points = s.points.map((p) =>
+            axis === 'h' ? { x: sum - p.x, y: p.y } : { x: p.x, y: sum - p.y }
+          )
+          // 連続複製(repeat)は伸びる向きも裏返す＝外枠が動かない
+          const repeat = s.repeat
+            ? {
+                ...s.repeat,
+                dx: axis === 'h' ? -s.repeat.dx : s.repeat.dx,
+                dy: axis === 'v' ? -s.repeat.dy : s.repeat.dy
+              }
+            : undefined
+          return repeat ? { ...s, points, repeat } : { ...s, points }
         })
       }
     }))
@@ -887,6 +997,8 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glowAmount: px } } })),
   setLedGlowPx: (px) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, ledGlowPx: px } } })),
+  setOutDiv: (div) =>
+    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, outDiv: div } } })),
   placingPart: null,
   setPlacingPart: (placingPart) => set({ placingPart }),
   setSyphonName: (name) => set((s) => ({ chart: { ...s.chart, syphon: { name } } })),

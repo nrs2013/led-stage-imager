@@ -9,8 +9,22 @@ type SyphonServer = {
     size: { width: number; height: number },
     flipped: boolean
   ): void
+  /** IOSurface のハンドルを渡す＝GPU の絵をコピーなしで Syphon へ出す（GPU直結出力用）。 */
+  publishSurfaceHandle(
+    handle: Buffer,
+    srcRect: { x: number; y: number; width: number; height: number },
+    size: { width: number; height: number },
+    flipped: boolean
+  ): void
   hasClients: boolean
   dispose(): void
+}
+
+/** Electron の offscreen paint イベントが渡す textureInfo のうち、送出に使う部分。 */
+export interface PaintTextureInfo {
+  codedSize: { width: number; height: number }
+  contentRect: { x: number; y: number; width: number; height: number }
+  handle: { ioSurface?: Buffer }
 }
 type SyphonServerCtor = new (name: string) => SyphonServer
 
@@ -45,6 +59,28 @@ export class OutputPublisher {
         ? rgba
         : new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.byteLength)
     this.server.publishImageData(data, { x: 0, y: 0, width, height }, { width, height }, false)
+  }
+
+  /** GPU直結: offscreen ウィンドウの paint が渡す IOSurface をコピーなしで publish する。
+   *  Chromium の IOSurface は BGRA・上端が先頭行＝publishImageData(本番実績・flipped=false)と
+   *  同じ向き。ネイティブ側は MTLPixelFormatBGRA8Unorm で包むので色もそのまま正しい
+   *  （vendor/node-syphon/MetalServer.mm.fixed 参照。flipped=true だと上下逆＝実測で確認済み）。
+   *  失敗は例外で呼び出し側へ（連続失敗で互換経路へ落とす）。 */
+  publishSurface(info: PaintTextureInfo, clipW?: number, clipH?: number): void {
+    if (!this.server || !info.handle?.ioSurface) return
+    // clipW/H: 奇数サイズ等で絵が要求より +1px 大きい時、受け手には要求サイズちょうどで見せる
+    const region = {
+      x: info.contentRect.x,
+      y: info.contentRect.y,
+      width: Math.min(info.contentRect.width, clipW ?? info.contentRect.width),
+      height: Math.min(info.contentRect.height, clipH ?? info.contentRect.height)
+    }
+    this.server.publishSurfaceHandle(
+      info.handle.ioSurface,
+      region,
+      { width: info.codedSize.width, height: info.codedSize.height },
+      false
+    )
   }
 
   get hasClients(): boolean {

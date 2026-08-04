@@ -11,20 +11,28 @@ import { join } from 'path'
 type KFn = (...args: unknown[]) => unknown
 
 /** プラットフォームに合った NDI ライブラリの絶対パスを探す。見つからなければ null。
- *  優先: ①アプリ同梱(bundledDir) → ②NDIランタイム環境変数 → ③よくある既定インストール先。
- *  Windows は NDI Tools / Resolume を入れると ②③ にDLLが置かれる（公式の探し方）。 */
+ *  優先: ①正規インストールのNDIランタイム → ②アプリ同梱(bundledDir) のフォールバック。
+ *
+ *  🔴 なぜ正規ランタイムを優先するか（2026-07-15 に現場の実機で判明・戻すな）:
+ *  同梱DLLは単体ファイルとして置かれるだけなので設定を読む土台が無く、
+ *  ndi-config.v1.json も NDI_CONFIG_DIR も完全に無視する。その結果、NIC が複数ある機材では
+ *  NDI が起動のたびに別のNICを勝手に選び（Wi-Fi / LED処理機の網 / 本番網）、
+ *  受信側(Resolume)から見つからないことがある。
+ *  正規インストール版はレジストリ/環境変数に自分を登録するため設定が効き、
+ *  NDI Access Manager から送信NICを固定できる。
+ *  同梱DLLは「NDIランタイム未導入のPCでも動く」ための保険として最後に残す。 */
 export function resolveNdiLibPath(bundledDir: string): string | null {
   if (process.platform === 'win32') {
     const dll = 'Processing.NDI.Lib.x64.dll'
     const candidates = [
-      join(bundledDir, dll), // ①アプリ同梱（あれば最優先）
-      process.env.NDI_RUNTIME_DIR_V6 ? join(process.env.NDI_RUNTIME_DIR_V6, dll) : '', // ②NDI Tools/Redist
+      process.env.NDI_RUNTIME_DIR_V6 ? join(process.env.NDI_RUNTIME_DIR_V6, dll) : '', // ①NDI Tools/Redist（設定が効く）
       process.env.NDI_RUNTIME_DIR_V5 ? join(process.env.NDI_RUNTIME_DIR_V5, dll) : '',
       `C:\\Program Files\\NDI\\NDI 6 Runtime\\v6\\${dll}`,
-      `C:\\Program Files\\NDI\\NDI 5 Runtime\\v5\\${dll}`,
       `C:\\Program Files\\NDI\\NDI 6 Tools\\Runtime\\${dll}`,
-      `C:\\Program Files\\Resolume Arena\\${dll}`, // ③Resolume を入れていれば同梱DLLを拝借
-      `C:\\Program Files\\Resolume Avenue\\${dll}`
+      `C:\\Program Files\\NDI\\NDI 5 Runtime\\v5\\${dll}`,
+      `C:\\Program Files\\Resolume Arena\\${dll}`, // Resolume を入れていれば同梱DLLを拝借
+      `C:\\Program Files\\Resolume Avenue\\${dll}`,
+      join(bundledDir, dll) // ②アプリ同梱（NDI未導入PC向けの保険。設定は効かない）
     ].filter(Boolean)
     return candidates.find((p) => existsSync(p)) ?? null
   }
@@ -43,11 +51,17 @@ let rxCount = 0
 let connTimer: NodeJS.Timeout | null = null
 let structsReady = false
 
-// RGBA のFourCC（バイト並び R,G,B,A）。レンダラの getImageData は RGBA 並び。
+// RGBA のFourCC（バイト並び R,G,B,A）。レンダラの getImageData は RGBA 並び（従来のCPU経路）。
 const FOURCC_RGBA =
   'R'.charCodeAt(0) |
   ('G'.charCodeAt(0) << 8) |
   ('B'.charCodeAt(0) << 16) |
+  ('A'.charCodeAt(0) << 24)
+// BGRA のFourCC。GPU出力窓の paint(NativeImage.toBitmap) は BGRA 並び＝並べ替え不要でそのまま送れる。
+const FOURCC_BGRA =
+  'B'.charCodeAt(0) |
+  ('G'.charCodeAt(0) << 8) |
+  ('R'.charCodeAt(0) << 16) |
   ('A'.charCodeAt(0) << 24)
 
 // 毎フレーム作り直さず再利用する送信フレーム（中身だけ書き換える）。
@@ -144,18 +158,21 @@ export function startNdiDirect(name: string, libPath: string): boolean {
   }
 }
 
-/** RGBA フレーム（width*height*4 の連続バイト）を 1 枚送る。active でなければ無視。 */
+/** フレーム（width*height*4 の連続バイト）を 1 枚送る。active でなければ無視。
+ *  bgra=true は GPU出力窓の paint(BGRA)をそのまま送る用（並べ替え不要）。false=従来のRGBA(CPU経路)。 */
 export function sendNdiFrame(
   width: number,
   height: number,
-  rgba: Uint8Array | Uint8ClampedArray | Buffer
+  data: Uint8Array | Uint8ClampedArray | Buffer,
+  bgra = false
 ): void {
   if (!sender || !sendVideo || width <= 0 || height <= 0) return
-  const buf = Buffer.isBuffer(rgba)
-    ? rgba
-    : Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength)
+  const buf = Buffer.isBuffer(data)
+    ? data
+    : Buffer.from(data.buffer, data.byteOffset, data.byteLength)
   frame.xres = width
   frame.yres = height
+  frame.FourCC = bgra ? FOURCC_BGRA : FOURCC_RGBA
   frame.p_data = buf
   frame.line_stride_in_bytes = width * 4
   try {

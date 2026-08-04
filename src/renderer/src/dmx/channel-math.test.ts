@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fixtureColor, channelCount, beamPose, shutterGate } from './channel-math'
+import { fixtureColor, channelCount, beamPose, shutterGate, shutterStable } from './channel-math'
 import type { Fixture } from '../model/types'
 
 const uni = (over: Record<number, number>): Uint8Array => {
@@ -135,5 +135,21 @@ describe('beamPose (DMX128=中心)', () => {
   })
   it('ビーム以外は中心姿勢', () => {
     expect(beamPose(fx('rgb', 1), uni({ 0: 255 }))).toEqual({ pan: 0, tilt: 0, zoom: 0 })
+  })
+})
+
+describe('shutterStable（ストロボの明滅を除いた開度＝シーン保存用）', () => {
+  it('閉(0〜7)は0＝卓が消している意思は保存も暗', () => {
+    expect(shutterStable(fx('beam9', 1), uni({ 3: 0 }))).toBe(0)
+    expect(shutterStable(fx('beam9', 1), uni({ 3: 7 }))).toBe(0)
+  })
+  it('ストロボ(8〜245)は1＝点滅の暗相の瞬間でも「点いている扱い」で保存', () => {
+    expect(shutterStable(fx('beam9', 1), uni({ 3: 8 }))).toBe(1)
+    expect(shutterStable(fx('beam8', 1), uni({ 3: 128 }))).toBe(1)
+    expect(shutterStable(fx('beam9', 1), uni({ 3: 245 }))).toBe(1)
+  })
+  it('開(246〜255)は1・ビーム以外のモードは常に1', () => {
+    expect(shutterStable(fx('beam9', 1), uni({ 3: 255 }))).toBe(1)
+    expect(shutterStable(fx('rgb', 1), uni({ 3: 0 }))).toBe(1)
   })
 })

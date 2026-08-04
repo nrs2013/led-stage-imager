@@ -7,7 +7,8 @@
  * （screen混色・アルベド乗算・色比保持トーン・パン非対称・Smoke連動）。
  */
 import { WHITE, COLORS, sameRgb, hexToRgb, type RGB3 } from './colors'
-import { fixtureColor, beamPose, shutterGate, channelCount } from '../dmx/channel-math'
+import { fixtureColor, beamPose, shutterGate, shutterStable, channelCount } from '../dmx/channel-math'
+import { goboTex, type GoboKind } from './gobo'
 import { FlameFX, type FlameParams } from './flame'
 import { SparklerFX, type SparklerParams } from './sparkler'
 import { RainFX, type RainParams } from './rain'
@@ -157,6 +158,11 @@ export interface Beam {
   motifSpeed?: number
   motifReverse?: boolean // マーキー逆方向チェイス
   motifSeed?: number // 星の散布レイアウトを固定（移動しても再シャッフルしない）
+  motifStarSize?: number // 星1粒の大きさ（0.5〜30・stars専用・未設定は既定3）
+  gobo?: GoboKind // フロント灯体の光だまりに乗せる柄（未設定=柄なし）
+  goboSharp?: number // 柄のくっきり度 0..1（既定0.65・生成時焼き分け＝毎フレームblurしない）
+  goboSpd?: number // 柄の回転速さ 0..1（既定0.3）
+  gaugeStable?: number // 卓駆動時の「ストロボの明滅を除いた明るさ」。シーン保存が暗相0を拾わないため
   // フロント灯体：前から当たる丸い光（プール）。下からの円錐ビーム(drawWallBeam)の代わりに
   //  光マップへ丸いプールを描く＝写真が照らされて「通った所だけセットが浮かぶ」。プール半径は motifDiam を流用。
   front?: boolean
@@ -199,6 +205,63 @@ export interface St extends FxFlags {
   smoke: number
 }
 
+// ---------- GPU直結出力の同期用（LiveFrame＝毎フレーム送る軽い動的状態） ----------
+/** 単発イベント（炎の発射等）。状態でなく「呼び出し」なので LiveFrame の別枠で運ぶ。 */
+export type LiveEvent =
+  | { k: 'flameFire'; fx: number; fy: number }
+  | { k: 'flameFireRow' }
+  | { k: 'flameFireAll' }
+  | { k: 'flameHoldStart'; fx: number; fy: number }
+  | { k: 'flameHoldAllStart' }
+  | { k: 'flameHoldRelease' }
+
+/** LiveFrame の灯体＝Beam から重い imageSrc と描画一時値(_tn/_cn/_zp)を除いたもの。 */
+export type LiveBeam = Omit<Beam, 'imageSrc' | '_tn' | '_cn' | '_zp'>
+
+/** 出力専用ウィンドウへ毎フレーム送る軽い動的状態（数KB）。
+ *  重い状態（写真/動画/マスク/切り抜き/画像灯体の絵）は serializeShow/restoreShow で別送。 */
+export interface LiveFrame {
+  ms: number // 送信側の now−t0。受信側は自分の t0 に写す＝時刻依存の絵が両窓で一致
+  st: St
+  fxp: FxParams
+  panicGain: number
+  strobeOverride: boolean
+  strobeRate: number
+  lightOnly: boolean
+  colorWash: number
+  baseLift: number
+  relief: number // 立体強調（contrast/saturate 仕上げ）。出力側 reliefPass に必須
+  lumReliefStrength: number // 光の向きの陰影（写真ごとの lumRelief の乗せ量）
+  falloffPow: number
+  outCap: number
+  viewScene: number
+  decorClock: number
+  decor: DecorPattern
+  sfx: {
+    flame: FlameParams
+    sparkler: SparklerParams
+    rain: RainParams & { on: boolean }
+    lowSmoke: LowSmokeParams & { on: boolean }
+    fireFlame: boolean
+    fireSparkler: boolean
+    chaseMode: 'all' | 'random' | 'inout' | 'outin'
+    chaseMs: number
+    seqSteps: number[][]
+    seqMs: number
+    seqPlaying: boolean
+    seqIndex: number
+    armedIds: number[] | null
+    activeScene: number
+  }
+  beams: LiveBeam[]
+  dmx: { frames: Record<number, Uint8Array>; gamma: boolean } | null
+  events: LiveEvent[]
+  /** シーン切替の位置ブレンド（前シーンの見た目の向き→新シーンの生きた向き）。null＝ブレンド無し。
+   *  age＝送信時点での経過ms。受信側は自分の now から引いて _aimT0 に写す（ms と同じ作法）。
+   *  これが無いと出力窓だけチルトがカットになる（編集画面と本番の絵が食い違う）。 */
+  aim?: { from: number[]; age: number; ms: number } | null
+}
+
 export interface Look {
   fxst: FxFlags
   fxp: FxParams
@@ -222,6 +285,41 @@ export interface Pattern {
   look: Look
 }
 
+/** SFXシーン＝「どの炎/火花マークが撃つか」＋発射パターンの記憶（キッカケ運用・CUEタブから呼ぶ）。
+ *  照明のPattern(CUE)とは完全に独立＝照明を切り替えても特効は変わらない。 */
+export interface SfxScene {
+  name: string
+  key: string | null
+  midi: number | null
+  ids: number[] // 撃つマークの sfxId（炎/火花混在OK）
+  chaseMode: 'all' | 'random' | 'inout' | 'outin'
+  chaseMs: number
+}
+
+/** 発射ボタンの種類（CUEタブの大ボタン）。 */
+export type FireKey = 'flame' | 'sparkler' | 'smoke' | 'rain'
+/** GO進行の1ステップ: 呼ぶシーン(pattern)・撃つ特効シーン(sfx)・メモ。null=その要素は変えない。 */
+export interface CueStep {
+  pattern: number | null
+  sfx: number | null
+  memo: string
+}
+
+/** その特効マークが発射ゲート/シーン絞り込みを通れるか（純関数・テスト対象）。
+ *  ゲートOFF=そのSFXは一切出ない（誤発防止）。armed指定中はID一致だけ通す（ID未割当は撃たない）。 */
+export function sfxGateAllows(
+  motif: 'flame' | 'sparkler',
+  flameFire: boolean,
+  sparklerFire: boolean,
+  armed: Set<number> | null,
+  sfxId: number | undefined
+): boolean {
+  if (motif === 'flame' && !flameFire) return false
+  if (motif === 'sparkler' && !sparklerFire) return false
+  if (armed && !(sfxId != null && armed.has(sfxId))) return false
+  return true
+}
+
 export interface Scene {
   name: string
   kind: 'photo' | 'video'
@@ -235,6 +333,8 @@ export interface Scene {
   fix?: { m: boolean; s: boolean }[]
   /** このシーンを呼び出す MIDI Note 番号（LEARN で割当）。 */
   midiNote?: number | null
+  /** このシーンを呼び出すキー（e.code・LEARN で割当）。MIDIと両方持てる。 */
+  key?: string | null
   /** 4 辺スケールワープの結果 box（LW×LH 座標系）。null＝デフォルト contain fit。 */
   warpBox?: { x: number; y: number; w: number; h: number } | null
   /** ピース（写真の一部を切り抜いて 4 隅コーナーピンで貼り付ける）の並び。
@@ -273,25 +373,33 @@ interface Snap {
   scenes: Scene[]
   sfxChaseMode: 'random' | 'all' | 'inout' | 'outin'
   sfxChaseMs: number
+  // SFXシーン（保存/削除を⌘Zで戻せるように。発射ゲートは本番の意思なのでSnapに含めない）
+  sfxScenes: (SfxScene | null)[]
+  sfxArmedIds: number[] | null
+  activeSfxScene: number
+  // GO進行表（編集を⌘Zで戻せるように。実行位置 cuePos は本番の意思なので含めない）
+  cueSheet?: CueStep[]
+  goKeyMap?: { go?: string; back?: string }
+  goMidiMap?: { go?: number; back?: number }
 }
 
-/** 灯体を「左下を1番に、下の段を左→右、終わったら一つ上の段もまた左→右」へ
- *  並べる順番 perm を返す（perm[newIndex]=oldIndex）。renumberByPosition と単体テストで共有する純関数。 */
+/** 灯体を「左下を1番に、各段は左→右、下の段→上の段」の順で並べる順番 perm を返す
+ *  （perm[newIndex]=oldIndex）。renumberByPosition と単体テストで共有する純関数。 */
 export function renumberOrder(pts: { x: number; y: number }[], lh: number = LH): number[] {
   const n = pts.length
   if (n < 2) return pts.map((_, i) => i)
   const bandTol = lh * 0.05 // 縦これ以内＝同じ段とみなす
-  const items = pts.map((p, i) => ({ i, x: p.x, y: p.y })).sort((a, b) => b.y - a.y) // 下(yが大)から
+  const items = pts.map((p, i) => ({ i, x: p.x, y: p.y })).sort((a, b) => b.y - a.y) // 下(yが大)の段から
   const rows: { i: number; x: number; y: number }[][] = []
   for (const it of items) {
     const row = rows[rows.length - 1]
     if (row && Math.abs(it.y - row[0].y) <= bandTol) row.push(it)
     else rows.push([it])
   }
+  // 各段は左(xが小)から右(xが大)へ。段は下から上（items を下優先で積んだ順）。
   const perm: number[] = []
   for (const row of rows) {
-    row.sort((a, b) => a.x - b.x) // 段の中は左→右
-    for (const it of row) perm.push(it.i) // 下の段から順に、各段を左→右で番号を振る
+    for (const it of [...row].sort((a, b) => a.x - b.x)) perm.push(it.i)
   }
   return perm
 }
@@ -325,19 +433,68 @@ export function detectDmxOverlaps(
 //     チルト等を捨てて、初期プリセットを常にまっさら（均等10台・tilt0・下向き）にする
 const RIG_KEY = 'decor.imagelight.rig.v3'
 
-// アプリを新しく開くたびに明かり/色/MIDI を引き継がない（のむさん確定 2026-06-21）。
-// 保持はページ生存中のメモリ(sessionRig)のみ＝モード切替の行き来では残るが、アプリ再起動で消える。
+// アプリを新しく開くたびに明かり/色/シーンは引き継がない（のむさん確定 2026-06-21）。
+// 保持はページ生存中のメモリ(sessionRig)のみ＝モード切替の行き来では残る。
 // 旧バージョンが localStorage に残した前回リグも、開いた瞬間に完全削除する。
+//
+// ただし MIDI とキーの割当だけは別に取っておく（のむさん 2026-07-26
+// 「アプリを立ち上げ直すと一度設定したMIDIが外れて操作できない」）。割当は
+// 仕込みであって「前の明かり」ではないので、引きずっても事故にならない。
+const MAP_KEY = 'decor.imagelight.midimap.v1'
+/** 再起動でも残す割当だけを抜き出した形。 */
+type MidiMap = Pick<
+  RigPayload,
+  | 'paramMidi'
+  | 'masterMidi'
+  | 'fxMidi'
+  | 'fxKey'
+  | 'colorMidi'
+  | 'colorKey'
+  | 'strobeMidi'
+  | 'strobeKey'
+  | 'motifChaseMidi'
+  | 'motifChaseKey'
+>
 let sessionRig: RigPayload | null = null
 try {
   localStorage.removeItem(RIG_KEY)
 } catch {
   /* localStorage が使えなくても支障なし */
 }
+function loadMidiMap(): MidiMap | null {
+  try {
+    const raw = localStorage.getItem(MAP_KEY)
+    return raw ? (JSON.parse(raw) as MidiMap) : null
+  } catch {
+    return null
+  }
+}
+function saveMidiMapRaw(json: string): void {
+  try {
+    localStorage.setItem(MAP_KEY, json)
+  } catch {
+    /* 保存できなくても操作は続けられる */
+  }
+}
+/** 割当を全部消す（SETUP の「割当をぜんぶ消す」用）。 */
+export function clearSavedMidiMap(): void {
+  try {
+    localStorage.removeItem(MAP_KEY)
+  } catch {
+    /* noop */
+  }
+}
 
 /** localStorage / 公演ファイル 共通のリグ内容（灯体配置=beams は含めない）。 */
 export interface RigPayload {
   st?: { master?: number; smoke?: number }
+  /** FX の入り切り（CHASE/SEARCH/RND SEARCH/STROBE/…）。無い古い保存＝全部切。
+   *  のむさん 2026-07-26「保存した時の設定がすべて残るようにしたい」。 */
+  fxst?: FxFlags
+  /** 見え方: 光だけ出力・立体強調・方向の立体（SETUP の OUTPUT / RELIEF）。 */
+  lightOnly?: boolean
+  relief?: number
+  lumReliefStrength?: number
   fxp?: FxParams
   patterns?: (Pattern | null)[]
   userColors?: RGB3[]
@@ -353,17 +510,26 @@ export interface RigPayload {
   sceneFadeMode?: 'cut' | 'fade'
   sceneFadeMs?: number
   strobeMidi?: number | null
+  /** 特別ストロボのキー割当（e.code）。 */
+  strobeKey?: string | null
   strobeRate?: number
   motifChaseMidi?: number | null
+  /** モチーフチェイスのキー割当（e.code）。 */
+  motifChaseKey?: string | null
 }
 /** 公演ファイル（show.json）のシーン1件。メディアは media/ 配下のファイル名で参照。 */
 export interface ShowSceneMeta {
   name: string
   kind: 'photo' | 'video'
+  /** 写真を持たない「空の背景」枠（モチーフ・電飾だけで使うシーン）。
+   *  無い古い保存＝写真ありとして扱う。これが無いと media が無いため復元で丸ごと消えていた。 */
+  empty?: boolean
   fix: { m: boolean; s: boolean }[] | null
   media: string | null
   /** このシーンを呼び出す MIDI Note 番号（未割当は省略可）。 */
   midiNote?: number | null
+  /** このシーンを呼び出すキー（e.code・未割当は省略可）。 */
+  key?: string | null
   /** 4 辺スケールワープの結果（LW×LH 座標系）。null/省略＝デフォルト contain fit。 */
   warpBox?: { x: number; y: number; w: number; h: number } | null
   /** ピース（4 隅コーナーピンで貼り付ける切り抜き）の並び。省略＝0 個。 */
@@ -392,9 +558,28 @@ export interface ShowFile {
     seqMs?: number
     flameChase?: { on?: boolean; pattern?: 'random' | 'all' | 'inout' | 'outin'; ms?: number }
     sfxChase?: { mode?: 'random' | 'all' | 'inout' | 'outin'; ms?: number }
+    /** 発射ゲート（無い古い保存＝両方true＝従来どおり）。smoke/rainのONは lowSmoke.on/rain.on が担当。 */
+    fire?: { flame?: boolean; sparkler?: boolean }
+    /** SFXシーン（6枠・nullは空き）。無い古い保存＝全部空き。 */
+    sfxScenes?: (SfxScene | null)[]
+    /** 撃つマークの絞り込み（SFXシーン適用中）。無い/null＝全部撃てる。 */
+    armedIds?: number[] | null
+    /** 適用中のSFXシーン番号（UIの点灯表示の復元用）。無い/-1＝なし。 */
+    activeScene?: number
+    /** 発射ボタンのキー/MIDI割当。 */
+    fireKeyMap?: Partial<Record<FireKey, string>>
+    fireMidiMap?: Partial<Record<FireKey, number>>
+  }
+  /** GO進行（キューシート）。無い古い保存＝空の進行表。 */
+  go?: {
+    steps?: CueStep[]
+    keys?: { go?: string; back?: string }
+    midi?: { go?: number; back?: number }
   }
   /** 見え方: 色ノリ（光の色を写真に乗せる量 0..0.4）。無い＝0（従来）。 */
   colorWash?: number
+  /** 保存時に表示していた写真(シーン)番号。無い古い保存＝1枚目から。 */
+  viewScene?: number
   /** 見え方: ベース明るさ（暗部の底上げ 0..0.3）。無い＝0（従来）。 */
   baseLift?: number
 }
@@ -467,6 +652,111 @@ const BEAM_ROOT_BOOST = 0.6 // ★出口付近の明るさを足す 0..1（根�
 const CONTACT_HOT = 0.85 // 接触面の焼け（白飛び）0..1（据え置き）
 const CONTACT_HOT_FROM = 0.3 // ★この明るさ(ゲージ)未満では白く焼けない。0..1。大きいほど「明るい時だけ白飛び」＝暗い時に白くならずリアル
 const CONTACT_NIJIMI = 0.45 // 根元のにじみ 0..1（色つき＝明るさに比例で自然に暗くなる）
+// ★光の筋の質感（のむさん 2026-07-26「ランダムサーチがモヤモヤしていてリアリティに欠ける」）。
+// 実際の煙の中の光は筋の中に濃淡のムラがあり、均一なグラデーションだけだと「モヤ」に見える。
+// 灯体ごとの blur は禁止（激重）なので、作り置きした縞テクスチャを筋に1枚重ねるだけで出す。
+// 🔴 2026-07-28 現場（Windows）で「チラつく」＝0 に戻した。ムラは時間で流す作りなので、
+// コマ落ちしている機械だと飛んで見える。上げ直すのは実機で確かめてから。
+const BEAM_HAZE = 0 // 筋の中の濃淡ムラの強さ 0..1（0=従来のなめらかなグラデだけ）
+const BEAM_HAZE_SCROLL = 0.045 // ムラが筋に沿って流れる速さ（煙の動き。0=止まる）
+const BEAM_LAYER_SPREAD = 0.62 // ★筋の縁のはっきり具合。小さいほど層が重なって縁がはっきりする
+// ★「伸び」の減衰をどれだけ現実に寄せるか（のむさん 2026-07-26「伸びの精度がいまいち」）。
+// 従来は 明るさ=(1-進んだ割合)^n。これだと (1)伸びを長くしても暗くなり方が変わらない
+// （長さで割った“割合”で計算しているため）(2)先端でぴったり0になって光の終わりが見える
+// (3)広がっても薄くならない、の3点が現実と違う。
+// 新しい式＝逆二乗（1/(1+距離/基準)²）×広がりぶんの薄まり×先端のとけ込み。
+// 🔴 2026-07-28 現場（Windows）で「先が暗くなりすぎ／先端の消え方が変」＝両方 0 側に戻した。
+// BEAM_REAL=0 かつ BEAM_END_FADE_FROM>=1 で、式は 7/26 より前と完全に同じになる。
+const BEAM_REAL = 0 // 0=従来のまま / 1=物理寄り。間の値で混ぜられる（実機で追い込む用）
+const BEAM_SPREAD_DIM = 0.6 // 広がるほど薄くする強さ 0..1（1=面積ぶん完全に薄める）
+const BEAM_END_FADE_FROM = 1 // この割合から先端へ向けて溶かす（1=溶かさない＝従来）
+/** 落ち込みプリセット（ソフト/標準/きつめ）→「明るさが1/4になる距離」。画面高さに対する割合。
+ *  ここが“絶対の距離”なのが要点＝伸びを長くすると先端は本当に暗くなる。 */
+const halfDistOf = (pow: number): number => (pow >= 4 ? 0.25 : pow >= 2.5 ? 0.45 : 0.75)
+
+/** 光の筋に重ねる縞テクスチャ（作り置き・全灯体で共用）。縦=筋の向き。
+ *  1回だけ作って drawImage で使い回す＝灯体ごとの重い処理を増やさない。 */
+let hazeTex: HTMLCanvasElement | null = null
+function getHazeTex(): HTMLCanvasElement {
+  if (hazeTex) return hazeTex
+  const W = 64
+  const H = 256
+  const c = document.createElement('canvas')
+  c.width = W
+  c.height = H
+  const g = c.getContext('2d')!
+  g.fillStyle = '#000'
+  g.fillRect(0, 0, W, H)
+  // 固定シードの擬似乱数＝毎回同じ模様（本番で見え方が変わらない）
+  let seed = 20260726
+  const rnd = (): number => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return seed / 0x7fffffff
+  }
+  // 横方向にゆるく変化する縞を数本重ねる（煙の筋）。縦にもゆっくり濃淡を付ける。
+  const bands = Array.from({ length: 5 }, () => ({
+    k: 1 + Math.floor(rnd() * 4), // 横の周期
+    ph: rnd() * Math.PI * 2,
+    a: 0.25 + rnd() * 0.75
+  }))
+  // 1マスずつ fillRect すると 16,384 回で最初の点灯が一瞬止まる。画素を直接書いて1回で置く。
+  const img = g.createImageData(W, H)
+  const px = img.data
+  const cols = new Float32Array(W) // 横方向の縞は y に依らないので先に1回だけ作る
+  for (let x = 0; x < W; x++) {
+    let v = 0
+    for (const b of bands) v += b.a * Math.sin((x / W) * Math.PI * 2 * b.k + b.ph)
+    cols[x] = Math.max(0, v / bands.length)
+  }
+  for (let y = 0; y < H; y++) {
+    const vy = 0.75 + 0.25 * Math.sin((y / H) * Math.PI * 2 * 1.5 + 0.7)
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 4
+      px[o] = 255
+      px[o + 1] = 255
+      px[o + 2] = 255
+      px[o + 3] = Math.round(cols[x] * vy * 0.9 * 255)
+    }
+  }
+  g.putImageData(img, 0, 0)
+  hazeTex = c
+  return c
+}
+
+/** FX ツマミ / シーン棚の速いコピー。JSON.parse(JSON.stringify()) は ⌘Z のスナップショットで
+ *  600ms ごとに走り、実測で1回 80ms 級の引っかかりになっていた
+ *  （のむさん 2026-07-26「つまみがマウスについてこない」）。中身は小さな数値の入れ物だけなので、
+ *  手で写す方が桁違いに速い。 */
+function cloneFxp(p: FxParams): FxParams {
+  return {
+    search: { ...p.search },
+    rndsearch: { ...p.rndsearch },
+    chase: { ...p.chase },
+    strobe: { ...p.strobe },
+    rndstrobe: { ...p.rndstrobe },
+    colorchase: { ...p.colorchase },
+    breath: { ...p.breath },
+    fire: { ...p.fire },
+    wave: { ...p.wave },
+    bolt: { ...p.bolt },
+    rainbow: { ...p.rainbow },
+    zoompulse: { ...p.zoompulse }
+  }
+}
+function cloneLook(l: Look): Look {
+  return {
+    fxst: { ...l.fxst },
+    fxp: cloneFxp(l.fxp),
+    lights: l.lights.map((x) => ({ ...x, color: x.color.slice() as RGB3 })),
+    ...(l.chasePalette ? { chasePalette: l.chasePalette.map((c) => c.slice() as RGB3) } : {})
+  }
+}
+function clonePatterns(ps: (Pattern | null)[]): (Pattern | null)[] {
+  return ps.map((p) =>
+    p ? { name: p.name, key: p.key, midi: p.midi, look: cloneLook(p.look) } : null
+  )
+}
+
 
 /** 固定シードの擬似乱数（毎回同じ「ランダム」個性）。 */
 function makeSearchParams(rnd: () => number): SearchParams {
@@ -476,10 +766,30 @@ function makeSearchParams(rnd: () => number): SearchParams {
 export class ImageLightEngine {
   /** 編集画面の表示用フレーム（写真＋余白・マーカー無し）。 */
   readonly frame = mk(IW, IH)
-  /** Syphon出力用（写真の部分だけ・写真の解像度・余白なし）。編集画面は frame、出力は outCv。 */
-  readonly outCv = mk(16, 9, true)
+  /** Syphon出力用（写真の部分だけ・写真の解像度・余白なし）。編集画面は frame、出力は outCv。
+   *  コンテキストは octx() 経由で取得＝役割で描画方式が変わる（下の outReadback 参照）。 */
+  readonly outCv = mk(16, 9)
+  /** true=編集側（readOutputRGBA で吸い出す＝CPUキャンバス）。false=GPU出力窓（吸い出さない＝
+   *  GPUキャンバスにして 3840 の合成をGPUに任せる。CPUだと3840は1コマ30-45ms＝22fps上限・実測）。 */
+  outReadback = true
+  private octx(): CanvasRenderingContext2D {
+    return this.outCv.getContext(
+      '2d',
+      this.outReadback ? { willReadFrequently: true } : undefined
+    )!
+  }
+  /** true=GPU出力窓が publish を担っている間、編集側は出力合成(composeOutput)を丸ごと省く。
+   *  3840 の合成コストが編集ループから消える＝編集画面の60fpsを守る。互換へ落ちたら false。 */
+  skipCompose = false
   outW = 16
   outH = 9
+  /** true=このコマの出力は「中身なし」（写真が無い or 無灯＝暗転/ストロボOFF/マスター0）。
+   *  出力(outCv)へ重ねる処理（モチーフ/電飾/炎/火花/受け系）は全部これを見て降りる。
+   *  🔴 以前は「outW <= 16」を暗転の合図に使っていたが、そのために無灯のたびに出力を
+   *  16x9 へ縮めており、NDIの解像度が毎秒何度も切り替わって受け手(Resolume)が
+   *  そのつどフォーマットを繋ぎ直す＝ストロボ/暗転で激しくカクついた（現場 2026-07-22 の主犯）。
+   *  サイズは保ったまま「中身なし」を別に持つ＝合図と大きさを切り離す。 */
+  private outBlank = false
   private outBlurCv = mk(16, 9)
 
   // 内部バッファ
@@ -552,10 +862,253 @@ export class ImageLightEngine {
       .filter((b) => b.motif === 'flame' && this.sfxOn(b))
       .map((b) => ({ fx: b.x / LW, fy: b.y / LH, dir: this.dirOf(b) }))
   }
-  /** その特効マークが「今点いているか」。通常はミュート判定、シーケンサー再生中は今のステップ。 */
+  /** その特効マークが「今点いているか」。発射ゲート→シーン絞り込み→ミュート/シーケンサーの順。 */
   private sfxOn(b: Beam): boolean {
+    if (b.motif === 'flame' || b.motif === 'sparkler') {
+      if (!sfxGateAllows(b.motif, this.flameFireGate, this.sparklerFireGate, this.sfxArmedIds, b.sfxId))
+        return false
+    }
     if (this.sfxSeqPlaying) return b.sfxId != null && this.currentSeqSet().has(b.sfxId)
     return this.isLit(b)
+  }
+
+  // ---- SFX発射ゲート＋SFXシーン（キッカケ運用・2026-07-11のむさん依頼）----
+  /** 発射ゲート。falseの間はその特効を一切出さない（本番のキッカケでCUEタブの大ボタンON）。
+   *  既定true＝従来どおり「置けば点く」（編集中に見えないと困る・古い保存もそのまま）。 */
+  flameFireGate = true
+  sparklerFireGate = true
+  /** 撃つマークの絞り込み（SFXシーン適用中）。null＝全部撃てる。 */
+  sfxArmedIds: Set<number> | null = null
+  /** SFXシーン6枠。 */
+  sfxScenes: (SfxScene | null)[] = [null, null, null, null, null, null]
+  /** 今呼んでいるSFXシーン番号（-1=なし/ALL）。UIの点灯表示用。 */
+  activeSfxScene = -1
+  setFlameFire(v: boolean): void { this.flameFireGate = v; this.bump() }
+  setSparklerFire(v: boolean): void { this.sparklerFireGate = v; this.bump() }
+  /** 発射ボタン（CUEタブ）のON/OFF。smoke/rainは既存のon切替へ委譲。 */
+  toggleFire(k: FireKey): void {
+    if (k === 'flame') this.setFlameFire(!this.flameFireGate)
+    else if (k === 'sparkler') this.setSparklerFire(!this.sparklerFireGate)
+    else if (k === 'smoke') this.setLowSmokeOn(!this.lowSmoke.on)
+    else this.setRainOn(!this.rain.on)
+  }
+  fireOn(k: FireKey): boolean {
+    if (k === 'flame') return this.flameFireGate
+    if (k === 'sparkler') return this.sparklerFireGate
+    if (k === 'smoke') return this.lowSmoke.on
+    return this.rain.on
+  }
+  /** SFXシーン保存：選択中の炎/火花マーク（無選択なら置いてある全部）＋今の発射パターンを番号へ。
+   *  名前とキー/MIDI割当は上書きでも引き継ぐ。 */
+  saveSfxScene(i: number): void {
+    this.ensureSfxIds()
+    const isMark = (b: Beam): boolean => b.motif === 'flame' || b.motif === 'sparkler'
+    const sel = this.selected.map((x) => this.beams[x]).filter(Boolean).filter(isMark) as Beam[]
+    const src = sel.length ? sel : this.beams.filter(isMark)
+    if (!src.length || i < 0 || i >= this.sfxScenes.length) return
+    this.pushHistory('sfxscene')
+    const prev = this.sfxScenes[i]
+    this.sfxScenes[i] = {
+      name: prev?.name || 'SFX ' + (i + 1),
+      key: prev?.key ?? null,
+      midi: prev?.midi ?? null,
+      ids: src.map((b) => b.sfxId!),
+      chaseMode: this.sfxChaseMode,
+      chaseMs: this.sfxChaseMs
+    }
+    // 適用中のシーンを上書きしたら、絞り込みも新しい中身に合わせる（表示と発射のズレ防止）
+    if (this.activeSfxScene === i) this.sfxArmedIds = new Set(this.sfxScenes[i]!.ids)
+    this.bump()
+  }
+  /** SFXシーン呼出：撃つマークをこの組み合わせに絞る＋発射パターンを切替。照明には触らない。 */
+  applySfxScene(i: number): void {
+    const s = this.sfxScenes[i]
+    if (!s) return
+    this.sfxArmedIds = new Set(s.ids)
+    this.sfxChaseMode = s.chaseMode
+    this.sfxChaseMs = s.chaseMs
+    this.activeSfxScene = i
+    this.bump(false)
+  }
+  /** ALL＝絞り込み解除（置いてあるマーク全部が撃てる状態へ）。 */
+  clearSfxArm(): void {
+    this.sfxArmedIds = null
+    this.activeSfxScene = -1
+    this.bump(false)
+  }
+  renameSfxScene(i: number, name: string): void {
+    const s = this.sfxScenes[i]
+    if (!s) return
+    s.name = name.trim() || 'SFX ' + (i + 1)
+    this.bump()
+  }
+  removeSfxScene(i: number): void {
+    if (!this.sfxScenes[i]) return
+    this.pushHistory('sfxscene')
+    this.sfxScenes[i] = null
+    if (this.learnSfxScene === i) this.learnSfxScene = null // 消した枠のLEARN待ちを残さない
+    if (this.activeSfxScene === i) this.clearSfxArm()
+    this.bump()
+  }
+  // 発射ボタン/SFXシーンのキー・MIDI割当（1キー1役＝clear*Everywhereに参加）
+  fireKeyMap: Partial<Record<FireKey, string>> = {}
+  fireMidiMap: Partial<Record<FireKey, number>> = {}
+  learnFire: FireKey | null = null
+  learnSfxScene: number | null = null
+  setLearnFire(k: FireKey | null): void {
+    this.learnFire = k
+    if (k != null) {
+      this.learnGo = null
+      this.learnSfxScene = null
+      this.learnPattern = null
+      this.learnScene = null
+      this.learnFx = null
+      this.learnParam = null
+      this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
+      this.masterLearn = false
+      this.initMidi()
+    }
+    this.bump(false)
+  }
+  setLearnSfxScene(i: number | null): void {
+    this.learnSfxScene = i
+    if (i != null) {
+      this.learnFire = null
+      this.learnGo = null
+      this.learnPattern = null
+      this.learnScene = null
+      this.learnFx = null
+      this.learnParam = null
+      this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
+      this.masterLearn = false
+      this.initMidi()
+    }
+    this.bump(false)
+  }
+  assignFireShortcut(k: FireKey, code: string | null, midi: number | null): void {
+    if (code != null) this.clearKeyEverywhere(code)
+    if (midi != null) this.clearMidiNoteEverywhere(midi)
+    if (code != null) this.fireKeyMap[k] = code
+    if (midi != null) this.fireMidiMap[k] = midi
+    this.learnFire = null
+    this.bump()
+  }
+  clearFireShortcut(k: FireKey): void {
+    delete this.fireKeyMap[k]
+    delete this.fireMidiMap[k]
+    this.bump()
+  }
+  assignSfxSceneShortcut(i: number, code: string | null, midi: number | null): void {
+    const s = this.sfxScenes[i]
+    if (!s) {
+      this.learnSfxScene = null // 空き枠へのLEARNは中止（待ち続けてキーを吸わない）
+      this.bump(false)
+      return
+    }
+    if (code != null) this.clearKeyEverywhere(code)
+    if (midi != null) this.clearMidiNoteEverywhere(midi)
+    if (code != null) s.key = code
+    if (midi != null) s.midi = midi
+    this.learnSfxScene = null
+    this.bump()
+  }
+
+  // ---- GO進行（キューシート）: 曲順に「シーン＋特効シーン」を並べ、本番はGOを押すだけで次へ ----
+  cueSheet: CueStep[] = []
+  cuePos = -1 // 実行位置（-1=開始前。保存しない＝公演を開いたら先頭前から）
+  goKeyMap: { go?: string; back?: string } = {}
+  goMidiMap: { go?: number; back?: number } = {}
+  learnGo: 'go' | 'back' | null = null
+  setLearnGo(which: 'go' | 'back' | null): void {
+    this.learnGo = which
+    if (which != null) {
+      this.learnFire = null
+      this.learnSfxScene = null
+      this.learnPattern = null
+      this.learnScene = null
+      this.learnFx = null
+      this.learnParam = null
+      this.learnColor = null
+      this.learnStrobe = false
+      this.learnMotifChase = false
+      this.masterLearn = false
+      this.initMidi()
+    }
+    this.bump(false)
+  }
+  assignGoShortcut(which: 'go' | 'back', code: string | null, midi: number | null): void {
+    if (code != null) this.clearKeyEverywhere(code)
+    if (midi != null) this.clearMidiNoteEverywhere(midi)
+    if (code != null) this.goKeyMap[which] = code
+    if (midi != null) this.goMidiMap[which] = midi
+    this.learnGo = null
+    this.bump()
+  }
+  clearGoShortcut(which: 'go' | 'back'): void {
+    delete this.goKeyMap[which]
+    delete this.goMidiMap[which]
+    this.bump()
+  }
+  /** 次のステップへ進んで適用。末尾で止まる（ループしない）。 */
+  goNext(): void {
+    if (!this.cueSheet.length || this.cuePos >= this.cueSheet.length - 1) return
+    this.cuePos++
+    this.applyCueStep(this.cuePos)
+  }
+  /** 1つ戻って適用（押し間違い用）。先頭より前へは行かない。 */
+  goBack(): void {
+    if (!this.cueSheet.length || this.cuePos <= 0) return
+    this.cuePos--
+    this.applyCueStep(this.cuePos)
+  }
+  /** 進行位置を先頭前へ（明かりは触らない＝本番前のリセット）。 */
+  goReset(): void {
+    this.cuePos = -1
+    this.bump(false)
+  }
+  private applyCueStep(i: number): void {
+    const st = this.cueSheet[i]
+    if (!st) return
+    if (st.pattern != null && this.patterns[st.pattern]) this.applyPattern(st.pattern)
+    if (st.sfx != null && this.sfxScenes[st.sfx]) this.applySfxScene(st.sfx)
+    this.bump(false)
+  }
+  addCueStep(): void {
+    if (this.cueSheet.length >= 200) return
+    this.pushHistory()
+    this.cueSheet.push({ pattern: null, sfx: null, memo: '' })
+    this.bump()
+  }
+  removeCueStep(i: number): void {
+    if (!this.cueSheet[i]) return
+    this.pushHistory()
+    this.cueSheet.splice(i, 1)
+    // 実行位置より前（または実行中の行）を消したら位置も詰める＝次のGOが1行飛ぶ/戻る事故を防ぐ
+    if (i <= this.cuePos) this.cuePos--
+    this.bump()
+  }
+  moveCueStep(i: number, dir: -1 | 1): void {
+    const j = i + dir
+    if (!this.cueSheet[i] || !this.cueSheet[j]) return
+    this.pushHistory()
+    const t = this.cueSheet[i]
+    this.cueSheet[i] = this.cueSheet[j]
+    this.cueSheet[j] = t
+    // 実行位置は「実行した行」に追従＝並べ替えてもハイライトと次のGOがズレない
+    if (this.cuePos === i) this.cuePos = j
+    else if (this.cuePos === j) this.cuePos = i
+    this.bump()
+  }
+  updateCueStep(i: number, patch: Partial<CueStep>): void {
+    const st = this.cueSheet[i]
+    if (!st) return
+    this.pushHistory()
+    Object.assign(st, patch)
+    this.bump()
   }
 
   // ---- 特効ステップシーケンサー（炎＋火花共通・ドラムマシン風の格子）----
@@ -609,10 +1162,13 @@ export class ImageLightEngine {
   flameChaseOn = false
   flameChasePattern: 'random' | 'all' | 'inout' | 'outin' = 'inout'
   flameChaseMs = 420 // 旧チェイスの保存互換用フィールド（発射は sfxChase に統一）
-  /** 置いた炎を全部いっぺんに発射（無ければ標準4本）。 */
+  /** 置いた炎を全部いっぺんに発射（無ければ標準4本）。発射ゲートOFF中は撃たない（誤発防止）。
+   *  SFXシーンで絞り込み中は「標準4本」へのフォールバックもしない（外したはずの炎が出る事故防止）。 */
   flameFireAll(): void {
+    if (!this.flameFireGate) return
+    this.pushLiveEvent({ k: 'flameFireAll' }) // GPU出力窓でも同じ発射を再生する
     if (this.flamePoints.length) this.flamePoints.forEach((p) => this.flame.fire(p.fx, p.fy, 1, p.dir))
-    else this.flame.fireRow()
+    else if (!this.sfxArmedIds) this.flame.fireRow()
     this.bump()
   }
   // ---- SFX 発射パターン（炎・火花 共通）：置いた点を 全部同時/内→外/外→内/ランダム で順に発射 ----
@@ -661,34 +1217,39 @@ export class ImageLightEngine {
   }
   /** 一発(単発)。fx,fy は 0..1（未指定は中央・床）。 */
   flameFire(fx = 0.5, fy = 1): void {
+    this.pushLiveEvent({ k: 'flameFire', fx, fy })
     this.flame.fire(fx, fy)
     this.bump()
   }
   /** 標準4本を時間差で一斉発射(単発)。 */
   flameFireRow(): void {
+    this.pushLiveEvent({ k: 'flameFireRow' })
     this.flame.fireRow()
     this.bump()
   }
   /** 長押し開始(サスティン)。releaseで終わる。fx,fy は 0..1。 */
   flameHoldStart(fx = 0.5, fy = 1): void {
+    this.pushLiveEvent({ k: 'flameHoldStart', fx, fy })
     this.flame.startHold(fx, fy)
     this.bump()
   }
   /** 置いた炎を全部、長押し開始（向きも反映）。 */
   flameHoldAllStart(): void {
+    this.pushLiveEvent({ k: 'flameHoldAllStart' })
     const pts = this.flamePoints
     if (pts.length) pts.forEach((p) => this.flame.startHold(p.fx, p.fy, 1, p.dir))
     else this.flame.startHold(0.5, 1)
     this.bump()
   }
   flameHoldRelease(): void {
+    this.pushLiveEvent({ k: 'flameHoldRelease' })
     this.flame.release()
     this.bump()
   }
   /** 出力(outCv)へ炎本体を重ねる（box領域→出力解像度へ写像）。glowは光マップ経由で既にcomposeOutputに入る。 */
   private drawFlameOnOutput(): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    if (this.lightOnly || !this.box || this.outBlank) return
+    const oc = this.octx()
     const box = this.box
     const bd = this.flame.body
     const kx = bd.width / IW
@@ -706,8 +1267,8 @@ export class ImageLightEngine {
   }
   /** 出力(outCv)へ火花本体を重ねる（炎と同じ box→出力の写像）。glowは光マップ経由で反映済み。 */
   private drawSparklerOnOutput(): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    if (this.lightOnly || !this.box || this.outBlank) return
+    const oc = this.octx()
     const box = this.box
     const bd = this.sparkler.body
     const kx = bd.width / IW
@@ -743,8 +1304,8 @@ export class ImageLightEngine {
   }
   /** vmCv(色付き受け系) を出力(outCv)へ加算合成（box領域→出力解像度）。 */
   private drawVolumetricOnOutput(alpha: number): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    if (this.lightOnly || !this.box || this.outBlank) return
+    const oc = this.octx()
     const b = this.box
     oc.setTransform(1, 0, 0, 1, 0, 0)
     oc.globalCompositeOperation = 'lighter'
@@ -851,10 +1412,14 @@ export class ImageLightEngine {
   strobeOverride = false
   /** 特別ストロボの MIDI ノート割当（保存対象）。 */
   strobeMidi: number | null = null
+  /** 特別ストロボを入/切するキー（e.code）。MIDIと両方持てる。 */
+  strobeKey: string | null = null
   /** 特別ストロボ LEARN 待機中か。 */
   learnStrobe = false
   /** モチーフチェイス(Chase motifs)の MIDI ノート割当（保存対象・rigData）。 */
   motifChaseMidi: number | null = null
+  /** モチーフチェイスを入/切するキー（e.code）。MIDIと両方持てる。 */
+  motifChaseKey: string | null = null
   /** モチーフチェイス LEARN 待機中か。 */
   learnMotifChase = false
   /** 特別ストロボの速さ 0..1（大きいほど速い・保存対象）。 */
@@ -880,6 +1445,11 @@ export class ImageLightEngine {
 
   // パニック／タイミング
   private t0 = performance.now()
+  // 位置ブレンド（シーン切替時に前シーンの見た目の向き→新シーンの生きた向きを混ぜる）用の状態
+  private _aimFrom: number[] | null = null
+  private _aimT0 = 0
+  private _aimMs = 0
+  private _aimActive = false
   panicGain = 1
   private panicSeq = 0
 
@@ -924,10 +1494,10 @@ export class ImageLightEngine {
     return {
       beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined })),
       st: { ...this.st },
-      fxp: JSON.parse(JSON.stringify(this.fxp)),
+      fxp: cloneFxp(this.fxp),
       selected: [...this.selected],
       activeScene: this.activeScene,
-      patterns: JSON.parse(JSON.stringify(this.patterns)),
+      patterns: clonePatterns(this.patterns),
       userColors: this.userColors.map((c) => c.slice() as RGB3),
       chasePalette: this.chasePalette.map((c) => c.slice() as RGB3),
       // 写真/動画オブジェクトは参照共有・fix と pieces(配置)だけ独立コピー（Undoで戻せるように）
@@ -946,7 +1516,13 @@ export class ImageLightEngine {
         }))
       })),
       sfxChaseMode: this.sfxChaseMode,
-      sfxChaseMs: this.sfxChaseMs
+      sfxChaseMs: this.sfxChaseMs,
+      sfxScenes: this.sfxScenes.map((sc) => (sc ? { ...sc, ids: sc.ids.slice() } : null)),
+      sfxArmedIds: this.sfxArmedIds ? [...this.sfxArmedIds] : null,
+      activeSfxScene: this.activeSfxScene,
+      cueSheet: this.cueSheet.map((st) => ({ ...st })),
+      goKeyMap: { ...this.goKeyMap },
+      goMidiMap: { ...this.goMidiMap }
     }
   }
   private restore(s: Snap): void {
@@ -957,9 +1533,10 @@ export class ImageLightEngine {
     this.sceneFadeTo = null
     this.beams = s.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined }))
     this.st = { ...s.st }
-    this.fxp = JSON.parse(JSON.stringify(s.fxp))
-    this.selected = s.selected.filter((i) => i >= 0 && i < s.beams.length)
-    this.patterns = JSON.parse(JSON.stringify(s.patterns))
+    this.fxp = cloneFxp(s.fxp)
+    // タブ制限（selGuard）も通す＝⌘Zで「今のタブで触れないもの」が選択に復活しない
+    this.selected = s.selected.filter((i) => i >= 0 && i < s.beams.length && this.selAllowed(this.beams[i]))
+    this.patterns = clonePatterns(s.patterns)
     this.userColors = s.userColors.map((c) => c.slice() as RGB3)
     this.chasePalette = s.chasePalette.map((c) => c.slice() as RGB3)
     this.scenes = s.scenes.map((sc) => ({
@@ -978,6 +1555,18 @@ export class ImageLightEngine {
     }))
     this.sfxChaseMode = s.sfxChaseMode
     this.sfxChaseMs = s.sfxChaseMs
+    this.sfxScenes = s.sfxScenes.map((sc) => (sc ? { ...sc, ids: sc.ids.slice() } : null))
+    this.sfxArmedIds = s.sfxArmedIds ? new Set(s.sfxArmedIds) : null
+    this.activeSfxScene =
+      s.activeSfxScene >= 0 && this.sfxScenes[s.activeSfxScene] ? s.activeSfxScene : -1
+    // GO進行表（古いSnapには無い＝現状維持）。実行位置はクランプだけ（本番の意思なので巻き戻さない）
+    if (s.cueSheet) {
+      this.cueSheet = s.cueSheet.map((st) => ({ ...st }))
+      this.goKeyMap = { ...(s.goKeyMap ?? {}) }
+      this.goMidiMap = { ...(s.goMidiMap ?? {}) }
+      if (this.cuePos >= this.cueSheet.length) this.cuePos = this.cueSheet.length - 1
+    }
+    if (this.learnSfxScene != null && !this.sfxScenes[this.learnSfxScene]) this.learnSfxScene = null
     const ai = s.activeScene >= 0 && s.activeScene < this.scenes.length ? s.activeScene : -1
     // 動画: 表示中だけ再生・他は停止
     this.scenes.forEach((sc, i) => {
@@ -1099,6 +1688,7 @@ export class ImageLightEngine {
    *  状態変化も無ければ、描画ループは1フレーム描いて止まってよい＝静止画は無負荷。 */
   isAnimating = (): boolean =>
     this.strobeOverride ||
+    this._aimActive || // シーン切替の位置ブレンド中（これが無いとカット設定で向きが固まる）
     this.anyFx() ||
     this.activeIsVideo() ||
     this.fading ||
@@ -1111,6 +1701,7 @@ export class ImageLightEngine {
     this.sfxSeqPlaying ||
     this.beams.some((b) => b.motif === 'marquee' || b.motif === 'stars') ||
     this.beams.some((b) => b.front && (b.frontPat ?? 'off') !== 'off') || // フロント灯体のサーチ（8の字/丸/横/ランダム）
+    this.beams.some((b) => b.front && !!b.gobo && (b.goboSpd ?? 0.3) > 0) || // ゴボの回転（静止シーンでも柄が回り続ける）
     this.hasDmxPatched()
   /** 色が動くFX中（点灯中は色ボタンを握れない＝UIでグレーアウト）。 */
   colorOwnedByFx = (): boolean => this.st.rainbow || this.st.colorChase
@@ -1185,17 +1776,30 @@ export class ImageLightEngine {
     const NL = 12
     for (let k = 0; k < NL; k++) {
       const u = k / (NL - 1)
-      const wf = 1 - u * 0.62
+      const wf = 1 - u * BEAM_LAYER_SPREAD
       const lf = 0.7 + 0.3 * Math.pow(u, 1.4)
       const L = geo.len * lf
       const gr = g.createLinearGradient(0, geo.y, 0, geo.y - L)
+      // 明るさが1/4になる距離。画面高さ基準の“絶対の距離”なので、伸びを長くすると
+      // 先端は本当に暗くなる（従来は長さで割った割合だったので変わらなかった）。
+      const d0 = Math.max(1, LH * halfDistOf(this.falloffPow))
       for (let s = 0; s <= 28; s++) {
         const t = s / 28
-        // 落ち込み: 光源(t=0)で最大、先(t=1)で0。指数 this.falloffPow で強さを切替（プリセット
-        // ソフト1.5 / 標準2.5 / きつめ4）。大きいほど手前が明るく先がかなり暗いメリハリ。
-        // ＋出口付近(t<0.3)をちょっとだけ強く（BEAM_ROOT_BOOST）。
+        // 出口付近(t<0.3)をちょっとだけ強く（BEAM_ROOT_BOOST）。
         const boost = 1 + BEAM_ROOT_BOOST * Math.max(0, 1 - t / 0.3)
-        const v = Math.pow(1 - t, this.falloffPow) * boost
+        // 従来: 長さで割った割合の累乗（ソフト1.5 / 標準2.5 / きつめ4）
+        const legacy = Math.pow(1 - t, this.falloffPow)
+        // 物理寄り: 逆二乗（実距離）× 広がるほど薄まる
+        const inv = 1 / Math.pow(1 + (t * L) / d0, 2)
+        const wRatio = geo.w0 / Math.max(1, geo.w0 + (geo.w1 - geo.w0) * t)
+        const phys = inv * Math.pow(Math.max(0.05, wRatio), BEAM_SPREAD_DIM)
+        // 先端は0で切らずに溶かす（光の終わりの位置が線で見えないように）
+        const e =
+          BEAM_END_FADE_FROM >= 1
+            ? 0 // 溶かさない（0除算=NaNで光が消える事故を防ぐ）
+            : Math.max(0, (t - BEAM_END_FADE_FROM) / (1 - BEAM_END_FADE_FROM))
+        const endFade = 1 - e * e * (3 - 2 * e)
+        const v = (legacy + (phys - legacy) * BEAM_REAL) * boost * endFade
         gr.addColorStop(t, rgs(col, v))
       }
       g.fillStyle = gr
@@ -1204,6 +1808,27 @@ export class ImageLightEngine {
       g.fill()
     }
     g.filter = 'none'
+    g.globalAlpha = 1
+    // 筋の中の濃淡ムラ（煙）。作り置きテクスチャを1枚、筋の形に切り抜いて重ねるだけ。
+    // 先の方は元々暗いので、ムラも先へ行くほど薄くしてグラデを壊さない。
+    if (BEAM_HAZE > 0.001) {
+      const tex = getHazeTex()
+      const halfMax = Math.max(geo.w0, geo.w1) / 2
+      const ms = performance.now() - this.t0
+      const scroll = ((ms * BEAM_HAZE_SCROLL) % tex.height) | 0
+      g.save()
+      this.trap(g, geo, 1, geo.y, geo.y - geo.len)
+      g.clip()
+      g.globalCompositeOperation = 'screen'
+      g.globalAlpha = BEAM_HAZE * ampl * 0.5
+      // 上下2枚でつなぎ目なく流す（テクスチャの高さぶんで巻き戻る）
+      const x = geo.x - halfMax
+      const w = halfMax * 2
+      const h = geo.len
+      g.drawImage(tex, 0, scroll, tex.width, tex.height - scroll, x, geo.y - h, w, h)
+      if (scroll > 0) g.drawImage(tex, 0, 0, tex.width, scroll, x, geo.y - h, w, h * (scroll / tex.height))
+      g.restore()
+    }
     g.globalAlpha = 1
     g.restore()
   }
@@ -1262,6 +1887,7 @@ export class ImageLightEngine {
     const p = 0.85 * (1 - edge) // ふちが効くほど中心の塗りプラトーが小さく＝外へなだらかに
     g.save()
     g.globalCompositeOperation = 'screen' // 加算でなく screen＝重なっても白飛びしすぎない（ビームと同じ流儀）
+    if (b.gobo) g.globalAlpha = 0.25 // 柄が主役＝素の光は薄い下地だけ（承認モックと同じ配分）
     const gr = g.createRadialGradient(cx, cy, 1, cx, cy, R)
     gr.addColorStop(0, rgs(col, 1))
     if (p > 0.001) gr.addColorStop(p, rgs(col, 1))
@@ -1271,6 +1897,61 @@ export class ImageLightEngine {
     g.beginPath()
     g.arc(cx, cy, R, 0, Math.PI * 2)
     g.fill()
+    g.restore()
+    if (b.gobo) this.drawGoboPool(g, b, col, cx, cy, R, p, ms)
+  }
+  /** ゴボ（光の柄）: 小さなスクラッチで「柄を回転→光色に染める→プールの丸い減衰でマスク」を
+   *  組み立ててから光マップへ screen で1回描く。全部 drawImage/fill だけ＝毎フレーム blur なし。 */
+  private goboScratch: HTMLCanvasElement | null = null
+  private drawGoboPool(
+    g: CanvasRenderingContext2D,
+    b: Beam,
+    col: number[],
+    cx: number,
+    cy: number,
+    R: number,
+    p: number,
+    ms: number
+  ): void {
+    if (!b.gobo) return
+    if (!this.goboScratch) {
+      this.goboScratch = document.createElement('canvas')
+      this.goboScratch.width = this.goboScratch.height = 512
+    }
+    const sc = this.goboScratch.getContext('2d')!
+    const sharp = b.goboSharp ?? 0.65
+    const ang = (ms / 1000) * (b.goboSpd ?? 0.3) * 0.7
+    sc.globalCompositeOperation = 'source-over'
+    sc.globalAlpha = 1
+    sc.clearRect(0, 0, 512, 512)
+    sc.save()
+    sc.translate(256, 256)
+    sc.rotate(ang)
+    sc.drawImage(goboTex(b.gobo, sharp, 0), -256, -256)
+    if (b.gobo === 'water') {
+      // 2枚目を逆回転で lighter 重ね＝ゆらめく干渉（承認モックと同じ）
+      sc.globalCompositeOperation = 'lighter'
+      sc.rotate(-ang * 2.7)
+      sc.drawImage(goboTex(b.gobo, sharp, 1), -256, -256)
+    }
+    sc.restore()
+    // 柄の白を光の色に差し替え（アルファは柄のまま）
+    sc.globalCompositeOperation = 'source-in'
+    sc.fillStyle = rgs(col, 1)
+    sc.fillRect(0, 0, 512, 512)
+    // プールと同じ丸い減衰でマスク＝黒地に柄が漏れない
+    sc.globalCompositeOperation = 'destination-in'
+    const m = sc.createRadialGradient(256, 256, 1, 256, 256, 256)
+    m.addColorStop(0, 'rgba(255,255,255,1)')
+    if (p > 0.001) m.addColorStop(p, 'rgba(255,255,255,1)')
+    m.addColorStop((p + 1) / 2, 'rgba(255,255,255,0.45)')
+    m.addColorStop(1, 'rgba(255,255,255,0)')
+    sc.fillStyle = m
+    sc.fillRect(0, 0, 512, 512)
+    sc.globalCompositeOperation = 'source-over'
+    g.save()
+    g.globalCompositeOperation = 'screen'
+    g.drawImage(this.goboScratch, cx - R, cy - R, R * 2, R * 2)
     g.restore()
   }
   /** セット接触面（根元）の焼け＝白飛びホットスポット＋出口の際のにじみ。screen 合成。 */
@@ -1449,7 +2130,8 @@ export class ImageLightEngine {
           { x: b.x - d / 2, y: b.y - d / 2 },
           { x: b.x + d / 2, y: b.y + d / 2 }
         ],
-        starSeed: b.motifSeed ?? 1
+        starSeed: b.motifSeed ?? 1,
+        starSize: b.motifStarSize // 未設定は genStars 側で既定3にフォールバック（旧公演もそのまま）
       } as unknown as Shape
       drawStarsLit(g, shape, rgb, 0, ms) // 白い星
       drawStarsLit(g, shape, rgb, 1, ms) // 青い星
@@ -1512,6 +2194,9 @@ export class ImageLightEngine {
       }
       b.color = hue
       b.gauge = m * gate
+      // シーン保存用: ストロボの明滅(gate 0/1)を除いた明るさ。保存が点滅の暗相の瞬間を拾って
+      // gauge=0 で保存される運まかせを防ぐ（閉0〜7は0のまま＝卓が消している意思は保存も暗）。
+      b.gaugeStable = m * (p.mode === 'beam8' || p.mode === 'beam9' ? shutterStable(fx, data) : 1)
     }
   }
 
@@ -1519,6 +2204,10 @@ export class ImageLightEngine {
     if (this.dmxFrame) this.applyDmx(this.dmxFrame, this.dmxGamma, now) // 卓(DMX)支配の灯体に先に焼く
     this.updateVideoFrame() // 動画シーンなら mat を今のコマへ
     const ms = now - this.t0
+    const _aimK = this._aimActive ? Math.min(1, (now - this._aimT0) / this._aimMs) : 1
+    const _aimE = _aimK < 0.5 ? 2 * _aimK * _aimK : 1 - Math.pow(-2 * _aimK + 2, 2) / 2
+    const _aimBlend = this._aimActive && this._aimFrom && _aimK < 1
+    if (this._aimActive && _aimK >= 1) this._aimActive = false
     const decorT = this.decorTime(now) // 電飾チェイス用の時計（playing 中だけ進む・1フレーム1回）
     const QW = IW
     const QH = IH
@@ -1570,7 +2259,7 @@ export class ImageLightEngine {
       beams.forEach((b, i) => {
         b._cn = this.colorNow(b, i, ms)
         if (!b.motif) {
-          b._tn = this.tiltNow(b, ms) + this.hangDeg(b) // 上吊りは180度回して真下基準
+          b._tn = (_aimBlend && this._aimFrom![i] != null ? this._aimFrom![i] + (this.tiltNow(b, ms) - this._aimFrom![i]) * _aimE : this.tiltNow(b, ms)) + this.hangDeg(b) // 上吊りは180度回して真下基準
           b._zp = this.st.zoompulse ? zoomPulseK(this.fxp.zoompulse, ms) : 1
         }
       })
@@ -1809,7 +2498,7 @@ export class ImageLightEngine {
     this.reliefPass(this.frame, this.fc, this.reliefCv, QW, QH)
 
     // ---- Syphon出力: 写真の部分だけを写真の解像度で（余白なし・写真フル解像度）
-    this.composeOutput(maxI)
+    if (!this.skipCompose) this.composeOutput(maxI) // GPU出力窓が担当中は編集側で省く（3840対策）
     // 出力(outCv)にもモチーフを乗せる＝編集画面と同じ絵を Resolume へ送る
     // （composeOutput は写真＋光だけ。モチーフはここで box→出力の写像で重ねる）。
     this.drawMotifsOnOutput(beams, Is, ms)
@@ -1829,8 +2518,9 @@ export class ImageLightEngine {
     if (sparklerLit) this.drawSparklerOnOutput()
 
     // 立体強調: 出力(Syphon/NDI)も編集画面と同じ仕上げにする（relief=0なら無処理）
-    if (this.relief > 0 && this.outW > 16) {
-      const oc2 = this.outCv.getContext('2d', { willReadFrequently: true })!
+    // 中身なし（暗転/ストロボOFF）のコマは透明のままにする＝無駄な全画面処理も走らせない。
+    if (this.relief > 0 && !this.outBlank) {
+      const oc2 = this.octx()
       this.reliefPass(this.outCv, oc2, this.reliefOutCv, this.outW, this.outH)
     }
   }
@@ -1839,9 +2529,9 @@ export class ImageLightEngine {
    *  ステージ座標(LW×LH) → 出力座標へ写像してから drawMotifLit を呼ぶ（位置・大きさが
    *  写真上の見え方と一致）。空シーンは warpBox=全ステージなので全モチーフが入る。 */
   private drawMotifsOnOutput(beams: Beam[], Is: number[], ms: number): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
+    if (this.lightOnly || !this.box || this.outBlank) return
     if (!beams.some((b) => b.motif)) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const oc = this.octx()
     const box = this.box
     const sx = this.outW / box.w
     const sy = this.outH / box.h
@@ -1933,6 +2623,7 @@ export class ImageLightEngine {
   /** 出力(outCv)を「写真の部分だけ・写真の解像度・余白なし」で合成する。写真(mat)はフル解像度、
    *  ソフトな光は lightCv の box 領域を引き伸ばす（写真だけシャープに保つ）。編集画面とは別物。 */
   private composeOutput(maxI: number): void {
+    this.outBlank = false // 下の「写真無し or 無灯」分岐だけが true にする
     const OUT_CAP = this.outCap // 出力上限幅（可変：なめらか1920/バランス2560/高精細3840）
     const flameLit = (this.flameEnabled && this.flame.active) || (this.sparklerEnabled && this.sparkler.active) // 特効: 炎/火花だけでも出力する
     // 光だけ出力モード: 写真を使わず光マップ(lightCv)を出力。Arena側で 映像×光(Multiply)。
@@ -1947,7 +2638,7 @@ export class ImageLightEngine {
         if (this.outCv.height !== oh) this.outCv.height = oh
         this.outW = ow
         this.outH = oh
-        const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+        const oc = this.octx()
         oc.setTransform(1, 0, 0, 1, 0, 0)
         oc.globalCompositeOperation = 'source-over'
         oc.clearRect(0, 0, ow, oh)
@@ -1962,7 +2653,7 @@ export class ImageLightEngine {
       if (this.outCv.height !== oh) this.outCv.height = oh
       this.outW = ow
       this.outH = oh
-      const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+      const oc = this.octx()
       const lb = this.box
       const lbx = lb.x * Q
       const lby = lb.y * Q
@@ -1975,14 +2666,28 @@ export class ImageLightEngine {
       return
     }
     if (!this.mat || !this.box || (maxI <= 0.004 && !flameLit)) {
-      // 写真無し or 無灯 → 透明な小フレーム（Add合成で何も乗らない）
-      if (this.outCv.width !== 16) {
+      // 写真無し or 無灯 → 中身は透明（Add合成で何も乗らない）。
+      // 🔴 サイズは縮めない。無灯のたびに 3840→16 と解像度が変わると、受け手(Resolume 等)が
+      //   そのつどフォーマットを繋ぎ直し、ストロボ/暗転で激しくカクつく（現場 2026-07-22 の主犯）。
+      //   写真がある間は本来の出力サイズのまま「透明なコマ」を送り続ける＝解像度が一定になる。
+      //   送るのをやめるという手は取れない（受け手が最後の絵を保持＝暗転で残像になる）。
+      //   写真がまだ無い時だけ、大きさの決めようが無いので従来どおり小さいダミー。
+      this.outBlank = true
+      if (this.mat && this.box) {
+        const bw = Math.min(this.mat.width, OUT_CAP)
+        const bh = Math.max(1, Math.round((this.mat.height * bw) / this.mat.width))
+        if (this.outCv.width !== bw) this.outCv.width = bw
+        if (this.outCv.height !== bh) this.outCv.height = bh
+      } else if (this.outCv.width !== 16) {
         this.outCv.width = 16
         this.outCv.height = 9
       }
       this.outW = this.outCv.width
       this.outH = this.outCv.height
-      this.outCv.getContext('2d')!.clearRect(0, 0, this.outCv.width, this.outCv.height)
+      // 🔴 octx() 経由（素の getContext ではない）＝outCv のコンテキスト属性を octx が意図した
+      //   willReadFrequency で確定させる。ここで素に呼ぶと（照明モード突入直後の暗い初回描画で
+      //   毎回通る）互換経路の readOutputRGBA が GPU 読み戻しに落ちる（レビュー指摘）。
+      this.octx().clearRect(0, 0, this.outCv.width, this.outCv.height)
       return
     }
     const mw = this.mat.width
@@ -1993,7 +2698,7 @@ export class ImageLightEngine {
     if (this.outCv.height !== oh) this.outCv.height = oh
     this.outW = ow
     this.outH = oh
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const oc = this.octx()
     const tone = Math.max(0, (0.5 - maxI) / 0.5) * 0.85
     const b = this.box
     const bx = b.x * Q
@@ -2069,7 +2774,7 @@ export class ImageLightEngine {
 
   /** Syphon出力用 premultiplied RGBA（outCv＝写真の部分だけ・写真解像度）。 */
   readOutputRGBA(): Uint8ClampedArray {
-    const ctx = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const ctx = this.octx()
     const d = ctx.getImageData(0, 0, this.outW, this.outH).data
     for (let i = 0; i < d.length; i += 4) {
       const a = d[i + 3]
@@ -2129,6 +2834,26 @@ export class ImageLightEngine {
   selectAll(): void {
     this.selected = this.beams.map((_, i) => i)
     this.bump(false)
+  }
+  /** 選択に入れてよい灯体の条件（UIがタブ制限を登録）。クリック等のUI操作だけでなく、
+   *  undo復元・削除後の自動選択・公演復元といった「プログラムからの選択」にも同じ制限を
+   *  効かせる門番。null=制限なし（従来どおり）。 */
+  selGuard: ((b: Beam) => boolean) | null = null
+  private selAllowed(b: Beam | undefined): boolean {
+    return !!b && (!this.selGuard || this.selGuard(b))
+  }
+  /** 条件に合う灯体だけ全選択（タブ連動のALL/⌘A用＝SFXタブなら炎/火花だけ等）。 */
+  selectWhere(pred: (b: Beam) => boolean): void {
+    this.selected = this.beams.map((b, i) => (pred(b) ? i : -1)).filter((i) => i >= 0)
+    this.bump(false)
+  }
+  /** 選択から条件に合わないものを外す（タブ切替時＝そのタブで触れないものを選択に残さない）。 */
+  filterSelection(pred: (b: Beam) => boolean): void {
+    const next = this.selected.filter((i) => this.beams[i] && pred(this.beams[i]))
+    if (next.length !== this.selected.length) {
+      this.selected = next
+      this.bump(false)
+    }
   }
   /** Shift+クリック: 選択に足す/外す。 */
   toggleSelectBeam(i: number): void {
@@ -2436,6 +3161,23 @@ export class ImageLightEngine {
     this.targets().forEach((b) => { if (b.front) b.frontEdge = n })
     this.bump()
   }
+  /** ゴボ（光の柄）: フロント灯体だけに効く。null=柄なし。 */
+  setGobo(kind: GoboKind | null): void {
+    this.targets().forEach((b) => {
+      if (b.front) b.gobo = kind ?? undefined
+    })
+    this.bump()
+  }
+  setGoboSharp(v: number): void {
+    const n = Math.max(0, Math.min(1, v))
+    this.targets().forEach((b) => { if (b.front) b.goboSharp = n })
+    this.bump()
+  }
+  setGoboSpd(v: number): void {
+    const n = Math.max(0, Math.min(1, v))
+    this.targets().forEach((b) => { if (b.front) b.goboSpd = n })
+    this.bump()
+  }
   /** リアルな発光画像を灯体として追加（明るさだけで光る・色は画像のまま）。 */
   addImageMotif(dataUrl: string): void {
     if (this.beams.length >= MAX_BEAMS) return
@@ -2527,6 +3269,11 @@ export class ImageLightEngine {
     this.targets().forEach((b) => { b.motifDiam = n })
     this.bump()
   }
+  setMotifStarSize(v: number): void {
+    const n = Math.max(0.5, Math.min(30, v)) // stars.ts の starsSize と同じ範囲
+    this.targets().forEach((b) => { b.motifStarSize = n })
+    this.bump()
+  }
   setMotifText(s: string): void {
     this.targets().forEach((b) => { b.motifText = s || 'LIVE' })
     this.bump()
@@ -2592,7 +3339,9 @@ export class ImageLightEngine {
     this.rigCustomized = true
     const drop = new Set(this.selected)
     this.beams = this.beams.filter((_, i) => !drop.has(i))
-    this.selected = this.beams.length ? [Math.min(this.selected[0], this.beams.length - 1)] : []
+    // 削除後の自動選択（隣）もタブ制限を通す＝SFXタブで炎を消した直後に照明が選ばれる事故を防ぐ
+    const ni = this.beams.length ? Math.min(this.selected[0], this.beams.length - 1) : -1
+    this.selected = ni >= 0 && this.selAllowed(this.beams[ni]) ? [ni] : []
     this.bump()
   }
   /** ⌘C: 選択中の灯体ぜんぶを内部クリップボードへ（仕込み・向き・色を丸ごと）。
@@ -2629,7 +3378,8 @@ export class ImageLightEngine {
       })
       newIdx.push(this.beams.length - 1)
     }
-    if (newIdx.length) this.selected = newIdx
+    // タブ制限（selGuard）を通す＝今のタブで触れない灯体が選択状態にならない
+    if (newIdx.length) this.selected = newIdx.filter((i) => this.selAllowed(this.beams[i]))
     this.bump()
   }
 
@@ -2651,7 +3401,8 @@ export class ImageLightEngine {
       })
       newIdx.push(this.beams.length - 1)
     }
-    if (newIdx.length) this.selected = newIdx
+    // タブ制限（selGuard）を通す＝今のタブで触れない灯体が選択状態にならない
+    if (newIdx.length) this.selected = newIdx.filter((i) => this.selAllowed(this.beams[i]))
     this.bump()
   }
 
@@ -2729,13 +3480,24 @@ export class ImageLightEngine {
     this.outCap = px
     this.bump()
   }
-  /** 同じキー(e.code)を持つ他カテゴリ(pattern/FX/color)から外す＝「1キー1役」。 */
+  /** 同じキー(e.code)を持つ他カテゴリ(pattern/FX/color/シーン/ストロボ/チェイス)から外す＝「1キー1役」。 */
   private clearKeyEverywhere(code: string): void {
+    if (this.strobeKey === code) this.strobeKey = null
+    if (this.motifChaseKey === code) this.motifChaseKey = null
+    this.scenes.forEach((s) => {
+      if (s.key === code) s.key = null
+    })
     this.patterns.forEach((p) => {
       if (p && p.key === code) p.key = null
     })
     for (const k of Object.keys(this.fxKey) as FxKey[]) if (this.fxKey[k] === code) delete this.fxKey[k]
     for (const h of Object.keys(this.colorKey)) if (this.colorKey[h] === code) delete this.colorKey[h]
+    for (const k of Object.keys(this.fireKeyMap) as FireKey[])
+      if (this.fireKeyMap[k] === code) delete this.fireKeyMap[k]
+    this.sfxScenes.forEach((s) => {
+      if (s && s.key === code) s.key = null
+    })
+    for (const k of ['go', 'back'] as const) if (this.goKeyMap[k] === code) delete this.goKeyMap[k]
   }
   /** 同じ MIDI ノートを持つ他カテゴリ(strobe/FX/color/pattern/scene)から外す＝「1ノート1役」。 */
   private clearMidiNoteEverywhere(note: number): void {
@@ -2749,6 +3511,12 @@ export class ImageLightEngine {
     this.scenes.forEach((s) => {
       if (s.midiNote === note) s.midiNote = null
     })
+    for (const k of Object.keys(this.fireMidiMap) as FireKey[])
+      if (this.fireMidiMap[k] === note) delete this.fireMidiMap[k]
+    this.sfxScenes.forEach((s) => {
+      if (s && s.midi === note) s.midi = null
+    })
+    for (const k of ['go', 'back'] as const) if (this.goMidiMap[k] === note) delete this.goMidiMap[k]
   }
   /** 本番シーン切替の方式（cut/fade）と時間(ms)を設定。 */
   setSceneFadeMode(mode: 'cut' | 'fade'): void {
@@ -2843,6 +3611,28 @@ export class ImageLightEngine {
       b.dmx = { universe, start: next, mode, fixedColor: b.dmx?.fixedColor, addressStep: b.dmx?.addressStep }
       next += count
     }
+    this.bump()
+  }
+  /** 全パッチ灯体のモード（チャンネル数）を一括変更。アドレスは 512 に収まるようクランプするだけ＝
+   *  重ならない番地への振り直しは「全灯体に一括で割り当てる」でチャンネル数ぶんに詰め直す。⌘Z で戻せる。 */
+  setAllPatchedMode(mode: ChannelMode): void {
+    const ps = this.beams.filter((b) => b.dmx)
+    if (!ps.length) return
+    this.pushHistory('dmx')
+    for (const b of ps) {
+      const start = Math.max(1, Math.min(513 - channelCount(mode), b.dmx!.start))
+      b.dmx = { ...b.dmx!, mode, start }
+    }
+    this.bump()
+  }
+  /** 全パッチ灯体のユニバースを一括変更（アドレス＝ADDR はそのまま）。⌘Z で戻せる。
+   *  u は 0 始まりの内部値（UI は 1 始まり表示なので呼ぶ側で −1 する）。 */
+  setAllPatchedUniverse(u: number): void {
+    const ps = this.beams.filter((b) => b.dmx)
+    if (!ps.length) return
+    this.pushHistory('dmx')
+    const uni = Math.max(0, Math.min(32767, Math.floor(u)))
+    for (const b of ps) b.dmx = { ...b.dmx!, universe: uni }
     this.bump()
   }
   setPan(v: number): void {
@@ -3137,6 +3927,10 @@ export class ImageLightEngine {
     }
     for (const u of this.allUrls) URL.revokeObjectURL(u) // 削除済み含め全URLをここで解放
     this.allUrls = []
+    // 炎/ロースモークの WebGL コンテキストも明示解放。モードを出入りするたびに engine が作り直され、
+    // 解放しないとコンテキストが溜まって上限(~16)に達し、特効が描けなくなる。unmount からここが呼ばれる。
+    this.flame.dispose()
+    this.lowSmoke.dispose()
   }
   private fitImage(): void {
     if (!this.mat) {
@@ -3421,8 +4215,13 @@ export class ImageLightEngine {
   }
   selectScene(i: number): void {
     if (!this.scenes[i]) return
-    if (this.activeScene >= 0 && this.activeScene !== i) {
-      this.saveFixState(this.activeScene)
+    // 同じシーンを選び直した時は何もしない。抜けないと下の loadFixState(i) が「そのシーンに来てから
+    // 変えたミュート/ソロ」を古い保存値で巻き戻す＝本番で消した灯体が復活する事故になる。
+    if (this.activeScene === i) return
+    if (this.activeScene >= 0) {
+      // 復元中(restoring)は saveFixState を呼ばない：復元したばかりの各シーンの fix を、まだ設定前の
+      // beams（全部ミュート無し）で上書きして潰してしまうため。
+      if (!this.restoring) this.saveFixState(this.activeScene)
       const prev = this.scenes[this.activeScene]
       if (prev?.kind === 'video') prev.video?.pause() // 非表示の動画は止める（軽さ・本数対策）
     }
@@ -3486,9 +4285,10 @@ export class ImageLightEngine {
         rainbow: s.rainbow,
         zoompulse: s.zoompulse
       },
-      fxp: JSON.parse(JSON.stringify(this.fxp)),
+      fxp: cloneFxp(this.fxp),
       lights: this.beams.map((b) => ({
-        gauge: b.gauge,
+        // 卓駆動中はストロボの明滅を除いた明るさで保存（暗相の瞬間に押しても0にならない）
+        gauge: b.dmx && this.dmxFrame ? (b.gaugeStable ?? b.gauge) : b.gauge,
         color: b.color.slice() as RGB3,
         pan: b.pan,
         tilt: b.tilt,
@@ -3501,13 +4301,21 @@ export class ImageLightEngine {
   }
   private applyLook(L: Look): void {
     if (!L) return
+    // 位置ブレンド: 前シーンの見た目の向きをスナップ→新シーンの生きた向きへトランジション時間で混ぜる
+    {
+      const _n = performance.now()
+      this._aimFrom = this.beams.map((b) => this.tiltNow(b, _n - this.t0))
+      this._aimT0 = _n
+      this._aimMs = this.sceneFadeMs > 0 ? this.sceneFadeMs : 600
+      this._aimActive = !(this.st.search && L.fxst.search)
+    }
     const s = this.st
     // 旧シーン互換: 記録に無いFXは確実にOFF
     s.chase = s.search = s.searchRandom = s.colorChase = false
     s.strobe = 'off'
     s.breath = s.fire = s.wave = s.bolt = s.rainbow = s.zoompulse = false
     Object.assign(s, L.fxst)
-    if (L.fxp) this.fxp = JSON.parse(JSON.stringify(L.fxp))
+    if (L.fxp) this.fxp = cloneFxp(L.fxp)
     // 復元データ(古い/壊れた/手編集 show.json)で lights が無い/壊れていても落ちないよう防御。
     const lights = Array.isArray(L.lights) ? L.lights : []
     lights.forEach((f, i) => {
@@ -3523,7 +4331,6 @@ export class ImageLightEngine {
     })
     // 旧シーン互換: chasePalette が無ければ空（=8色ぜんぶ）に
     this.chasePalette = (L.chasePalette ?? []).map((c) => c.slice() as RGB3)
-    this.t0 = performance.now()
   }
   toggleArmSave(): void {
     this.armedSave = !this.armedSave
@@ -3542,6 +4349,9 @@ export class ImageLightEngine {
     if (n <= 9 || this.patterns[n - 1] !== null) return
     this.pushHistory()
     this.patterns.pop()
+    // GO進行表が消えた枠を指したままだと「GOを押しても何も起きない行」が残る＝nullへ落とす
+    for (const st of this.cueSheet)
+      if (st.pattern != null && st.pattern >= this.patterns.length) st.pattern = null
     this.bump()
   }
   /** PLAY/BUILD どちらからでも: armed中なら保存、そうでなければ呼び出し。 */
@@ -3581,6 +4391,14 @@ export class ImageLightEngine {
   private startSceneFade(L: Look): void {
     if (!L) return
     this.sceneFadeTo = L // 割込み(暗転/全点灯)時に目標へ即ジャンプで完了させるため覚える
+    // 位置ブレンド: 前シーンの見た目の向きをスナップ→新シーンの生きた向きへトランジション時間で混ぜる
+    {
+      const _n = performance.now()
+      this._aimFrom = this.beams.map((b) => this.tiltNow(b, _n - this.t0))
+      this._aimT0 = _n
+      this._aimMs = this.sceneFadeMs > 0 ? this.sceneFadeMs : 600
+      this._aimActive = !(this.st.search && L.fxst.search)
+    }
     // 復元データが壊れていても落ちないよう lights を検証して使う。
     const lights = Array.isArray(L.lights) ? L.lights : []
     const from = this.beams.map((b) => ({
@@ -3596,7 +4414,7 @@ export class ImageLightEngine {
     s.strobe = 'off'
     s.breath = s.fire = s.wave = s.bolt = s.rainbow = s.zoompulse = false
     Object.assign(s, L.fxst)
-    if (L.fxp) this.fxp = JSON.parse(JSON.stringify(L.fxp))
+    if (L.fxp) this.fxp = cloneFxp(L.fxp)
     this.chasePalette = (L.chasePalette ?? []).map((c) => c.slice() as RGB3)
     // mute/solo は真偽値＝フェード不可。明かり切替と同時に即反映する。
     this.beams.forEach((b, i) => {
@@ -3606,9 +4424,11 @@ export class ImageLightEngine {
         b.solo = !!t.solo
       }
     })
-    this.t0 = performance.now()
     const dur = this.sceneFadeMs
     const seq = this.sceneFadeSeq
+    // 位置ブレンドが効くフェードか（両サーチONだと効かない＝C3）。効かない時は
+    // 従来どおり tilt を補間しないと、向きだけ最初の1コマで飛ぶ。
+    const aimOn = this._aimActive
     const t0 = performance.now()
     this.sceneFadeActive = true
     const lerp = (a: number, b: number, k: number): number => a + (b - a) * k
@@ -3628,7 +4448,9 @@ export class ImageLightEngine {
         ] as RGB3
         b.pan = lerp(f.pan, t.pan, e)
         // 灯体は±110で止める（applyLookと同じ。古いシーンの±180が居座らないように）。Lookは書き換えない。
-        b.tilt = b.motif ? lerp(f.tilt, t.tilt, e) : clampTilt(lerp(f.tilt, t.tilt, e))
+        // ブレンド中は即 target（見た目の動きは _tn 側が持つ＝二重移動防止）。ブレンドしない時は補間。
+        const tl = aimOn ? t.tilt : lerp(f.tilt, t.tilt, e)
+        b.tilt = b.motif ? tl : clampTilt(tl)
         b.zoom = lerp(f.zoom, t.zoom, e)
       })
       this.bump(false)
@@ -3694,6 +4516,9 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
+      this.learnSfxScene = null
     }
     this.bump(false)
   }
@@ -3730,6 +4555,9 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
+      this.learnSfxScene = null
     }
     this.bump(false)
   }
@@ -3740,6 +4568,31 @@ export class ImageLightEngine {
     if (note !== null) this.clearMidiNoteEverywhere(note)
     this.scenes[i].midiNote = note
     this.learnScene = null
+    this.bump()
+  }
+  /** シーンにキー(e.code)を割当。同じキーは他カテゴリからも外す＝1キー1役。null でクリア。 */
+  assignSceneKey(i: number, code: string | null): void {
+    if (i < 0 || i >= this.scenes.length) return
+    this.pushHistory()
+    if (code !== null) this.clearKeyEverywhere(code)
+    this.scenes[i].key = code
+    this.learnScene = null
+    this.bump()
+  }
+  /** 特別ストロボにキーを割当（1キー1役）。null でクリア。 */
+  assignStrobeKey(code: string | null): void {
+    this.pushHistory()
+    if (code !== null) this.clearKeyEverywhere(code)
+    this.strobeKey = code
+    this.learnStrobe = false
+    this.bump()
+  }
+  /** モチーフチェイスにキーを割当（1キー1役）。null でクリア。 */
+  assignMotifChaseKey(code: string | null): void {
+    this.pushHistory()
+    if (code !== null) this.clearKeyEverywhere(code)
+    this.motifChaseKey = code
+    this.learnMotifChase = false
     this.bump()
   }
 
@@ -4026,11 +4879,11 @@ export class ImageLightEngine {
 
   /** 出力(outCv)に電飾パターンを重ねる（モチーフと同じ box→出力写像）。 */
   private drawDecorOnOutput(t: number): void {
-    if (this.lightOnly || !this.box || this.outW <= 16) return
+    if (this.lightOnly || !this.box || this.outBlank) return
     if (!this.decor.enabled || !this.decorSegs || !this.decorSegs.length) return
     const boxLW = this.getMaskBoxLW()
     if (!boxLW) return
-    const oc = this.outCv.getContext('2d', { willReadFrequently: true })!
+    const oc = this.octx()
     const box = this.box
     const sx = this.outW / box.w
     const sy = this.outH / box.h
@@ -4046,19 +4899,73 @@ export class ImageLightEngine {
     this.panicSeq++
     this.panicGain = 1
     this.panicActive = false
+    this.preBlackout = null // CUE適用/全点灯で明かりが戻った＝暗転トグルの復帰先は破棄
     this.snapSceneFade() // フェード中の割込み＝目標へ即ジャンプで完了（中途半端な明かりで残さない）
   }
+  /** 暗転トグルの復帰先（暗転直前の look）。blackout で退避・wake/panicFade/復帰で破棄。 */
+  private preBlackout: Look | null = null
+  private preBlackoutPattern = -1
+  /** 暗転中（トグルで戻れる状態）か。暗転ボタンの点灯表示用。 */
+  get blackedOut(): boolean {
+    return this.panicGain === 0 && this.preBlackout != null
+  }
+  /** キー'0'/暗転ボタン: 暗転⇄直前の明かりへ復帰のトグル。 */
+  blackoutToggle(): void {
+    if (this.panicGain === 0 && this.preBlackout) this.restoreFromBlackout()
+    else this.blackout()
+  }
   blackout(): void {
+    // フェード中の暗転＝先に目標へ即ジャンプ。これを退避より先にやらないと、フェード途中の
+    // 中間ブレンドの明かりが復帰先として保存される（戻した時にどのシーンでもない絵になる）。
+    this.snapSceneFade()
+    // 暗転直前の look と表示中CUEを退避（stopAllFx の前）＝もう一度 0 で元の明かりへ戻れる。
+    this.preBlackout = this.currentLook()
+    this.preBlackoutPattern = this.activePattern
     // 暗転の直前の look（FX・明るさ）を履歴へ積む → ⌘Z で直前へ戻せる。stopAllFx は
     // 内部呼びなので二重に積まない（pushHist=false）。
     this.pushHistory()
     this.panicSeq++
     this.panicGain = 0
     this.panicActive = false
-    this.snapSceneFade() // フェード中の暗転＝目標へ即ジャンプしてから真っ黒（戻した時に正しいシーンの明かり）
     this.stopAllFx(false)
     this.activePattern = -1
     this.bump(false)
+  }
+  /** 暗転から直前の明かりへ復帰。FX・表示中CUEも戻し、panicGain を 0→1 へフェード
+   *  （カット設定なら即）。CUEのフェード時間(sceneFadeMs)を流用。 */
+  private restoreFromBlackout(): void {
+    const L = this.preBlackout
+    this.preBlackout = null
+    if (!L) return
+    this.pushHistory()
+    this.applyLook(L) // FX・チェイスも復活（画面は panicGain=0 のままなのでまだ黒）
+    this.activePattern = this.preBlackoutPattern
+    this.preBlackoutPattern = -1
+    if (this.sceneFadeMode === 'cut') {
+      this.panicSeq++
+      this.panicGain = 1
+      this.panicActive = false
+      this.bump(false)
+      return
+    }
+    const my = ++this.panicSeq
+    const t1 = performance.now()
+    const dur = Math.max(120, this.sceneFadeMs)
+    this.panicActive = true // 描画ループに「フェード中＝描き続けて」と知らせる
+    const step = (now: number): void => {
+      if (this.panicSeq !== my) {
+        this.panicActive = false
+        return
+      }
+      const k = Math.min(1, (now - t1) / dur)
+      this.panicGain = k
+      if (k < 1) requestAnimationFrame(step)
+      else {
+        this.panicActive = false
+        this.bump(false)
+      }
+    }
+    requestAnimationFrame(step)
   }
   fullOn(): void {
     this.pushHistory()
@@ -4070,6 +4977,7 @@ export class ImageLightEngine {
   panicFade(): void {
     // パニック開始時に直前の look（FX・明るさ）を履歴へ積む → フェード完了後でも ⌘Z で一発で
     // 直前へ戻せる。完了時の stopAllFx は内部呼びなので二重に積まない（pushHist=false）。
+    this.preBlackout = null // パニックは暗転トグルと別系統＝古い退避で誤復帰しない
     this.pushHistory()
     const my = ++this.panicSeq
     const t1 = performance.now()
@@ -4140,6 +5048,9 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
+      this.learnSfxScene = null
       this.initMidi()
     }
     this.bump(false)
@@ -4153,6 +5064,9 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
+      this.learnSfxScene = null
       this.initMidi()
     }
     this.bump(false)
@@ -4168,6 +5082,9 @@ export class ImageLightEngine {
       this.learnColor = null
       this.learnStrobe = false
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
+      this.learnSfxScene = null
       this.initMidi()
     }
     this.bump(false)
@@ -4212,12 +5129,16 @@ export class ImageLightEngine {
       this.learnPattern = null
       this.learnScene = null
       this.learnMotifChase = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
+      this.learnSfxScene = null
     }
     this.bump(false)
   }
-  /** 特別ストロボの MIDI 割当を解除。 */
+  /** 特別ストロボの割当（キー・MIDI とも）を解除。 */
   clearStrobeShortcut(): void {
     this.strobeMidi = null
+    this.strobeKey = null
     this.bump()
   }
   /** モチーフチェイスの MIDI Learn 待機を開始/解除。 */
@@ -4230,12 +5151,16 @@ export class ImageLightEngine {
       this.learnPattern = null
       this.learnScene = null
       this.learnStrobe = false
+      this.learnFire = null // 発射ボタン/SFXシーンのLearnも排他（余ったキーが特効スイッチに化ける事故防止）
+      this.learnGo = null
+      this.learnSfxScene = null
     }
     this.bump(false)
   }
   /** モチーフチェイスの MIDI 割当を解除。 */
   clearMotifChaseShortcut(): void {
     this.motifChaseMidi = null
+    this.motifChaseKey = null
     this.bump()
   }
   /** 特別ストロボの速さ 0..1。 */
@@ -4245,10 +5170,18 @@ export class ImageLightEngine {
   }
   /** MIDI メッセージ1件を処理（ネイティブ midiread / Web MIDI 共通の入口）。
    *  stt=ステータス, note=データ1(ノート/CC番号), vel=データ2(ベロシティ/値)。 */
+  /** MIDI で何か動いた時に呼ぶ（画面側が「ユーザーが触った」判定に使う＝自動保存が働く）。 */
+  onUserTouch: (() => void) | null = null
   handleMidiMessage(stt: number, note: number, vel: number): void {
+    // 物理つまみ/パッドしか触っていないセッションでも自動保存が働くようにする
+    // （画面のクリックやキーだけを「触った」としていたため、MIDI だけの仕込みが消えていた）。
+    this.onUserTouch?.()
     if ((stt & 0xf0) === 0x90 && vel > 0) {
       // ノートON：LEARN中なら割当、そうでなければ割当済みを発火
       if (this.learnFx != null) this.assignFxShortcut(this.learnFx, null, note)
+      else if (this.learnFire != null) this.assignFireShortcut(this.learnFire, null, note)
+      else if (this.learnGo != null) this.assignGoShortcut(this.learnGo, null, note)
+      else if (this.learnSfxScene != null) this.assignSfxSceneShortcut(this.learnSfxScene, null, note)
       else if (this.learnPattern != null) this.assignShortcut(this.learnPattern, null, note)
       else if (this.learnScene != null) this.assignSceneMidi(this.learnScene, note)
       else if (this.learnStrobe) {
@@ -4268,8 +5201,14 @@ export class ImageLightEngine {
       } else {
         const fk = (Object.keys(this.fxMidi) as FxKey[]).find((k) => this.fxMidi[k] === note)
         const ck = Object.keys(this.colorMidi).find((h) => this.colorMidi[h] === note)
+        const fireK = (Object.keys(this.fireMidiMap) as FireKey[]).find((k) => this.fireMidiMap[k] === note)
+        const sxi = this.sfxScenes.findIndex((s) => s && s.midi === note)
         if (fk) this.fxToggle(fk)
         else if (ck) this.setColor(hexToRgb(ck))
+        else if (fireK) this.toggleFire(fireK)
+        else if (this.goMidiMap.go === note) this.goNext()
+        else if (this.goMidiMap.back === note) this.goBack()
+        else if (sxi >= 0) this.applySfxScene(sxi)
         else {
           const pi = this.patterns.findIndex((p) => p && p.midi === note)
           if (pi >= 0) this.applyPattern(pi)
@@ -4297,6 +5236,43 @@ export class ImageLightEngine {
       }
     }
   }
+  /** requestMIDIAccess の結果（つなぎ直しで使い回す）。 */
+  private midiAccess: MIDIAccess | null = null
+  /** MIDI をつなぎ直す。抜き差しの後に効かなくなった時の出口（SETUP のボタンから呼ぶ）。
+   *  Mac は main 側の CoreMIDI リーダーも作り直す。割当（ノート/CC）は消さない。 */
+  async reconnectMidi(): Promise<string[]> {
+    const acc = this.midiAccess
+    if (acc) {
+      // 今見えている入力を全部繋ぎ直す
+      acc.inputs.forEach((inp) => {
+        inp.onmidimessage = (m: MIDIMessageEvent): void => {
+          const data = m.data
+          if (!data) return
+          this.handleMidiMessage(data[0], data[1] ?? 0, data[2] ?? 0)
+        }
+      })
+      const names: string[] = []
+      acc.inputs.forEach((inp) => names.push(inp.name || 'MIDI'))
+      this.midiInputs = names
+      this.onMidiInputs?.(names)
+    } else {
+      this.midiTried = false // まだ取れていなければ取り直す
+      this.initMidi()
+    }
+    // Mac(CoreMIDI) 側: 子プロセスを作り直して全ソースへ再接続
+    const api = (window as unknown as { api?: { restartMidi?: () => Promise<string[]> } }).api
+    const ports = (await api?.restartMidi?.()) ?? []
+    if (ports.length) {
+      this.midiInputs = ports
+      this.onMidiInputs?.(ports)
+    }
+    this.bump()
+    return this.midiInputs
+  }
+  /** Web MIDI を掴めているか（起動直後の自動リトライを打ち切る判定に使う）。 */
+  get midiReady(): boolean {
+    return this.midiTried
+  }
   initMidi(): void {
     const nav = navigator as Navigator & { requestMIDIAccess?: () => Promise<MIDIAccess> }
     if (this.midiTried || !nav.requestMIDIAccess) return
@@ -4322,11 +5298,13 @@ export class ImageLightEngine {
             this.handleMidiMessage(data[0], data[1] ?? 0, data[2] ?? 0)
           }
         }
+        this.midiAccess = acc
         acc.inputs.forEach(hook)
         refreshInputs()
-        acc.onstatechange = (e): void => {
-          const port = e.port
-          if (port && port.type === 'input' && port.state === 'connected') hook(port as MIDIInput)
+        acc.onstatechange = (): void => {
+          // 抜き差しでは「変わったポートだけ」繋ぎ直しても足りないことがある
+          // （別のポート番号で生え直す機種がある）。毎回ぜんぶ繋ぎ直す＝取りこぼしなし。
+          acc.inputs.forEach(hook)
           refreshInputs()
         }
       })
@@ -4355,6 +5333,24 @@ export class ImageLightEngine {
   private rigData(): RigPayload {
     return {
       st: { master: this.st.master, smoke: this.st.smoke },
+      // FX の入り切りは「今出している絵」そのもの。保存に入っていないと開き直した時に
+      // 灯体の色と向きだけ戻った“動かない絵”になる。
+      fxst: {
+        chase: this.st.chase,
+        search: this.st.search,
+        searchRandom: this.st.searchRandom,
+        strobe: this.st.strobe,
+        colorChase: this.st.colorChase,
+        breath: this.st.breath,
+        fire: this.st.fire,
+        wave: this.st.wave,
+        bolt: this.st.bolt,
+        rainbow: this.st.rainbow,
+        zoompulse: this.st.zoompulse
+      },
+      lightOnly: this.lightOnly,
+      relief: this.relief,
+      lumReliefStrength: this.lumReliefStrength,
       fxp: this.fxp,
       patterns: this.patterns,
       userColors: this.userColors,
@@ -4370,8 +5366,10 @@ export class ImageLightEngine {
       sceneFadeMode: this.sceneFadeMode,
       sceneFadeMs: this.sceneFadeMs,
       strobeMidi: this.strobeMidi,
+      strobeKey: this.strobeKey,
       strobeRate: this.strobeRate,
-      motifChaseMidi: this.motifChaseMidi
+      motifChaseMidi: this.motifChaseMidi,
+      motifChaseKey: this.motifChaseKey
     }
   }
   // rigData を取り込む（localStorage / 公演読込 共通）。灯体配置は読み込まない。
@@ -4381,6 +5379,11 @@ export class ImageLightEngine {
       this.st.master = d.st.master ?? 1
       this.st.smoke = d.st.smoke ?? 12
     }
+    if (d.fxst) Object.assign(this.st, d.fxst)
+    if (typeof d.lightOnly === 'boolean') this.lightOnly = d.lightOnly
+    if (typeof d.relief === 'number') this.relief = Math.max(0, Math.min(1, d.relief))
+    if (typeof d.lumReliefStrength === 'number')
+      this.lumReliefStrength = Math.max(0, Math.min(1, d.lumReliefStrength))
     if (d.fxp) this.fxp = { ...this.fxp, ...d.fxp }
     if (Array.isArray(d.patterns)) this.patterns = d.patterns
     if (Array.isArray(d.userColors)) this.userColors = d.userColors
@@ -4396,21 +5399,57 @@ export class ImageLightEngine {
     if (d.sceneFadeMode === 'cut' || d.sceneFadeMode === 'fade') this.sceneFadeMode = d.sceneFadeMode
     if (typeof d.sceneFadeMs === 'number') this.sceneFadeMs = d.sceneFadeMs
     if (typeof d.strobeMidi === 'number') this.strobeMidi = d.strobeMidi
+    if (typeof d.strobeKey === 'string') this.strobeKey = d.strobeKey
     if (typeof d.motifChaseMidi === 'number') this.motifChaseMidi = d.motifChaseMidi
+    if (typeof d.motifChaseKey === 'string') this.motifChaseKey = d.motifChaseKey
     if (typeof d.strobeRate === 'number') this.strobeRate = d.strobeRate
   }
+  /** 前回 localStorage に書いた割当。同じ内容なら書かない（つまみ操作ごとの同期書き込みを避ける）。 */
+  private lastMidiMapJson = ''
   private saveRig(): void {
-    // セッション内（ページ生存中）だけ保持＝モード切替の行き来では残るが、アプリ再起動で消える。
-    // localStorage には書かない＝新しく開いたら明かり/色/MIDI はまっさら。
-    try {
-      sessionRig = JSON.parse(JSON.stringify(this.rigData())) as RigPayload
-    } catch {
-      /* ignore */
+    // 🔴 rigData() は1回だけ。ここはつまみから指を離すたびに走るので、2回作ると素で倍のコスト。
+    const d = this.rigData()
+    // 明かり/色/シーンはセッション内（ページ生存中）だけ保持＝モード切替の行き来では残るが、
+    // アプリ再起動で消える（のむさん確定 2026-06-21）。
+    // ここも JSON をやめる（patterns を含むので重く、つまみ操作の合間に走って引っかかる）
+    sessionRig = {
+      ...d,
+      st: d.st ? { ...d.st } : undefined,
+      fxst: d.fxst ? { ...d.fxst } : undefined,
+      fxp: d.fxp ? cloneFxp(d.fxp) : undefined,
+      patterns: d.patterns ? clonePatterns(d.patterns) : undefined,
+      userColors: d.userColors?.map((c) => c.slice() as RGB3),
+      chasePalette: d.chasePalette?.map((c) => c.slice() as RGB3),
+      paramMidi: d.paramMidi ? { ...d.paramMidi } : undefined,
+      fxMidi: d.fxMidi ? { ...d.fxMidi } : undefined,
+      fxKey: d.fxKey ? { ...d.fxKey } : undefined,
+      colorMidi: d.colorMidi ? { ...d.colorMidi } : undefined,
+      colorKey: d.colorKey ? { ...d.colorKey } : undefined
     }
+    // MIDI とキーの割当だけは再起動でも残す（仕込みなので引きずって困らない）。
+    // 🔴 localStorage への書き込みは同期＝つまみを動かすたびに書くと指に付いてこない。
+    // 割当が実際に変わった時（LEARN した時）だけ書く。
+    const json = JSON.stringify({
+      paramMidi: d.paramMidi,
+      masterMidi: d.masterMidi,
+      fxMidi: d.fxMidi,
+      fxKey: d.fxKey,
+      colorMidi: d.colorMidi,
+      colorKey: d.colorKey,
+      strobeMidi: d.strobeMidi,
+      strobeKey: d.strobeKey,
+      motifChaseMidi: d.motifChaseMidi,
+      motifChaseKey: d.motifChaseKey
+    })
+    if (json === this.lastMidiMapJson) return
+    this.lastMidiMapJson = json
+    saveMidiMapRaw(json)
   }
   private loadRig(): void {
-    // 同一セッション中に作ったリグだけ復元（モード切替で消えないように）。
-    // アプリ再起動後は sessionRig=null＝初期状態のまま＝まっさら。
+    // 先に「前回の MIDI/キー割当」を戻す（アプリ再起動をまたぐ）。
+    const map = loadMidiMap()
+    if (map) this.applyRig(map as RigPayload)
+    // 同一セッション中に作ったリグ（明かり/色/シーン）はこの後で上書き復元。
     if (sessionRig) this.applyRig(sessionRig)
   }
 
@@ -4418,27 +5457,258 @@ export class ImageLightEngine {
    *  （＝起動直後のデフォルト灯体だけ）なら false＝中身なし扱い。冷間起動のデフォルト
    *  状態で前回データ(il-autosave)を上書きする事故を防ぐためのガード。 */
   hasSaveableContent(): boolean {
-    return this.scenes.length > 0 || !!this.maskImage || this.rigCustomized
+    if (this.scenes.length > 0 || !!this.maskImage || this.rigCustomized) return true
+    // 仕込みだけ作った状態（写真をまだ入れていない／灯体を動かしていない）も“中身あり”とする。
+    // のむさん 2026-07-26「一度設定したものは、立ち上げ直しても全部残っているようにしたい」。
+    // これが無いと MIDI を覚えさせただけのセッションが自動保存されず、次の起動で消える。
+    const someMidiOrKey =
+      this.masterMidi != null ||
+      this.strobeMidi != null ||
+      this.motifChaseMidi != null ||
+      Object.keys(this.paramMidi).length > 0 ||
+      Object.keys(this.fxMidi).length > 0 ||
+      Object.keys(this.fxKey).length > 0 ||
+      Object.keys(this.colorMidi).length > 0 ||
+      Object.keys(this.colorKey).length > 0 ||
+      Object.keys(this.fireMidiMap).length > 0 ||
+      Object.keys(this.fireKeyMap).length > 0 ||
+      Object.keys(this.goMidiMap).length > 0 ||
+      Object.keys(this.goKeyMap).length > 0
+    const someShelf =
+      this.patterns.some((p) => !!p) ||
+      this.sfxScenes.some((s) => !!s) ||
+      this.cueSheet.length > 0 ||
+      this.userColors.length > 0
+    return someMidiOrKey || someShelf
   }
 
+  // ---------- GPU直結出力（出力専用ウィンドウ）との状態同期 ----------
+  // 設計: docs/superpowers/specs/2026-07-14-gpu-output-design.md
+  //  - 重い状態（写真/動画/マスク/切り抜き/画像灯体）: serializeShow を「メディア署名が変わった時だけ」送る
+  //  - 軽い動的状態: LiveFrame を毎フレーム送る（灯体の生値・FX・時刻ms・DMX・単発発射イベント）
+  //  - 時刻: 送信側の ms(=now-t0) を受信側が自分の t0 に写す＝ストロボ位相/ゴボ回転/星の瞬きが一致
+
+  /** 単発イベント（炎の発射等）。状態でなく「呼び出し」なので別枠で運ぶ。 */
+  recordLiveEvents = false // 編集側で GPU 出力が生きている間だけ true（無駄な蓄積を防ぐ）
+  private liveEvents: LiveEvent[] = []
+  private pushLiveEvent(e: LiveEvent): void {
+    if (!this.recordLiveEvents) return
+    if (this.liveEvents.length < 64) this.liveEvents.push(e) // 取りこぼしより溢れ防止を優先
+  }
+  /** GPU出力の生死で ON/OFF する。OFF→ON の切替時に古い発射イベントを捨てる
+   *  （残っていると再有効化の瞬間に「幻の炎」が出る・レビュー指摘）。 */
+  setRecordLiveEvents(v: boolean): void {
+    if (this.recordLiveEvents === v) return
+    this.recordLiveEvents = v
+    this.liveEvents = []
+  }
+
+  /** メディア本体（写真/動画/マスク/画像灯体の絵）が変わったかの署名。
+   *  これが変わった時だけ blob を再送する（変わっていなければ受信側のキャッシュを使い回す）。
+   *  dataURL の中身は舐めず長さ・参照だけ＝毎 bump 呼んでも安い。 */
+  mediaSignature(): string {
+    const parts: string[] = []
+    for (const sc of this.scenes) parts.push(sc.kind, sc.src ? String(sc.src.length) : (sc.objectUrl ?? ''))
+    parts.push(this.maskSrc ? String(this.maskSrc.length) : '')
+    for (const b of this.beams) if (b.imageSrc) parts.push(String(b.imageSrc.length))
+    return parts.join('|')
+  }
+
+  /** 公演 json の再送が要る変化か（メディア本体＋シーン構造＋ワープ/切り抜き＋画像灯体の位置＋灯体件数）。
+   *  灯体の gauge/色/PTZ/mute 等は LiveFrame が毎コマ運ぶのでここには含めない＝灯体移動では再送しない。
+   *  画像灯体は「位置(index)」まで見る＝並べ替え(renumberByPosition)で imageSrc が別灯体に付く事故を検知。 */
+  showSignature(): string {
+    const parts: string[] = [this.mediaSignature(), 'n' + this.beams.length]
+    this.scenes.forEach((sc, i) => {
+      if (sc.warpBox) parts.push(i + 'w' + JSON.stringify(sc.warpBox))
+      if (sc.pieces)
+        for (const p of sc.pieces)
+          parts.push(i + 'p' + p.id + JSON.stringify(p.corners) + [p.src.x, p.src.y, p.src.w, p.src.h].join(','))
+    })
+    this.beams.forEach((b, i) => {
+      if (b.imageSrc) parts.push('img' + i)
+    })
+    return parts.join('|')
+  }
+
+  /** 編集側: 今の動的状態を1コマ分吸い出す（出力専用ウィンドウへ送る用）。 */
+  getLiveFrame(now: number): LiveFrame {
+    const events = this.liveEvents
+    this.liveEvents = []
+    return {
+      ms: now - this.t0,
+      st: { ...this.st },
+      fxp: JSON.parse(JSON.stringify(this.fxp)) as FxParams,
+      panicGain: this.panicGain,
+      strobeOverride: this.strobeOverride,
+      strobeRate: this.strobeRate,
+      lightOnly: this.lightOnly,
+      colorWash: this.colorWash,
+      baseLift: this.baseLift,
+      relief: this.relief,
+      lumReliefStrength: this.lumReliefStrength,
+      falloffPow: this.falloffPow,
+      outCap: this.outCap,
+      viewScene: this.activeScene,
+      decorClock: this.decorClock,
+      decor: JSON.parse(JSON.stringify(this.decor)) as DecorPattern,
+      sfx: {
+        flame: { ...this.flame.params },
+        sparkler: { ...this.sparkler.params },
+        rain: { ...this.rain.params, on: this.rain.on },
+        lowSmoke: { ...this.lowSmoke.params, on: this.lowSmoke.on },
+        fireFlame: this.flameFireGate,
+        fireSparkler: this.sparklerFireGate,
+        chaseMode: this.sfxChaseMode,
+        chaseMs: this.sfxChaseMs,
+        seqSteps: this.sfxSeqSteps.map((s) => s.slice()),
+        seqMs: this.sfxSeqMs,
+        seqPlaying: this.sfxSeqPlaying,
+        seqIndex: this.sfxSeqIndex,
+        armedIds: this.sfxArmedIds ? [...this.sfxArmedIds] : null,
+        activeScene: this.activeSfxScene
+      },
+      // 灯体は「imageSrc（重い画像）と描画一時値を除いた全量」＝BUILD中の配置編集も即時に出力へ映る
+      beams: this.beams.map((b) => {
+        const { imageSrc: _i, _tn: _t, _cn: _c, _zp: _z, ...rest } = b
+        return { ...rest, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined }
+      }),
+      dmx: this.dmxFrame ? { frames: this.dmxFrame, gamma: this.dmxGamma } : null,
+      events,
+      aim:
+        this._aimActive && this._aimFrom
+          ? { from: this._aimFrom.slice(), age: now - this._aimT0, ms: this._aimMs }
+          : null
+    }
+  }
+
+  /** 出力専用ウィンドウ側: LiveFrame を反映して1コマ描く。
+   *  時刻は「自分の now − 送信側 ms」を t0 に写す＝位相一致かつ SFX パーティクルには単調増加の
+   *  now が渡る（編集側の t0 リセットにも自然に追従）。 */
+  applyLiveFrame(f: LiveFrame): void {
+    if (this.restoring) return // 公演の復元中はスキップ（次のコマで追いつく）
+    const now = performance.now()
+    this.t0 = now - f.ms
+    // 位置ブレンドも写す（これが無いと出力窓はチルトだけカットになる）
+    if (f.aim) {
+      this._aimFrom = f.aim.from
+      this._aimT0 = now - f.aim.age
+      this._aimMs = f.aim.ms
+      this._aimActive = true
+    } else this._aimActive = false
+    this.st = { ...f.st }
+    this.fxp = f.fxp
+    this.panicGain = f.panicGain
+    this.strobeOverride = f.strobeOverride
+    this.strobeRate = f.strobeRate
+    this.lightOnly = f.lightOnly
+    this.colorWash = f.colorWash
+    this.baseLift = f.baseLift
+    this.relief = f.relief
+    this.lumReliefStrength = f.lumReliefStrength
+    this.falloffPow = f.falloffPow
+    this.outCap = f.outCap
+    this.decorClock = f.decorClock
+    this.decorLastNow = now // 自前で進めない（毎コマ送信側の値で上書き＝チェイス位相一致）
+    this.decor = f.decor
+    this.flame.params = { ...this.flame.params, ...f.sfx.flame }
+    this.sparkler.params = { ...this.sparkler.params, ...f.sfx.sparkler }
+    {
+      const { on: rainOn, ...rp } = f.sfx.rain
+      this.rain.params = { ...this.rain.params, ...rp }
+      this.rain.on = !!rainOn
+      const { on: smokeOn, ...sp2 } = f.sfx.lowSmoke
+      this.lowSmoke.params = { ...this.lowSmoke.params, ...sp2 }
+      this.lowSmoke.on = !!smokeOn
+    }
+    this.flameFireGate = f.sfx.fireFlame
+    this.sparklerFireGate = f.sfx.fireSparkler
+    this.sfxChaseMode = f.sfx.chaseMode
+    this.sfxChaseMs = f.sfx.chaseMs
+    this.sfxSeqSteps = f.sfx.seqSteps
+    this.sfxSeqMs = f.sfx.seqMs
+    this.sfxSeqPlaying = f.sfx.seqPlaying
+    this.sfxSeqIndex = f.sfx.seqIndex
+    this.sfxSeqLast = now // 自前でステップを進めない（送信側の seqIndex が正）
+    this.sfxArmedIds = f.sfx.armedIds ? new Set(f.sfx.armedIds) : null
+    this.activeSfxScene = f.sfx.activeScene
+    // シーン（写真/動画）の表示切替。restoreShow 済みの scenes を前提に selectScene を流用
+    if (f.viewScene >= 0 && f.viewScene !== this.activeScene && this.scenes[f.viewScene]) {
+      this.selectScene(f.viewScene)
+    } else if (f.viewScene < 0 && this.activeScene >= 0) {
+      this.activeScene = -1
+      this.mat = null
+      this.box = null
+    }
+    // 灯体: 件数が同じなら imageSrc（重い画像・公演チャネル担当）だけ残して全量上書き。
+    // 件数が変わった（BUILDで追加/削除）ら作り直し＝画像灯体の絵は公演チャネル到着まで空。
+    if (f.beams.length === this.beams.length) {
+      for (let i = 0; i < f.beams.length; i++) {
+        const keep = this.beams[i].imageSrc
+        this.beams[i] = { ...f.beams[i], imageSrc: keep } as Beam
+      }
+    } else {
+      this.beams = f.beams.map((b) => ({ ...b }) as Beam)
+    }
+    for (const e of f.events) this.applyLiveEvent(e)
+    if (f.dmx) this.setDmxFrame(f.dmx.frames, f.dmx.gamma)
+    else this.dmxFrame = null
+    this.renderFrame(now)
+  }
+
+  private applyLiveEvent(e: LiveEvent): void {
+    switch (e.k) {
+      case 'flameFire': this.flameFire(e.fx, e.fy); break
+      case 'flameFireRow': this.flameFireRow(); break
+      case 'flameFireAll': this.flameFireAll(); break
+      case 'flameHoldStart': this.flameHoldStart(e.fx, e.fy); break
+      case 'flameHoldAllStart': this.flameHoldAllStart(); break
+      case 'flameHoldRelease': this.flameHoldRelease(); break
+    }
+  }
+
+  // GPU出力への軽量再送用: 直近のフル書き出しで割り当てた media ファイル名を覚えておく。
+  // メディア本体が変わっていない時（ワープ/切り抜き/灯体並べ替えだけ）はこれを使い回し、
+  // 動画の blob→dataURL 変換（数秒・大量メモリ）を丸ごと省く。
+  private lastMediaFiles: (string | null)[] = []
+  private lastMaskFile: string | null = null
+
   /** 公演まるごとの書き出し材料を作る（リグ＋シーン一覧＋メディアのファイル）。
-   *  写真=元dataURL／動画=blobをfetchしてdataURL化。重いので保存時だけ呼ぶ。 */
-  async serializeShow(): Promise<{ json: string; media: { file: string; dataUrl: string }[] }> {
+   *  写真=元dataURL／動画=blobをfetchしてdataURL化。重いので保存時だけ呼ぶ。
+   *  opts.media=false（GPU出力への json だけ再送）: blob 変換を省き、前回のファイル名を
+   *  使い回して media は空で返す＝受信側は自分のキャッシュを使う。 */
+  async serializeShow(
+    opts?: { media?: boolean }
+  ): Promise<{ json: string; media: { file: string; dataUrl: string }[] }> {
+    const includeMedia = opts?.media !== false
+    // 表示中シーンの最新ミュート/ソロを fix に確定してから書き出す。fix はシーンを離れる時にしか
+    // 同期されないので、これが無いと「今のシーンで消した灯体」が保存されず、開き直すと点いてしまう。
+    if (this.activeScene >= 0) this.saveFixState(this.activeScene)
     const media: { file: string; dataUrl: string }[] = []
     const scenesMeta: ShowSceneMeta[] = []
     for (let i = 0; i < this.scenes.length; i++) {
       const sc = this.scenes[i]
-      let dataUrl: string | null = null
-      if (sc.kind === 'photo') dataUrl = sc.src ?? sc.img?.src ?? null
-      else if (sc.kind === 'video' && sc.objectUrl) dataUrl = await blobUrlToDataUrl(sc.objectUrl)
-      const file = dataUrl ? `media/${String(i + 1).padStart(3, '0')}.${extFromDataUrl(dataUrl)}` : null
-      if (dataUrl && file) media.push({ file, dataUrl })
+      let file: string | null
+      if (includeMedia) {
+        let dataUrl: string | null = null
+        if (sc.kind === 'photo') dataUrl = sc.src ?? sc.img?.src ?? null
+        else if (sc.kind === 'video' && sc.objectUrl) dataUrl = await blobUrlToDataUrl(sc.objectUrl)
+        file = dataUrl ? `media/${String(i + 1).padStart(3, '0')}.${extFromDataUrl(dataUrl)}` : null
+        if (dataUrl && file) media.push({ file, dataUrl })
+        this.lastMediaFiles[i] = file
+      } else {
+        file = this.lastMediaFiles[i] ?? null // メディア不変＝受信側キャッシュのファイル名を再利用
+      }
       scenesMeta.push({
         name: sc.name,
         kind: sc.kind,
+        // 写真を持たない「空の背景」枠は印を付けて保存する（media が無いので、これが
+        // 無いと復元側でスキップされて枠ごと消える）
+        ...(!file && sc.kind === 'photo' && !sc.src && !sc.img ? { empty: true } : {}),
         fix: sc.fix ?? null,
         media: file,
         midiNote: sc.midiNote ?? null,
+        key: sc.key ?? null,
         warpBox: sc.warpBox ?? null,
         pieces: sc.pieces ? sc.pieces.map((p) => ({
           id: p.id,
@@ -4455,9 +5725,14 @@ export class ImageLightEngine {
     // マスク画像（あれば）も media/ に書き出して show.json から参照
     let maskMeta: { file: string } | null = null
     if (this.maskSrc) {
-      const file = `media/mask.${extFromDataUrl(this.maskSrc)}`
-      maskMeta = { file }
-      media.push({ file, dataUrl: this.maskSrc })
+      if (includeMedia) {
+        const file = `media/mask.${extFromDataUrl(this.maskSrc)}`
+        this.lastMaskFile = file
+        media.push({ file, dataUrl: this.maskSrc })
+        maskMeta = { file }
+      } else if (this.lastMaskFile) {
+        maskMeta = { file: this.lastMaskFile }
+      }
     }
     const show: ShowFile = {
       app: 'LED STAGE IMAGER',
@@ -4465,11 +5740,22 @@ export class ImageLightEngine {
       version: 1,
       rig: this.rigData(),
       // 灯体配置を丸ごと保存（runtime 専用の _tn/_cn/_zp は復元時に再計算されるので含めてOK）。
-      beams: this.beams.map((b) => ({ ...b, color: b.color.slice() as RGB3, sp: { ...b.sp }, dmx: b.dmx ? { ...b.dmx } : undefined })),
+      // gauge は卓ストロボの明滅（暗相=0）の瞬間を拾わないよう、卓駆動中は安定値で保存
+      // （currentLook と同じ流儀。卓を繋がず開いた時に灯体が消えたまま復元されるのを防ぐ）。
+      beams: this.beams.map((b) => ({
+        ...b,
+        gauge: b.dmx && this.dmxFrame ? (b.gaugeStable ?? b.gauge) : b.gauge,
+        color: b.color.slice() as RGB3,
+        sp: { ...b.sp },
+        dmx: b.dmx ? { ...b.dmx } : undefined
+      })),
       scenes: scenesMeta,
       mask: maskMeta,
       colorWash: this.colorWash,
       baseLift: this.baseLift,
+      viewScene: this.activeScene, // 保存時に表示していた写真＝開いた時に同じ所から
+      // ※beams の gauge は下の beams マップで「卓ストロボの暗相を除いた値」に差し替える
+
       decor: {
         ...this.decor,
         color1: this.decor.color1.slice() as RGB3,
@@ -4483,7 +5769,18 @@ export class ImageLightEngine {
         seqSteps: this.sfxSeqSteps.map((s) => s.slice()),
         seqMs: this.sfxSeqMs,
         flameChase: { on: this.flameChaseOn, pattern: this.flameChasePattern, ms: this.flameChaseMs },
-        sfxChase: { mode: this.sfxChaseMode, ms: this.sfxChaseMs }
+        sfxChase: { mode: this.sfxChaseMode, ms: this.sfxChaseMs },
+        fire: { flame: this.flameFireGate, sparkler: this.sparklerFireGate },
+        sfxScenes: this.sfxScenes.map((s) => (s ? { ...s, ids: s.ids.slice() } : null)),
+        armedIds: this.sfxArmedIds ? [...this.sfxArmedIds] : null,
+        activeScene: this.activeSfxScene,
+        fireKeyMap: { ...this.fireKeyMap },
+        fireMidiMap: { ...this.fireMidiMap }
+      },
+      go: {
+        steps: this.cueSheet.map((st) => ({ ...st })),
+        keys: { ...this.goKeyMap },
+        midi: { ...this.goMidiMap }
       }
     }
     return { json: JSON.stringify(show, null, 2), media }
@@ -4544,6 +5841,19 @@ export class ImageLightEngine {
     }
     for (const sm of show.scenes ?? []) {
       const dataUrl = sm.media ? mediaByFile[sm.media] : null
+      // 「空の背景」＝写真を持たない枠。media が無くても作り直す（前は丸ごと消えていた）。
+      if (!dataUrl && sm.empty) {
+        this.addEmptyScene()
+        const e = this.scenes[this.scenes.length - 1]
+        if (e) {
+          e.name = sm.name || '空の背景'
+          if (sm.fix) e.fix = sm.fix
+          if (typeof sm.midiNote === 'number') e.midiNote = sm.midiNote
+          if (typeof sm.key === 'string') e.key = sm.key
+          if (sm.warpBox) e.warpBox = sm.warpBox
+        }
+        continue
+      }
       if (!dataUrl) continue
       if (sm.kind === 'video') {
         const blobUrl = await dataUrlToBlobUrl(dataUrl)
@@ -4555,6 +5865,7 @@ export class ImageLightEngine {
       if (added) {
         if (sm.fix) added.fix = sm.fix
         if (sm.midiNote != null) added.midiNote = sm.midiNote
+        if (sm.key != null) added.key = sm.key
         if (sm.warpBox) added.warpBox = { ...sm.warpBox }
         if (sm.pieces && sm.pieces.length) {
           added.pieces = sm.pieces.map((p) => ({
@@ -4621,6 +5932,55 @@ export class ImageLightEngine {
         this.sfxChaseMode = sfx.flameChase.pattern
         if (typeof sfx.flameChase.ms === 'number') this.sfxChaseMs = sfx.flameChase.ms
       }
+      // 発射ゲート＋SFXシーンの復元（無い古い保存＝ゲート両方true・シーン空き・絞り込み無し＝従来どおり）
+      this.flameFireGate = sfx.fire?.flame ?? true
+      this.sparklerFireGate = sfx.fire?.sparkler ?? true
+      this.sfxScenes = Array.from({ length: 6 }, (_, i) => {
+        const s = sfx.sfxScenes?.[i]
+        return s && Array.isArray(s.ids)
+          ? { name: s.name || 'SFX ' + (i + 1), key: s.key ?? null, midi: s.midi ?? null,
+              ids: s.ids.slice(), chaseMode: s.chaseMode || 'all', chaseMs: s.chaseMs || 420 }
+          : null
+      })
+      this.sfxArmedIds = Array.isArray(sfx.armedIds) && sfx.armedIds.length ? new Set(sfx.armedIds) : null
+      // 絞り込み中のまま保存した公演は、どのシーンが点いていたかも復元（表示と発射のズレ防止）
+      this.activeSfxScene =
+        this.sfxArmedIds && typeof sfx.activeScene === 'number' && sfx.activeScene >= 0 && this.sfxScenes[sfx.activeScene]
+          ? sfx.activeScene
+          : -1
+      this.fireKeyMap = { ...(sfx.fireKeyMap ?? {}) }
+      this.fireMidiMap = { ...(sfx.fireMidiMap ?? {}) }
+    } else {
+      // sfxブロック自体が無い古い保存＝全部既定へ（前のショーの状態を引きずらない）
+      this.flameFireGate = true
+      this.sparklerFireGate = true
+      this.sfxScenes = [null, null, null, null, null, null]
+      this.sfxArmedIds = null
+      this.activeSfxScene = -1
+      this.fireKeyMap = {}
+      this.fireMidiMap = {}
+    }
+    // GO進行表を復元（無い古い保存＝空へ）。実行位置は必ず先頭前から＝前のショーの位置を引きずらない。
+    {
+      const go = (show as { go?: { steps?: CueStep[]; keys?: { go?: string; back?: string }; midi?: { go?: number; back?: number } } }).go
+      this.cueSheet = Array.isArray(go?.steps)
+        ? go.steps.map((st) => ({
+            // 範囲外（壊れた保存・枠を減らした後）はnull＝「変えない」へ落とす
+            pattern:
+              typeof st?.pattern === 'number' && st.pattern >= 0 && st.pattern < this.patterns.length
+                ? st.pattern
+                : null,
+            sfx:
+              typeof st?.sfx === 'number' && st.sfx >= 0 && st.sfx < this.sfxScenes.length
+                ? st.sfx
+                : null,
+            memo: typeof st?.memo === 'string' ? st.memo : ''
+          }))
+        : []
+      this.goKeyMap = { ...(go?.keys ?? {}) }
+      this.goMidiMap = { ...(go?.midi ?? {}) }
+      this.cuePos = -1
+      this.learnGo = null
     }
     // 見え方（色ノリ・ベース明るさ）を復元。無い古いファイルは 0＝従来の見た目。
     this.colorWash = typeof show.colorWash === 'number' ? Math.max(0, Math.min(0.4, show.colorWash)) : 0
@@ -4628,8 +5988,14 @@ export class ImageLightEngine {
     this.sfxSeqPlaying = false
     this.sfxSeqIndex = 0
     // sfxId カウンタを復元（既存の最大+1）＝復元後に足す炎/火花のID衝突を防ぐ。
+    // ID採番の再開位置は「マークが今持つID」だけでなく、SFXシーン/絞り込み/シーケンサーが
+    // 参照しているIDも跨ぐ（消したマークのIDを新しいマークが再利用すると、保存済みシーンが
+    // 無関係なマークに化けて誤発射するため）。
     let maxSfxId = 0
     for (const b of this.beams) if (typeof b.sfxId === 'number' && b.sfxId > maxSfxId) maxSfxId = b.sfxId
+    for (const s of this.sfxScenes) if (s) for (const id of s.ids) if (id > maxSfxId) maxSfxId = id
+    if (this.sfxArmedIds) for (const id of this.sfxArmedIds) if (id > maxSfxId) maxSfxId = id
+    for (const col of this.sfxSeqSteps) for (const id of col) if (id > maxSfxId) maxSfxId = id
     this.sfxIdSeq = maxSfxId + 1
     // 復元した灯体配置は「ユーザーが置いた配置」そのもの。これを立てないと selectScene →
     // placeRigAtPhotoBottom が全灯体の縦位置を写真下端に潰してしまう（位置が全部リセットされるバグ）。
@@ -4639,8 +6005,33 @@ export class ImageLightEngine {
     // 灯体があれば先頭を選択しておく（初期化直後と同じ＝selected=[0]）。空のままだと
     // 復元直後に GAUGE/COLOR/PTZ を動かしても targets() が空で何も効かず「直したのに効かない」
     // 見え方になるため、初期状態と挙動を揃える。
-    this.selected = this.beams.length ? [0] : []
-    this.selectScene(this.scenes.length ? 0 : -1)
+    // タブ制限を通る最初の灯体を選ぶ（先頭が炎/飾りだと「触れないものが選ばれて始まる」ため）
+    const fi = this.beams.findIndex((b) => this.selAllowed(b))
+    this.selected = fi >= 0 ? [fi] : []
+    // 暗転トグルの復帰先は破棄（前のショーの look を新しいショーへ誤適用しない）。
+    // 暗転状態(panicGain)自体は維持＝暗転したまま読み込んでも画面は暗いまま（本番の意思を尊重）。
+    this.preBlackout = null
+    this.preBlackoutPattern = -1
+    // 保存時に表示していた写真から開く（無い古い保存・範囲外＝1枚目）。媒体の読込失敗で
+    // 枚数が減った場合も範囲チェックで安全側（1枚目）へ落ちる。
+    const vs =
+      typeof show.viewScene === 'number' &&
+      Number.isInteger(show.viewScene) && // 壊れた保存の小数(1.5等)は selectScene が無視して真っ黒になるため弾く
+      show.viewScene >= 0 &&
+      show.viewScene < this.scenes.length
+        ? show.viewScene
+        : this.scenes.length
+          ? 0
+          : -1
+    // 🔴 selectScene は「同じ番号なら何もしない」早期 return があるので、復元では必ず
+    // 通す。通さないと写真の位置と大きさ（4辺スケールワープ）が作り直されず、
+    // 保存した時の見え方と違う位置に写真が出る。
+    this.activeScene = -1
+    this.selectScene(vs)
+    // 🔴 開いた直後の ⌘Z で「前の公演」の配置が戻ってくるのを止める（別公演の配置で
+    // 今開いたファイルを上書きしてしまう事故になる）。
+    this.hist = []
+    this.fut = []
     this.bump()
     return true
   }

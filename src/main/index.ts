@@ -25,6 +25,17 @@ import {
   resolveNdiLibPath
 } from './output/ndi-direct'
 import { startMidiInput, stopMidiInput, getMidiPorts } from './midi/midi-input'
+import {
+  startGpuChartOutput,
+  stopGpuOutput,
+  setGpuOutputMode,
+  getGpuOutputMode,
+  isGpuOutputActive,
+  isGpuOutputReady,
+  markGpuOutputReady,
+  resizeGpuOutput,
+  sendToGpuOutput
+} from './output/gpu-output'
 
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
@@ -33,6 +44,7 @@ const publisher = new OutputPublisher()
 let mainWindow: BrowserWindow | null = null
 let previewWindow: BrowserWindow | null = null
 let lastChart: unknown = null
+let lastManual: unknown = null // TESTフェーダー状態（GPU出力窓へ初期同期するため保持）
 let midiInputs: string[] = [] // renderer が検出した MIDI 入力ポート名（ステータスバー表示用）
 let currentChartPath: string | null = null // 今開いている .ledimager のパス（⌘Sの上書き先）
 // .ledshow の上書き先は renderer（実際に開けた公演を知っている側）が保存のたびに渡してくる。
@@ -119,11 +131,11 @@ function startEngine(): void {
   }
   receiver.on('dmx', (pkt: ArtDmxPacket) => {
     const msg = { universe: pkt.universe, sequence: pkt.sequence, data: pkt.data }
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('artnet:dmx', msg)
+    broadcast('artnet:dmx', msg)
   })
   // CoreMIDI 直読みの MIDI 入力（Web MIDI が効かないため）。受信を renderer(engine) へ転送。
   startMidiInput((s, d1, d2) => {
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('midi:message', [s, d1, d2])
+    broadcast('midi:message', [s, d1, d2])
   })
   // 受信機の生死を画面へ通知（bind失敗＝ポート使用中などは今まで無言で死んでいた）。
   // 🔴 起動直後のエラーは画面がまだ無い時に起きる＝最後の状態を覚えておき、
@@ -132,22 +144,40 @@ function startEngine(): void {
     console.error('[artnet] receiver error:', err)
     const msg = String((err as NodeJS.ErrnoException)?.code ?? err)
     lastArtnetStatus = { ok: false, detail: msg }
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('artnet:status', lastArtnetStatus)
+    broadcast('artnet:status', lastArtnetStatus)
   })
   receiver.on('listening', () => {
     lastArtnetStatus = { ok: true, detail: '' }
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('artnet:status', lastArtnetStatus)
+    broadcast('artnet:status', lastArtnetStatus)
   })
   receiver.start()
   console.log('[engine] Art-Net receiver (UDP 6454) + Syphon/NDI "LED STAGE IMAGER" started')
 }
 
 function stopEngine(): void {
+  stopGpuOutput() // publisher より先に（破棄後の publish を出さない）
   receiver.stop()
   publisher.stop()
   stopNdiBridge()
   stopNdiDirect()
   stopMidiInput()
+}
+
+/** GPU直結出力を開始（Mac + Syphon 可の時だけ動く）。窓の準備ができたら最新状態を流し込み、
+ *  生死は全画面へ通知＝editor 側の互換経路が自動で止まる/再開する。 */
+function startGpu(): void {
+  startGpuChartOutput(publisher, {
+    onReady: (wc) => {
+      if (lastChart) wc.send('chart:update', lastChart)
+      if (lastManual) wc.send('manual:update', lastManual)
+      // 画像照明モード中に出力窓が（再）起動した＝公演の再送を編集側へ頼む
+      if (getGpuOutputMode() === 'imagelight' && mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('il:resync')
+    },
+    onActive: (active) => broadcast('gpu-output:active', active),
+    // 画像照明の「実絵が出た/まだ」の変化＝編集側が CPU 本番を続けるか止めるか決める（finding14）
+    onReadyChange: (ready) => broadcast('il:output-ready-changed', ready)
+  })
 }
 
 /** Fullscreen output preview on a second display (mirrors the editor's chart, no re-publish). */
@@ -204,19 +234,27 @@ function closePreview(): void {
  *  .ledimager（チャート・JSON）→ chart:open-path（⌘S の上書き先にも設定）。
  *  .ledshow（画像照明の公演・ZIP）→ imagelight:open-path（バイト列を渡す）。
  *  画面がまだ無い起動直後は pendingOpenPath に積み、did-finish-load で流す。 */
-function deliverOpenFile(p: string): void {
+/** 全ウィンドウへ IPC 送信（破棄済みは飛ばす）。出力用の別窓を本番中に閉じた瞬間に届いた通知を、
+ *  破棄済みの webContents に send して main プロセスごと落とす事故を防ぐ。 */
+function broadcast(channel: string, ...args: unknown[]): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send(channel, ...args)
+  }
+}
+
+function deliverOpenFile(p: string, force?: boolean): void {
   const w = mainWindow
-  const ready = w && !w.isDestroyed() && !w.webContents.isLoading()
+  const ready = w && !w.isDestroyed() && (force || !w.webContents.isLoading())
   const isShow = p.toLowerCase().endsWith('.ledshow')
-  // .ledshow は画像照明モードの公演。チャートの ⌘S 上書き先(currentChartPath)にはしない。
-  // 上書き先の確定は renderer が「実際に開けた」時に行う（ここでは決めない）。
-  if (!isShow) currentChartPath = p
+  // チャートの ⌘S 上書き先(currentChartPath)はここで eager に覚えない。renderer が「実際に開けた」時だけ
+  // 'chart:opened' で確定する。ここで覚えると、開くのをキャンセル/読込失敗した後の ⌘S が、開こうと
+  // した別ファイルを黙って上書きする事故になる（path を第2引数で渡す＝開けた時だけ確定に使う）。
   if (ready) {
     try {
       if (isShow) {
         w!.webContents.send('imagelight:open-path', { bytes: readFileSync(p), path: p })
       } else {
-        w!.webContents.send('chart:open-path', readFileSync(p, 'utf8'))
+        w!.webContents.send('chart:open-path', readFileSync(p, 'utf8'), p)
       }
       if (w!.isMinimized()) w!.restore()
       w!.focus()
@@ -233,6 +271,10 @@ function deliverOpenFile(p: string): void {
 app.on('open-file', (e, p) => {
   e.preventDefault()
   deliverOpenFile(p)
+})
+// 編集画面の React が「開く準備ができた」合図＝保留中ファイルを強制的に流す（load完了レース回復）
+ipcMain.on('open-file:renderer-ready', (e) => {
+  if (mainWindow && e.sender === mainWindow.webContents && pendingOpenPath) deliverOpenFile(pendingOpenPath, true)
 })
 // Windows/Linux: ダブルクリック起動時はファイルパスが引数で来る（macOS は open-file 経由）。
 if (process.platform !== 'darwin') {
@@ -357,6 +399,11 @@ function createWindow(): void {
     void confirmAndClose('window')
   })
 
+  // 画像照明モード中に編集ウィンドウが閉じた/落ちた時、IL モードが残留すると
+  // 出力窓の IL 描画が凍る（駆動役の編集側が居ない）＝チャート（自走）へ必ず戻す。
+  mainWindow.on('closed', () => setGpuOutputMode('chart'))
+  mainWindow.webContents.on('render-process-gone', () => setGpuOutputMode('chart'))
+
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
@@ -373,11 +420,15 @@ function createWindow(): void {
 
   // ダブルクリックで開かれた（起動直後で保留中の）ファイルを、画面ができたら流し込む。
   mainWindow.webContents.on('did-finish-load', () => {
-    if (pendingOpenPath) deliverOpenFile(pendingOpenPath)
     // 起動直後に起きた受信機のエラー（ポート使用中など）は画面が無い時に飛んで消えるので、
     // 画面ができたここで送り直す＝「無言のNo Signal」をなくす。
     if (lastArtnetStatus) mainWindow?.webContents.send('artnet:status', lastArtnetStatus)
   })
+  // 編集画面のリロード＝残留した照明モードを一旦チャートへ戻す。
+  // 🔴 did-finish-load でやってはいけない: onload は React の起動より遅く、先に照明モードへ
+  // 入った直後の imagelight を chart に巻き戻す（実測でモード切替が消えた）。did-navigate は
+  // 新しいページの実行前に必ず来る＝レースしない。
+  mainWindow.webContents.on('did-navigate', () => setGpuOutputMode('chart'))
 }
 
 /** App menu: Cmd+Z/Shift+Cmd+Z go to the app's own chart undo (the default Electron
@@ -452,6 +503,17 @@ app.whenReady().then(() => {
   })
 
   // renderer が検出した MIDI 入力ポート一覧を受け取る（ステータスバー表示＋疎通ログ）。
+  // MIDI をつなぎ直す（現場で抜き差しした後に効かなくなった時の出口）。
+  // Mac は CoreMIDI リーダーを作り直し、返り値でポート名を返す。
+  ipcMain.handle('midi:restart', async () => {
+    if (process.platform === 'darwin') {
+      stopMidiInput()
+      startMidiInput((s2, d1, d2) => broadcast('midi:message', [s2, d1, d2]))
+      await new Promise((r) => setTimeout(r, 700)) // 子プロセスが READY を出すのを待つ
+      return getMidiPorts()
+    }
+    return midiInputs.slice()
+  })
   ipcMain.on('midi:inputs', (_e, names: string[]) => {
     midiInputs = Array.isArray(names) ? names : []
     console.log('[midi] 検出した入力:', midiInputs.length ? midiInputs.join(', ') : '(なし)')
@@ -461,6 +523,11 @@ app.whenReady().then(() => {
   ipcMain.on(
     'syphon:frame',
     (_e, payload: { width: number; height: number; buffer: Uint8Array | Uint8ClampedArray }) => {
+      // GPU直結出力が「本番を担っている」間だけ編集側のCPUフレームを捨てる（二重出力の点滅防止）。
+      // chart モード＝GPUが自走で即描くので active になった瞬間から担当。
+      // imagelight モード＝出力窓が実絵を1枚描くまで(ready)はCPUが本番＝モード切替/公演読込中に
+      // 出力が黒く落ちない（finding14）。
+      if (isGpuOutputActive() && (getGpuOutputMode() === 'chart' || isGpuOutputReady())) return
       publisher.publishRGBA(payload.width, payload.height, payload.buffer) // Mac: Syphon（Winはno-op）
       // Windows 等: 同じ RGBA を直接 NDI 送信（Mac は Syphon→ブリッジ経路を使うので送らない）
       if (process.platform !== 'darwin') {
@@ -484,6 +551,45 @@ app.whenReady().then(() => {
     // まだ非nullの瞬間がある。破棄済みへ send すると本番中に例外が飛ぶので二重ガード。
     if (previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed())
       previewWindow.webContents.send('chart:update', chart)
+    sendToGpuOutput('chart:update', chart)
+  })
+  // TESTフェーダー状態（GPU出力窓が編集側と同じ絵を出すため）
+  ipcMain.on('manual:sync', (_e, m) => {
+    lastManual = m
+    sendToGpuOutput('manual:update', m)
+  })
+  // 画像照明モードの入退場＝GPU出力窓の描き手を切替（chart⇄imagelight）
+  ipcMain.on('imagelight:active', (_e, on: boolean) =>
+    setGpuOutputMode(on ? 'imagelight' : 'chart')
+  )
+  // 画像照明の状態同期を出力窓へ中継（重い公演データはキャッシュしない＝素通し）
+  ipcMain.on('il:sync-show', (_e, p) => sendToGpuOutput('il:sync-show', p))
+  ipcMain.on('il:sync-frame', (_e, f) => sendToGpuOutput('il:sync-frame', f))
+  // 出力窓が実絵を1枚描いた合図＝ここから Syphon 送出を CPU から出力窓へ切替（黒落ち防止 finding14）
+  ipcMain.on('il:output-ready', () => markGpuOutputReady())
+  // 出力窓のマウント直後の pull ハンドシェイク＝編集側へ公演の全量再送を依頼（レース回復 finding18）
+  ipcMain.on('il:request-show', () => {
+    if (getGpuOutputMode() === 'imagelight' && mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send('il:resync')
+  })
+  // 出力方式（SETUPのトグル）。compat=GPU出力窓を止めて従来のCPU経路に戻す。
+  ipcMain.on('gpu-output:method', (_e, m: string) => {
+    if (m === 'compat') stopGpuOutput()
+    else startGpu()
+  })
+  // GPU出力窓（見えない出力専用窓）: 状態問い合わせ＋出力解像度の変更要求
+  ipcMain.handle('gpu-output:status', () => isGpuOutputActive())
+  ipcMain.on('gpu-output:resize', (_e, w: number, h: number) => resizeGpuOutput(w, h))
+  // 出力窓の React が聞き耳を立て終えた合図（pull型ハンドシェイク）。
+  // push だけだと「ロード完了→リスナー登録」の隙間に届いたモード切替/チャートが消える
+  // （実測: 照明モードに切り替わらず空チャートを出し続けた）。ここで現在の全状態を返し直す。
+  ipcMain.handle('gpu-output:hello', () => {
+    if (lastChart) sendToGpuOutput('chart:update', lastChart)
+    if (lastManual) sendToGpuOutput('manual:update', lastManual)
+    // 照明モード中なら編集側へ公演の再送を依頼（メディアは編集側しか持っていない）
+    if (getGpuOutputMode() === 'imagelight' && mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send('il:resync')
+    return getGpuOutputMode()
   })
 
   // Network interface list + receiver re-bind + engine status (for the status lamps).
@@ -533,6 +639,11 @@ app.whenReady().then(() => {
     })
     return res.canceled || !res.filePath ? null : res.filePath
   }
+  // renderer が「実際にチャートを開けた」時だけ ⌘S 上書き先を確定する（deliverOpenFile は覚えない）。
+  // 開くのをキャンセル/読込失敗した時は呼ばれない＝別ファイルを黙って上書きする事故を防ぐ。
+  ipcMain.on('chart:opened', (_e, path: string) => {
+    if (typeof path === 'string' && path) currentChartPath = path
+  })
   ipcMain.handle('chart:save', async (_e, json: string, name: string) => {
     if (!currentChartPath) {
       const p = await askSavePath(name)
@@ -555,8 +666,13 @@ app.whenReady().then(() => {
       filters: CHART_FILTERS
     })
     if (res.canceled || res.filePaths.length === 0) return null
-    currentChartPath = res.filePaths[0]
-    return readFileSync(currentChartPath, 'utf8')
+    // 🔴 先に読んで、成功してから「今のファイル」を覚える。逆にすると読み出しに失敗した時
+    // （Dropbox/iCloud のオンライン専用ファイル・権限なし等）に、そのファイルが上書き先として
+    // 残り、次の ⌘S で今の作品を書き込んで元データを潰す（249行の方針どおり eager に覚えない）。
+    const picked = res.filePaths[0]
+    const json = readFileSync(picked, 'utf8')
+    currentChartPath = picked
+    return json
   })
   // 新規/別作品に切り替えたら「今のファイル」を忘れる（次の⌘Sで保存先を聞く）。
   ipcMain.handle('chart:new', () => {
@@ -858,9 +974,12 @@ app.whenReady().then(() => {
 
   createWindow()
   startEngine()
+  startGpu()
 
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    // 🔴 getAllWindows() は見えないGPU出力窓も数える＝0個判定だと Dock クリックで
+    // 編集ウィンドウが二度と出ない。編集ウィンドウの有無で判定する。
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow()
   })
 })
 

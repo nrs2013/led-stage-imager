@@ -46,7 +46,13 @@ export async function openChartFromFile(): Promise<Chart | null> {
   const a = api()
   let json: string | null = null
   if (a?.openChartFile) {
-    json = await a.openChartFile()
+    // 読み出し自体が失敗した時も、保存先の記憶を消してから投げる（次の ⌘S で潰さない）
+    try {
+      json = await a.openChartFile()
+    } catch (err) {
+      markNewChart()
+      throw err
+    }
   } else {
     json = await new Promise<string | null>((resolve) => {
       const input = document.createElement('input')
@@ -64,5 +70,12 @@ export async function openChartFromFile(): Promise<Chart | null> {
     })
   }
   if (!json) return null
-  return parseChart(json)
+  try {
+    return parseChart(json)
+  } catch (err) {
+    // 読めなかったファイルを「今のファイル」として覚えたままにすると、
+    // 次の ⌘S でそのファイルを今の中身で上書きしてしまう（元のデータが消える）。
+    markNewChart()
+    throw err
+  }
 }

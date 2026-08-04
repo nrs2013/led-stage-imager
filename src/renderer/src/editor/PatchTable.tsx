@@ -1,14 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useStore } from '../state/store'
 import { C, F, chrome, buttonStyle } from '../ui/tokens'
 import { channelRange, detectOverlaps } from '../dmx/patch'
 import { formatDmx, repeatCount } from '../dmx/address'
 import { resolveColor } from '../dmx/resolve'
-import { buildMvr } from '../io/mvr-export'
-
-interface MvrApi {
-  saveMvr?: (name: string, data: Uint8Array) => Promise<string | null>
-}
 
 export function PatchTable(): React.JSX.Element {
   const chart = useStore((s) => s.chart)
@@ -29,83 +24,54 @@ export function PatchTable(): React.JSX.Element {
     el?.scrollIntoView({ block: 'nearest' })
   }, [selectedId])
 
-  const overlaps = detectOverlaps(chart.fixtures)
-  const flagged = new Set(overlaps.flat())
+  // 個数（ネオンの文字数・連続複製）まで含めて重なりを見る。
+  // 🔴 卓(Art-Net)は毎フレーム dmxByUniverse を更新するので、ここを素で書くと
+  // 図形数×灯体数の総当たりが毎フレーム走って出力がガクつく。番地と図形が変わった時だけ計算する。
+  const { overlaps, flagged } = useMemo(() => {
+    const repsOf = (fx: { shapeId: string }): number => {
+      const sh = chart.shapes.find((x) => x.id === fx.shapeId)
+      return sh ? repeatCount(sh) : 1
+    }
+    const ov = detectOverlaps(chart.fixtures, repsOf)
+    return { overlaps: ov, flagged: new Set(ov.flat()) }
+  }, [chart.fixtures, chart.shapes])
 
   const shapeName = (shapeId: string): string => {
     const sh = chart.shapes.find((s) => s.id === shapeId)
     return sh ? `${sh.type} ${sh.id.slice(-4)}` : shapeId.slice(-4)
   }
 
-  const exportCsv = (): void => {
-    const header = ['shape', 'type', 'universe', 'start', 'end', 'mode']
-    const rows = chart.fixtures.map((f) => {
-      const [, e] = channelRange(f)
-      return [shapeName(f.shapeId), f.mode, String(f.universe + 1), String(f.start), String(e), f.mode]
-    })
-    const csv = [header, ...rows].map((r) => r.join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${chart.name || 'chart'}-patch.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
 
-  const exportMvr = async (): Promise<void> => {
-    const data = await buildMvr(chart)
-    const api = (window as unknown as { api?: MvrApi }).api
-    if (api?.saveMvr) {
-      await api.saveMvr(chart.name || 'decor', data)
-      return
-    }
-    const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/zip' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${chart.name || 'decor'}.mvr`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
 
   return (
     <div style={wrapStyle}>
       <div style={headerRow}>
         <div style={{ fontFamily: F.display, fontSize: 15, letterSpacing: '0.1em', color: C.white }}>
-          Patch <span style={{ color: C.hint, fontSize: 12 }}>({chart.fixtures.length})</span>
+          番地一覧 <span style={{ color: C.hint, fontSize: 12 }}>({chart.fixtures.length})</span>
         </div>
         {overlaps.length > 0 && (
           <div style={{ color: '#e0726a', fontSize: 11, fontFamily: F.ui }}>
-            ⚠ {overlaps.length} DMX clash
+            番地の重なり {overlaps.length} 件
           </div>
         )}
         <div style={{ flex: 1 }} />
+        {/* 書き出し（MVR/CSV）は「ファイル」メニューへ移動。ここは番地の作業に要る物だけ。 */}
+        <span style={{ fontSize: 11, color: C.label, fontFamily: F.mono }}>
+          キャンバス {chart.canvas.w} × {chart.canvas.h}
+        </span>
         <button
           style={{ ...buttonStyle({ active: showIds }), padding: '7px 12px', minHeight: 30 }}
           onClick={() => setShowIds(!showIds)}
           title="キャンバスに #番号 ラベルを表示（下の札と同じ番号）"
         >
-          IDs
-        </button>
-        <button
-          style={{ ...buttonStyle({}), padding: '7px 12px', minHeight: 30 }}
-          onClick={exportMvr}
-          title="grandMA3 用の MVR（パッチ＋配置＋DECOR Cell の GDTF 同梱）を書き出す"
-        >
-          Export MVR
-        </button>
-        <button style={{ ...buttonStyle({}), padding: '7px 12px', minHeight: 30 }} onClick={exportCsv}>
-          Export CSV
+          番号を出す
         </button>
       </div>
 
       <div ref={listRef} style={{ overflow: 'auto', flex: 1 }}>
         {chart.fixtures.length === 0 && (
           <div style={{ color: C.faint, fontFamily: F.ui, fontSize: 12, padding: '8px 2px' }}>
-            まだパッチがありません。電飾を選んで Inspector でパッチしてください。
-            <br />
-            No fixtures patched yet — select a fixture and patch it in the Inspector.
+            まだ番地がありません。電飾を選んで、右のパネルで番地をふってください。
           </div>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
@@ -156,7 +122,7 @@ export function PatchTable(): React.JSX.Element {
                       padding: '0 3px'
                     }}
                   >
-                    LOCK
+                    ロック
                   </span>
                 )}
                 <span>{formatDmx(f.universe, f.start)}</span>
