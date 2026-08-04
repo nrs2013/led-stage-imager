@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LED STAGE IMAGER — 本番(LIGHT SKETCH) UIモック</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: #050505; color: #e8e5dc; font-family: 'Inter','Noto Sans JP',sans-serif; -webkit-font-smoothing: antialiased; padding: 16px 20px 60px; }
+
+  .head { max-width: 1240px; margin: 0 auto 14px; }
+  .head h1 { font-size: 20px; font-weight: 300; letter-spacing: 0.2em; margin: 0 0 4px; color: #f3f0e8; }
+  .head h1 b { color: #e6b45a; font-weight: 500; }
+  .head .sub { font-size: 13px; color: #8a877e; margin: 0 0 14px; line-height: 1.6; }
+  .toggle { display: inline-flex; border: 0.5px solid #34322e; border-radius: 6px; overflow: hidden; }
+  .toggle button { appearance: none; border: 0; cursor: pointer; padding: 11px 22px; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; background: transparent; color: #8a877e; font-weight: 500; transition: all 120ms; }
+  .toggle button + button { border-left: 0.5px solid #34322e; }
+  .toggle button.sel { background: rgba(230,180,90,0.12); color: #e6b45a; }
+  .note { font-size: 12px; color: #6f6c64; margin-top: 10px; }
+  .note b { color: #e6b45a; font-weight: 500; }
+
+  /* ===== APP ===== */
+  .app { max-width: 1240px; margin: 0 auto; border-radius: 10px; overflow: hidden; border: 0.5px solid #1c1b18; display: flex; flex-direction: column; transition: background 200ms; }
+  .app.before { --bg:#0c0b0a; --bar:#100e0c; --panel:#0d0c0b; --bd:#2a2723; --bd2:#38332a;
+    --key-bg:linear-gradient(180deg,#242018,#16130e); --key-bw:1px; --key-bevel:inset 0 1px 0 rgba(255,255,255,0.04);
+    --r:3px; --title-font:'Bebas Neue',sans-serif; --title-color:#857e71; --title-sp:0.10em; --title-wt:400; --title-sz:14px;
+    --card:#211d16; --gap:5px; --pad:13px; --label:#a39c8e; --hint:#7d776c; }
+  .app.after { --bg:#0a0908; --bar:#131110; --panel:#131110; --bd:#34322e; --bd2:#38352e;
+    --key-bg:transparent; --key-bw:0.5px; --key-bevel:none;
+    --r:5px; --title-font:'Inter',sans-serif; --title-color:#c9c4b8; --title-sp:0.16em; --title-wt:600; --title-sz:11px;
+    --card:#181614; --gap:8px; --pad:16px; --label:#b4b1a8; --hint:#8a877e; }
+  .app { background: var(--bg); }
+  .acc { color: #e6b45a; }
+
+  /* topbar */
+  .topbar { display:flex; align-items:center; gap:10px; height:48px; padding:0 16px; background:var(--bar); border-bottom:0.5px solid var(--bd); box-shadow: var(--key-bevel); }
+  .app.after .topbar { box-shadow: inset 0 1px 0 rgba(255,238,214,0.05); }
+  .wm { font-size:16px; letter-spacing:0.24em; color:#f1ece2; white-space:nowrap; }
+  .app.before .wm { font-weight:400; } .app.after .wm { font-weight:300; }
+  .spacer { flex:1; }
+  .tag { font-size:10px; letter-spacing:0.08em; color:var(--hint); display:inline-flex; align-items:center; gap:5px; }
+  .tag .d { width:6px; height:6px; border-radius:50%; background:#8a8478; } .tag .d.on { background:#9ED27A; }
+  .tbtn { font-size:11px; letter-spacing:0.06em; color:#d9d2c6; padding:7px 12px; border-radius:var(--r); border:var(--key-bw) solid var(--bd2); background:var(--key-bg); box-shadow:var(--key-bevel); white-space:nowrap; }
+
+  /* master row */
+  .master { display:flex; align-items:center; gap:10px; height:36px; padding:0 16px; background:var(--bar); border-bottom:0.5px solid var(--bd); }
+  .master .ml { font-size:9px; letter-spacing:0.14em; color:var(--hint); text-transform:uppercase; }
+  .rng { -webkit-appearance:none; appearance:none; height:3px; border-radius:2px; background:var(--bd2); outline:none; }
+  .rng::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; }
+  .app.before .rng::-webkit-slider-thumb { border-radius:50%; background:#e6a647; box-shadow:0 0 6px rgba(230,166,71,.45); }
+  .app.after .rng::-webkit-slider-thumb { border-radius:3px; background:#0e0e0e; border:1px solid #e6b45a; }
+  .mval { font-family:'JetBrains Mono',monospace; font-size:14px; color:#e6a647; }
+
+  /* main */
+  .main { display:flex; min-height:430px; }
+  .canvas { flex:1; position:relative; background:#0a0a0a; overflow:hidden; }
+  .canvas .ph { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; }
+  .canvas .ph .t { font-family:'JetBrains Mono',monospace; font-size:13px; letter-spacing:0.14em; color:#3f3d39; }
+  .canvas .ph .s { font-size:11px; color:#34322e; }
+  .canvas .help { position:absolute; left:14px; top:12px; font-family:'JetBrains Mono',monospace; font-size:10px; color:#4a4843; letter-spacing:0.06em; }
+
+  /* right panel */
+  .panel { width:354px; flex-shrink:0; background:var(--panel); border-left:0.5px solid var(--bd); display:flex; flex-direction:column; overflow:hidden; }
+  .tabs { display:flex; border-bottom:0.5px solid var(--bd); }
+  .tab { flex:1; text-align:center; padding:10px 0 11px; font-size:11px; letter-spacing:0.1em; color:var(--hint); cursor:default; }
+  .app.before .tab.on { color:#e6a647; box-shadow:inset 0 -2px 0 #e6a647; }
+  .app.after .tab.on { color:#e6b45a; box-shadow:inset 0 -1.5px 0 #e6b45a; }
+  .scroll { overflow:auto; padding-bottom:14px; }
+  .seclab { font-family:var(--title-font); font-size:var(--title-sz); letter-spacing:var(--title-sp); font-weight:var(--title-wt); color:var(--title-color); text-transform:uppercase; padding:0 var(--pad); margin:15px 0 9px; }
+  .app.before .seclab { font-size:14px; }
+
+  .key { display:inline-flex; align-items:center; justify-content:center; border-radius:var(--r); font-size:10.5px; letter-spacing:0.04em; color:#d9d2c6; padding:8px 6px; white-space:nowrap; border:var(--key-bw) solid var(--bd2); background:var(--key-bg); box-shadow:var(--key-bevel); }
+  .app.before .key.on { border-color:#e6a647; color:#f2c882; background:linear-gradient(180deg,#2a2316,#1d1810); box-shadow:none; }
+  .app.after .key.on { border-color:#e6b45a; color:#f2cc84; background:rgba(230,180,90,0.10); box-shadow:none; }
+  .grid { display:grid; gap:var(--gap); padding:0 var(--pad); }
+  .g3 { grid-template-columns:repeat(3,1fr); } .g4 { grid-template-columns:repeat(4,1fr); }
+
+  /* ===== PARTS — cool line icons, fixture-accurate ===== */
+  .parts { padding:0 var(--pad); }
+  /* BEFORE: text-only cramped pills (matches the real app today) */
+  .app.before .parts { display:flex; flex-wrap:wrap; gap:5px; }
+  .app.before .part { font-size:10px; color:#cfc7b8; padding:6px 8px; border:1px solid #38332a; border-radius:3px; background:linear-gradient(180deg,#211d16,#16130e); }
+  .app.before .part svg { display:none; }
+  .app.before .part .pl { display:inline; }
+  /* AFTER: line-icon + label cards (cool look, accurate fixture shapes) */
+  .app.after .parts { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .app.after .part { display:flex; flex-direction:column; align-items:center; gap:7px; padding:11px 5px 9px; border:0.5px solid #34322e; border-radius:7px; background:#181614; color:#cbbf9f; }
+  .app.after .part svg { display:block; width:27px; height:27px; }
+  .app.after .part .pl { font-size:10.5px; letter-spacing:0.01em; color:#d9d2c6; }
+  .app.after .part:hover { border-color:#4a463c; }
+
+  /* DECOR toggle row */
+  .togrow { display:flex; align-items:center; gap:10px; padding:4px var(--pad) 0; }
+  .sw { width:34px; height:18px; border-radius:999px; background:#2a2723; position:relative; flex-shrink:0; }
+  .sw.on { background:#e6b45a; }
+  .sw i { position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#0a0a0a; transition:left 120ms; }
+  .sw.on i { left:18px; }
+  .togrow .tl { font-size:12px; color:#ddd6ca; flex:1; }
+  .togrow .ts { font-size:9px; letter-spacing:0.1em; color:var(--hint); }
+  .wide { margin:8px var(--pad) 0; padding:9px 0; text-align:center; font-size:11px; color:#d9d2c6; border:var(--key-bw) solid var(--bd2); border-radius:var(--r); background:var(--key-bg); box-shadow:var(--key-bevel); }
+  .cap { font-size:10px; color:var(--hint); padding:6px var(--pad) 0; line-height:1.5; }
+  .capt { font-size:9px; letter-spacing:0.08em; color:var(--label); text-transform:uppercase; padding:8px var(--pad) 0; }
+
+  .colr { display:flex; align-items:center; gap:8px; padding:2px var(--pad) 0; }
+  .chip { width:24px; height:15px; border-radius:3px; }
+  .det { padding:4px var(--pad) 0; }
+  .drow { display:flex; align-items:center; gap:9px; margin-top:8px; }
+  .drow .dl { font-size:9px; letter-spacing:0.08em; color:var(--label); width:52px; text-transform:uppercase; }
+  .drow input { flex:1; }
+  .drow .dv { font-family:'JetBrains Mono',monospace; font-size:10px; color:#cfc7b8; width:24px; text-align:right; }
+
+  /* fixture strip */
+  .fixbar { background:#0a0a0a; border-top:0.5px solid var(--bd); padding:14px 16px; }
+  .fixs { display:flex; gap:10px; flex-wrap:wrap; }
+  .fx { width:74px; text-align:center; }
+  .fx .cell { border:var(--key-bw) solid var(--bd2); background:var(--card); border-radius:var(--r); padding:7px 0 5px; box-shadow:var(--key-bevel); }
+  .app.after .fx .cell { background:transparent; box-shadow:none; }
+  .fx.sel .cell { border-color:#e6b45a; }
+  .app.after .fx.sel .cell { background:rgba(230,180,90,0.07); }
+  .fx .num { font-family:'JetBrains Mono',monospace; font-size:14px; color:#fafaf8; }
+  .fx .dot { width:6px; height:6px; border-radius:50%; margin:4px auto 0; }
+  .app.before .fx .dot { width:9px; height:9px; }
+  .fx .ms { display:flex; justify-content:center; gap:8px; margin-top:5px; }
+  .fx .ms span { font-size:9px; letter-spacing:0.08em; color:#5a5a55; }
+  .app.before .fx .ms span { border:0.5px solid var(--bd); border-radius:2px; padding:1px 4px; }
+  .fx .ms .m.on { color:#e0726a; } .fx .ms .s.on { color:#e6b45a; }
+
+  /* bottom right actions */
+  .actions { display:flex; justify-content:flex-end; gap:8px; padding:10px 16px; background:var(--bar); border-top:0.5px solid var(--bd); }
+  .actions .ab { font-size:11px; letter-spacing:0.06em; padding:8px 14px; border-radius:var(--r); border:var(--key-bw) solid var(--bd2); background:var(--key-bg); box-shadow:var(--key-bevel); color:#d9d2c6; }
+  .actions .ab.danger { color:#e0726a; }
+  .app.after .actions .ab.danger { color:#d9d2c6; }
+  .app.after .actions .ab.danger:hover { color:#e0726a; border-color:#e0726a; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <h1>LED STAGE IMAGER — 本番 <b>LIGHT SKETCH</b> UIモック</h1>
+    <p class="sub">のむさんが実際に触る本番画面で、今 ↔ 刷新案を切替。<b style="color:#cfcabf;font-weight:500">Parts はクールな線アイコンのまま、形だけ実物の灯体に正確化</b>（PAR＝缶＋フレネル／PAT＝金網メッシュ／Pixel PAT＝六角7セル／街灯／シャンデリア…）。光る所だけアンバーの差し色。</p>
+    <div class="toggle">
+      <button id="t-before" onclick="setTheme('before')">今 (NOW)</button>
+      <button id="t-after" class="sel" onclick="setTheme('after')">刷新案</button>
+    </div>
+    <p class="note">注目：<b>① Parts が線アイコンで実物どおり即わかる</b> ／ ② 見出しの極太文字 → 静かな細ラベル ／ ③ 塗りキー → ヘアライン ／ ④ 余白でスッキリ ／ ⑤ アクセントはアンバーのまま</p>
+  </div>
+
+  <div class="app after" id="app">
+    <div class="topbar">
+      <span class="wm">LIGHT&nbsp;SKETCH</span>
+      <span class="spacer"></span>
+      <span class="tag"><span class="d on"></span>MIDI</span>
+      <span class="tag"><span class="d on"></span>出力</span>
+      <span class="tbtn">SHORTCUT</span>
+      <span class="tbtn">保存</span>
+      <span class="tbtn">閉じる</span>
+      <span class="tbtn acc" style="border-color:#5a4a2a">← SHOW MODEへ</span>
+    </div>
+    <div class="master">
+      <span class="ml">Master</span>
+      <input class="rng" type="range" min="0" max="100" value="100" style="width:340px" />
+      <span class="mval">100<span style="font-size:9px">%</span></span>
+      <span class="spacer"></span>
+      <span class="ml" style="color:#6f6c64">KEY ▬ &nbsp; LIVE</span>
+    </div>
+    <div class="main">
+      <div class="canvas">
+        <span class="help">⌘ click add · click multi · drag move · delete · ? help</span>
+        <div class="ph">
+          <svg width="260" height="150" viewBox="0 0 260 150">
+            <rect x="78" y="58" width="104" height="40" rx="5" fill="none" stroke="#3a352c" stroke-width="1"/>
+            <g id="livebulbs"></g>
+            <text x="130" y="84" text-anchor="middle" font-family="Inter" font-size="20" font-weight="600" letter-spacing="3" fill="#e6b45a">LIVE</text>
+          </svg>
+          <div class="t">LOAD PHOTO / VIDEO</div>
+          <div class="s">写真・動画を選ぶ（ドロップでもOK）／ いまは Marquee に CHASE が流れています</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="tabs">
+          <div class="tab">CUE</div><div class="tab">LIGHT</div><div class="tab on">DECOR</div><div class="tab">SFX</div><div class="tab">SETUP</div>
+        </div>
+        <div class="scroll">
+          <div class="seclab">Add · 灯体／モチーフを置く</div>
+          <div class="parts" id="parts"></div>
+
+          <div class="togrow"><span class="sw on" id="decsw" onclick="this.classList.toggle('on')"><i></i></span><span class="tl">DECOR（電飾を表示）</span><span class="ts">ON</span></div>
+          <div class="wide">LOAD CHART</div>
+          <div class="capt">Load Alpha Chart</div>
+          <div class="cap">透過チャートを読み込むと、ステージ一面に電飾が出てパターンが流れます</div>
+
+          <div class="seclab">Pattern</div>
+          <div class="grid g3">
+            <span class="key on">STRIPE H</span><span class="key">STRIPE V</span><span class="key">OUTLINE</span>
+            <span class="key">DOTS</span><span class="key">GRID</span><span class="key">DIAG</span>
+            <span class="key">BRICK</span><span class="key">CHECK</span><span class="key">RINGS</span>
+          </div>
+
+          <div class="seclab">Motion</div>
+          <div class="grid g3">
+            <span class="key on">CHASE</span><span class="key">THEATER</span><span class="key">COMET</span>
+            <span class="key">METEOR</span><span class="key">WAVE</span><span class="key">FILL</span>
+            <span class="key">RAINBOW</span><span class="key">GRAD</span><span class="key">SPARKLE</span>
+          </div>
+
+          <div class="seclab">Direction</div>
+          <div class="grid g4">
+            <span class="key on">FWD</span><span class="key">REV</span><span class="key">BOUNCE</span><span class="key">CENTER</span>
+          </div>
+
+          <div class="seclab">Color</div>
+          <div class="colr">
+            <span class="chip" style="background:#d6428a"></span><span class="ts" style="color:var(--hint)">C1</span>
+            <span class="chip" style="background:#3f7fe0"></span><span class="ts" style="color:var(--hint)">C2</span>
+            <span class="key" style="padding:6px 12px">STOP</span>
+          </div>
+
+          <div class="seclab">Detail</div>
+          <div class="det">
+            <div class="drow"><span class="dl">Colors</span><input class="rng" type="range" min="1" max="12" value="6"><span class="dv">6</span></div>
+            <div class="drow"><span class="dl">Width</span><input class="rng" type="range" min="1" max="20" value="3"><span class="dv">3</span></div>
+            <div class="drow"><span class="dl">Gap</span><input class="rng" type="range" min="0" max="40" value="14"><span class="dv">14</span></div>
+            <div class="drow"><span class="dl">Speed</span><input class="rng" type="range" min="0" max="40" value="12"><span class="dv">1.2</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="fixbar"><div class="fixs" id="fixs"></div></div>
+    <div class="actions">
+      <span class="ab">暗転</span><span class="ab">パニック</span><span class="ab">全点灯</span><span class="ab danger">戻す</span>
+    </div>
+  </div>
+
+<script>
+  // Cool line icons, accurate to each real fixture. Accent (amber) marks the light-emitting part.
+  const A = '#e6b45a';
+  function hex(cx,cy,r){ let p=''; for(let i=0;i<6;i++){ const a=(-90+60*i)*Math.PI/180; const x=(cx+r*Math.cos(a)).toFixed(2); const y=(cy+r*Math.sin(a)).toFixed(2); p+=(i?'L':'M')+x+' '+y; } return p+'Z'; }
+  function pixelpat(){ let g='<g fill="none" stroke="currentColor" stroke-width="1.1">'; g+=`<path d="${hex(12,12,2.6)}"/>`; for(let i=0;i<6;i++){ const a=(i*60)*Math.PI/180; const cx=12+4.7*Math.cos(a), cy=12+4.7*Math.sin(a); g+=`<path d="${hex(cx,cy,2.4)}"/>`; } return g+'</g><circle cx="12" cy="12" r="1.1" fill="'+A+'"/>'; }
+  const F = {
+    Street: `<path d='M9 21V7' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/><path d='M9 7q0-3 4-3 4 0 4 3' fill='none' stroke='currentColor' stroke-width='1.5'/><path d='M15 7h4l-1.3 3.6h-1.4z' fill='${A}' stroke='currentColor' stroke-width='0.9'/><path d='M6 21h6' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/>`,
+    Chandelier: `<path d='M12 3v3M6 8h12M8 8c0 3.5 1.5 4.5 1.5 4.5M16 8c0 3.5-1.5 4.5-1.5 4.5M12 6v6.5' fill='none' stroke='currentColor' stroke-width='1.4'/><g fill='${A}'><circle cx='8' cy='13.5' r='1.5'/><circle cx='16' cy='13.5' r='1.5'/><circle cx='12' cy='14.6' r='1.6'/></g>`,
+    Marquee: `<g stroke='currentColor' stroke-width='2.6' stroke-linejoin='round' stroke-linecap='round' fill='none'><path d='M5 19 L12 5 L19 19'/><path d='M7.8 14 H16.2'/></g>`,
+    Bulb: `<circle cx='12' cy='10.5' r='6' fill='none' stroke='currentColor' stroke-width='1.5'/><circle cx='12' cy='10.5' r='2.4' fill='${A}'/><path d='M9.5 17.5h5M10.5 20h3' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/>`,
+    PAR: `<path d='M3.5 9v6M20.5 9v6' stroke='currentColor' stroke-width='1.5' stroke-linecap='round'/><circle cx='12' cy='12' r='7.5' fill='none' stroke='currentColor' stroke-width='1.5'/><circle cx='12' cy='12' r='4.2' fill='none' stroke='currentColor' stroke-width='1.1'/><circle cx='12' cy='12' r='1.9' fill='${A}'/>`,
+    '8Mini': `<rect x='4' y='7' width='16' height='10' rx='1.5' fill='none' stroke='currentColor' stroke-width='1.5'/><g fill='${A}'><circle cx='7' cy='10.2' r='1.3'/><circle cx='10.3' cy='10.2' r='1.3'/><circle cx='13.7' cy='10.2' r='1.3'/><circle cx='17' cy='10.2' r='1.3'/><circle cx='7' cy='13.8' r='1.3'/><circle cx='10.3' cy='13.8' r='1.3'/><circle cx='13.7' cy='13.8' r='1.3'/><circle cx='17' cy='13.8' r='1.3'/></g>`,
+    PAT: `<circle cx='12' cy='12' r='8.5' fill='none' stroke='currentColor' stroke-width='1.5'/><g stroke='currentColor' stroke-width='1.3' stroke-linecap='round'><path d='M12 14v6'/><path d='M10.3 11 L5.1 8'/><path d='M13.7 11 L18.9 8'/></g><circle cx='12' cy='12' r='2.1' fill='${A}'/><g fill='currentColor' opacity='0.45'><circle cx='12' cy='6.6' r='0.6'/><circle cx='7.4' cy='15' r='0.6'/><circle cx='16.6' cy='15' r='0.6'/><circle cx='6.6' cy='11' r='0.6'/><circle cx='17.4' cy='11' r='0.6'/></g>`,
+    PixelPAT: pixelpat(),
+    Star: `<g fill='currentColor'><circle cx='6' cy='6.5' r='0.8'/><circle cx='13' cy='5' r='1'/><circle cx='19.5' cy='8' r='0.7'/><circle cx='9' cy='11.5' r='0.7'/><circle cx='16.5' cy='12.5' r='0.9'/><circle cx='4.5' cy='15' r='0.8'/><circle cx='11' cy='17.5' r='0.7'/><circle cx='20' cy='17' r='0.8'/><circle cx='7.5' cy='20' r='0.7'/><circle cx='15' cy='20.5' r='0.9'/></g><g fill='${A}'><path d='M11.5 6.9 L12.1 8.4 L13.6 9 L12.1 9.6 L11.5 11.1 L10.9 9.6 L9.4 9 L10.9 8.4 Z'/><path d='M17 14.7 L17.5 15.9 L18.7 16.5 L17.5 17.1 L17 18.3 L16.5 17.1 L15.3 16.5 L16.5 15.9 Z'/></g>`,
+    Banner: `<path d='M3 7 Q12 16 21 7' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round'/><g stroke='currentColor' stroke-width='0.8'><path d='M6.6 9.9v1.5M10.2 11.3v1.5M12 11.5v1.5M13.8 11.3v1.5M17.4 9.9v1.5'/></g><g fill='${A}'><circle cx='6.6' cy='12.7' r='1.4'/><circle cx='10.2' cy='14.1' r='1.4'/><circle cx='12' cy='14.3' r='1.4'/><circle cx='13.8' cy='14.1' r='1.4'/><circle cx='17.4' cy='12.7' r='1.4'/></g>`,
+    '画像': `<rect x='3' y='5' width='18' height='14' rx='2' fill='none' stroke='currentColor' stroke-width='1.5'/><circle cx='8' cy='10' r='1.6' fill='${A}'/><path d='M4 17l5-5 3 3 3-3 5 5' fill='none' stroke='currentColor' stroke-width='1.3' stroke-linejoin='round'/>`
+  };
+  (function(){
+    const wrap = document.getElementById('parts');
+    for (const [name, svg] of Object.entries(F)) {
+      const el = document.createElement('span'); el.className='part';
+      el.innerHTML = `<svg viewBox="0 0 24 24">${svg}</svg><span class="pl">${name}</span>`;
+      wrap.appendChild(el);
+    }
+    const lb = document.getElementById('livebulbs');
+    const cols = ['#e6b45a','#9ED27A','#fafaf8','#e6b45a','#d6428a','#9ED27A'];
+    let i=0;
+    for (let x=86; x<=174; x+=12.5){ const c=document.createElementNS('http://www.w3.org/2000/svg','circle'); c.setAttribute('cx',x); c.setAttribute('cy','64'); c.setAttribute('r','1.7'); c.setAttribute('fill',cols[i%cols.length]); lb.appendChild(c); const c2=document.createElementNS('http://www.w3.org/2000/svg','circle'); c2.setAttribute('cx',x); c2.setAttribute('cy','92'); c2.setAttribute('r','1.7'); c2.setAttribute('fill',cols[(i+2)%cols.length]); lb.appendChild(c2); i++; }
+    const fx = document.getElementById('fixs');
+    const hues=['#e6b45a','#9ED27A','#d6428a','#3f7fe0','#e6b45a','#fafaf8','#9ED27A','#e6b45a','#e0726a','#e6b45a'];
+    for(let n=1;n<=10;n++){ const d=document.createElement('div'); d.className='fx'+(n===1?' sel':''); d.innerHTML=`<div class="cell"><div class="num">${n}</div><div class="dot" style="background:${hues[n-1]}"></div></div><div class="ms"><span class="m${n===9?' on':''}">M</span><span class="s${n===1?' on':''}">S</span></div>`; fx.appendChild(d); }
+  })();
+  function setTheme(t){ const a=document.getElementById('app'); a.classList.remove('before','after'); a.classList.add(t); document.getElementById('t-before').classList.toggle('sel',t==='before'); document.getElementById('t-after').classList.toggle('sel',t==='after'); }
+</script>
+</body>
+</html>

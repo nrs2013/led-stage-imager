@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LED STAGE IMAGER — UI スタイル比較モック</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Cormorant+Garamond:wght@300;400&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: #050505;
+    color: #e8e5dc;
+    font-family: 'Inter', 'Noto Sans JP', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 18px 20px 60px;
+  }
+
+  /* ===== my chrome (the proto wrapper, not the app) ===== */
+  .head { max-width: 1180px; margin: 0 auto 16px; }
+  .head h1 {
+    font-family: 'Cormorant Garamond', serif; font-weight: 400;
+    font-size: 26px; letter-spacing: 0.14em; margin: 0 0 4px; color: #f3f0e8;
+  }
+  .head h1 .cy { color: #7bc5e8; }
+  .head .sub { font-size: 13px; color: #8a877e; margin: 0 0 16px; line-height: 1.6; }
+  .toggle { display: inline-flex; gap: 0; border: 0.5px solid #34322e; border-radius: 6px; overflow: hidden; }
+  .toggle button {
+    appearance: none; border: 0; cursor: pointer; padding: 11px 22px;
+    font-family: 'Inter', sans-serif; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    background: transparent; color: #8a877e; font-weight: 500; transition: all 120ms;
+  }
+  .toggle button + button { border-left: 0.5px solid #34322e; }
+  .toggle button.sel { background: rgba(123,197,232,0.10); color: #7bc5e8; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .legend .lg {
+    font-size: 12px; color: #b4b1a8; border: 0.5px solid #2c2a27; border-radius: 999px;
+    padding: 6px 13px; display: inline-flex; align-items: center; gap: 7px; transition: all 160ms;
+  }
+  .legend .lg b { color: #7bc5e8; font-weight: 600; }
+  .legend .lg.on { border-color: #7bc5e8; background: rgba(123,197,232,0.06); }
+  .legend .lg .n { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #7bc5e8; opacity: 0.7; }
+
+  .screen-label { max-width: 1180px; margin: 26px auto 8px; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: #6f6c64; font-weight: 500; }
+
+  /* ===== THE APP MOCK ===== */
+  .app {
+    max-width: 1180px; margin: 0 auto; border-radius: 8px; overflow: hidden;
+    border: 0.5px solid #1c1b18; background: var(--root-bg);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+    transition: background 200ms;
+  }
+  .app.editor { display: flex; flex-direction: column; }
+
+  /* theme tokens */
+  .app.before {
+    --root-bg: radial-gradient(140% 130% at 50% -16%, #1a1611 0%, #0a0908 50%, #040404 100%);
+    --bar: linear-gradient(180deg,#1d1a15 0%,#121009 52%,#070604 100%);
+    --bar-hi: inset 0 1px 0 rgba(255,255,255,0.07);
+    --panel: linear-gradient(180deg,#151210 0%,#090806 100%);
+    --border: #2c2a27;
+    --btn-bg: linear-gradient(180deg,#26231f 0%,#1a1815 100%);
+    --btn-bd: #3b3631;
+    --btn-bw: 1px;
+    --btn-bevel: inset 0 1px 0 rgba(255,255,255,0.05);
+    --radius: 3px;
+    --title-font: 'Bebas Neue','Inter',sans-serif;
+    --title-color: #b9b2a6; --title-spacing: 0.16em; --title-weight: 400;
+    --card-bg: #242220; --card-bd: #3b3631;
+    --bar-gap: 6px; --bar-pad: 14px; --chip-bd: var(--border);
+    --label: #a8a8a0; --hint: #888780;
+  }
+  .app.after {
+    --root-bg: radial-gradient(140% 130% at 50% -16%, #17140f 0%, #0a0908 55%, #050505 100%);
+    --bar: #131110;
+    --bar-hi: inset 0 1px 0 rgba(255,238,214,0.05);
+    --panel: #131110;
+    --border: #34322e;
+    --btn-bg: transparent;
+    --btn-bd: #34322e;
+    --btn-bw: 0.5px;
+    --btn-bevel: none;
+    --radius: 4px;
+    --title-font: 'Inter',sans-serif;
+    --title-color: #c8c6bf; --title-spacing: 0.18em; --title-weight: 500;
+    --card-bg: #181614; --card-bd: #34322e;
+    --bar-gap: 12px; --bar-pad: 20px; --chip-bd: transparent;
+    --label: #b4b1a8; --hint: #8a877e;
+  }
+
+  /* toolbar / subbar / statusbar */
+  .bar { display: flex; align-items: center; gap: var(--bar-gap); padding: 0 var(--bar-pad);
+         background: var(--bar); box-shadow: var(--bar-hi); flex-shrink: 0; transition: all 180ms; }
+  .toolbar { height: 52px; border-bottom: 0.5px solid var(--border); }
+  .subbar  { height: 42px; border-bottom: 0.5px solid var(--border); font-size: 11px; }
+  .statusbar { height: 34px; border-top: 0.5px solid var(--border); box-shadow: var(--bar-hi); }
+
+  .wordmark { font-family: 'Cormorant Garamond', serif; font-weight: 400; font-size: 23px; letter-spacing: 0.16em; color: #fafaf8; white-space: nowrap; }
+  .wordmark .cy { color: #7bc5e8; }
+
+  .tick { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; transition: opacity 160ms; }
+  .subbar .tick { height: 20px; }
+  .statusbar .tick { height: 16px; }
+  .app.after .tick:not(.major) { display: none; }
+
+  .island { display: flex; align-items: center; gap: var(--bar-gap); }
+  .eyebrow { font-size: 9px; letter-spacing: 0.14em; color: var(--hint); font-weight: 700; line-height: 1; text-transform: uppercase; }
+  .app.after .eyebrow { font-weight: 500; letter-spacing: 0.16em; }
+  .spacer { flex: 1; }
+
+  /* buttons */
+  .btn {
+    appearance: none; cursor: pointer;
+    background: var(--btn-bg); border: var(--btn-bw) solid var(--btn-bd); box-shadow: var(--btn-bevel);
+    color: #e8e5dc; border-radius: var(--radius);
+    padding: 9px 15px; font-family: 'Inter','Noto Sans JP',sans-serif; font-size: 12px;
+    letter-spacing: 0.06em; line-height: 1; white-space: nowrap; transition: all 120ms;
+  }
+  .subbar .btn { padding: 8px 11px; font-size: 11px; }
+  .btn:hover { border-color: #4a4843; }
+  .app.after .btn:hover { background: rgba(255,255,255,0.03); }
+  .btn.icon { width: 36px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+  .app.after .btn.icon { width: 38px; height: 34px; }
+  .btn svg { display: block; }
+
+  /* active — BEFORE = solid paint block (the rainbow); AFTER = cyan tinted glass */
+  .app.before .btn.active { background: #7bc5e8; border-color: #7bc5e8; color: #0a0a0a; box-shadow: none; }
+  .app.before .btn.active[data-accent="fuchsia"] { background: #c186c8; border-color: #c186c8; }
+  .app.before .btn.active[data-accent="green"]   { background: #a8e878; border-color: #a8e878; }
+  .app.before .btn.active[data-accent="amber"]   { background: #f5c878; border-color: #f5c878; }
+  .app.before .btn.danger { background: linear-gradient(180deg,#3a1f1d,#2a1614); border-color: #e0726a; color: #f0c4bf; }
+
+  .app.after .btn.active { background: rgba(123,197,232,0.09); border-color: #7bc5e8; color: #7bc5e8; box-shadow: none; }
+  .app.after .btn.primary { border-color: rgba(123,197,232,0.85); color: #aedcf0; }
+  .app.after .btn.danger { color: #e8e5dc; }
+  .app.after .btn.danger:hover { border-color: #e0726a; color: #e0726a; background: rgba(224,114,106,0.08); }
+
+  .px-field { display: inline-flex; align-items: center; gap: 4px; }
+  .px-field .v { background: #1d1b19; border: 0.5px solid #3b3631; color: #fafaf8; border-radius: 4px; padding: 6px 8px; font-family: 'JetBrains Mono',monospace; font-size: 12px; width: 40px; text-align: center; }
+  .app.after .px-field .v { border-color: var(--border); }
+  .px-field .u { font-size: 10px; color: var(--hint); }
+
+  .mono-lbl { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--label); white-space: nowrap; }
+  .sub-lbl { font-size: 11px; color: var(--label); }
+
+  /* range */
+  .rng { -webkit-appearance: none; appearance: none; width: 110px; height: 3px; border-radius: 2px; background: var(--border); outline: none; }
+  .rng::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; }
+  .app.before .rng::-webkit-slider-thumb { border-radius: 50%; background: #f5c878; box-shadow: 0 0 6px rgba(245,200,120,0.5); }
+  .app.after .rng::-webkit-slider-thumb { border-radius: 3px; background: #0e0e0e; border: 1px solid #7bc5e8; box-shadow: none; }
+
+  /* body: canvas + right panel */
+  .body { display: flex; min-height: 360px; }
+  .canvas { flex: 1; position: relative; background: #0a0a0a; overflow: hidden; }
+  .canvas .hint { position: absolute; left: 14px; bottom: 12px; font-family: 'JetBrains Mono',monospace; font-size: 10px; color: #4a4843; letter-spacing: 0.08em; }
+  .canvas .note { position: absolute; right: 12px; top: 10px; font-size: 10px; color: #3f3d39; font-family:'JetBrains Mono',monospace; }
+
+  .rightcol { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--panel); border-left: 0.5px solid var(--border); }
+
+  .shelf { padding: 14px; border-bottom: 0.5px solid var(--border); }
+  .app.after .shelf { margin: 8px; padding: 13px; border: 0.5px solid var(--border); border-radius: var(--radius); background: #15120f; box-shadow: inset 0 1px 0 rgba(255,238,214,0.04); }
+  .app.after .rightcol .shelf:not(:first-child) { margin-top: 0; }
+
+  .sect-title { font-family: var(--title-font); font-size: 13px; letter-spacing: var(--title-spacing); font-weight: var(--title-weight); color: var(--title-color); text-transform: uppercase; margin: 0 0 10px; line-height: 1; }
+  .app.before .sect-title { font-size: 15px; }
+
+  /* layers */
+  .layer-row { display: flex; align-items: center; gap: 8px; padding: 8px 6px; border-radius: 3px; }
+  .app.before .layer-row { padding: 4px 6px; }
+  .layer-row .eye { width: 14px; color: #7bc5e8; opacity: 0.8; }
+  .layer-row .nm { font-size: 12px; color: #e8e5dc; flex: 1; }
+  .layer-row .ct { font-family: 'JetBrains Mono',monospace; font-size: 11px; color: var(--hint); }
+  .layer-row.sel { background: rgba(123,197,232,0.07); }
+
+  /* parts grid */
+  .filters { display: flex; gap: 6px; margin-bottom: 10px; }
+  .filters .f { font-size: 10px; letter-spacing: 0.08em; padding: 5px 10px; border-radius: var(--radius); border: var(--btn-bw) solid var(--btn-bd); color: var(--label); background: var(--btn-bg); box-shadow: var(--btn-bevel); text-transform: uppercase; }
+  .filters .f.on { }
+  .app.before .filters .f.on { background: #7bc5e8; color: #0a0a0a; border-color: #7bc5e8; }
+  .app.after .filters .f.on { background: rgba(123,197,232,0.09); color: #7bc5e8; border-color: #7bc5e8; }
+  .parts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .app.after .parts { gap: 10px; }
+  .part { background: var(--card-bg); border: var(--btn-bw) solid var(--card-bd); border-radius: var(--radius); padding: 8px 6px 7px; text-align: center; box-shadow: var(--btn-bevel); }
+  .app.after .part { box-shadow: none; }
+  .part .sw { height: 30px; border-radius: 3px; margin-bottom: 6px; }
+  .part .pl { font-size: 10px; color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .part .pc { display: none; font-family: 'JetBrains Mono',monospace; font-size: 8.5px; color: #5a5a55; letter-spacing: 0.04em; }
+  .app.before .part .pc { display: block; }
+
+  /* inspector */
+  .insp-group + .insp-group { margin-top: 16px; }
+  .app.after .insp-group + .insp-group { margin-top: 18px; }
+  .field { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .app.after .field { margin-bottom: 11px; }
+  .field label { font-size: 10px; letter-spacing: 0.06em; color: var(--label); text-transform: uppercase; width: 46px; }
+  .field .inp { flex: 1; background: #1d1b19; border: var(--btn-bw) solid var(--btn-bd); color: #fafaf8; border-radius: var(--radius); padding: 6px 8px; font-family: 'JetBrains Mono',monospace; font-size: 12px; }
+  .app.after .field .inp { border-color: var(--border); }
+  .swatch { width: 22px; height: 22px; border-radius: 4px; border: 0.5px solid var(--border); }
+
+  /* status chips */
+  .chip { font-family: 'JetBrains Mono', monospace; font-size: 11px; border: 0.5px solid var(--chip-bd); border-radius: 3px; padding: 2px 7px; white-space: nowrap; }
+  .chip.ok { color: #a8e878; } .chip.off { color: #5a5a55; }
+  .app.after .chip { padding: 2px 2px; }
+
+  /* ===== 本番 fixture strip ===== */
+  .stage2 { padding: 0 0 18px; }
+  .masterbar { height: 46px; }
+  .masterbar .mtitle { font-family: var(--title-font); font-size: 13px; letter-spacing: var(--title-spacing); font-weight: var(--title-weight); color: var(--title-color); text-transform: uppercase; }
+  .app.before .masterbar .mtitle { font-size: 15px; }
+  .fixtures { display: flex; gap: 10px; padding: 20px var(--bar-pad); background: #0a0a0a; flex-wrap: wrap; }
+  .fx { width: 78px; text-align: center; }
+  .fx .cell { border: var(--btn-bw) solid var(--card-bd); background: var(--card-bg); border-radius: var(--radius); padding: 8px 0 6px; box-shadow: var(--btn-bevel); }
+  .app.after .fx .cell { background: transparent; border-color: var(--border); box-shadow: none; }
+  .fx.sel .cell { border-color: #7bc5e8; }
+  .app.after .fx.sel .cell { background: rgba(123,197,232,0.06); }
+  .fx .num { font-family: 'JetBrains Mono', monospace; font-size: 15px; color: #fafaf8; }
+  .fx .dot { width: 6px; height: 6px; border-radius: 50%; margin: 5px auto 0; }
+  .app.before .fx .dot { width: 9px; height: 9px; }
+  .fx .ms { display: flex; justify-content: center; gap: 9px; margin-top: 6px; }
+  .fx .ms span { font-size: 10px; letter-spacing: 0.1em; color: #5a5a55; }
+  .app.before .fx .ms span { border: 0.5px solid var(--border); border-radius: 2px; padding: 1px 4px; }
+  .fx .ms .m.on { color: #e0726a; } .fx .ms .s.on { color: #7bc5e8; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <h1>LED&nbsp;STAGE&nbsp;<span class="cy">IMAGER</span> — UI スタイル比較</h1>
+    <p class="sub">同じ卓・同じ文字サイズ・データはそのまま。<b style="color:#cfcabf;font-weight:500">クロム（バー/ボタン/パネルの見た目）だけ</b>を整えた刷新案です。下のボタンで「今 ↔ 刷新案」を切り替えて見比べてください。</p>
+    <div class="toggle" role="tablist">
+      <button id="t-before" class="" onclick="setTheme('before')">今 (NOW)</button>
+      <button id="t-after" class="sel" onclick="setTheme('after')">刷新案 — Atelier Console</button>
+    </div>
+    <div class="legend" id="legend">
+      <span class="lg on"><span class="n">01</span> 塗りキー → <b>ヘアラインのガラスキー</b></span>
+      <span class="lg on"><span class="n">02</span> Bebas追放 → <b>静かな細ラベル</b></span>
+      <span class="lg on"><span class="n">03</span> 5色乱立 → <b>cyan 1色</b></span>
+      <span class="lg on"><span class="n">04</span> 箱だらけ → <b>余白で仕切る</b></span>
+    </div>
+  </div>
+
+  <div class="screen-label">① 編集画面（電飾チャート）</div>
+  <div class="app editor after" id="app1">
+    <!-- toolbar -->
+    <div class="bar toolbar">
+      <span class="wordmark">LED&nbsp;STAGE&nbsp;<span class="cy">IMAGER</span></span>
+      <div class="tick major"></div>
+      <div class="island">
+        <button class="btn icon active" title="Select"><svg width="16" height="16" viewBox="0 0 16 16"><polygon points="4,2 12.5,8.7 8.1,9.4 10.3,13.8 8.4,14.7 6.3,10.3 4,12.6" fill="currentColor"/></svg></button>
+      </div>
+      <div class="tick"></div>
+      <span class="eyebrow">Pixel</span>
+      <div class="island">
+        <button class="btn icon" title="Paint"><svg width="16" height="16" viewBox="0 0 16 16"><g fill="currentColor"><rect x="1.5" y="11" width="3.4" height="3.4"/><rect x="4.9" y="7.6" width="3.4" height="3.4"/><rect x="8.3" y="4.2" width="3.4" height="3.4"/><rect x="11.7" y="0.8" width="3.4" height="3.4"/></g></svg></button>
+        <button class="btn icon" title="Eraser"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M9.2 2.6 L13.4 6.8 L8.2 12 H4.8 L2.6 9.8 Z"/><line x1="3" y1="14.2" x2="13" y2="14.2"/></svg></button>
+        <span class="px-field"><span class="v">3</span><span class="u">px</span></span>
+      </div>
+      <div class="tick"></div>
+      <span class="eyebrow">Draw</span>
+      <div class="island">
+        <button class="btn icon" title="Pen"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 12 C 4.5 3.5, 8 14.5, 14 4.5"/></svg></button>
+        <button class="btn icon" title="Line"><svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="2.5" y1="13.5" x2="13.5" y2="2.5"/></svg></button>
+        <button class="btn icon" title="Bulb"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="5.6"/></svg></button>
+        <button class="btn icon" title="Rect"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.6" y="3.6" width="10.8" height="8.8"/></svg></button>
+        <button class="btn icon" title="Star"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><polygon points="8,1.6 9.8,5.9 14.4,6.3 10.9,9.3 12,13.9 8,11.4 4,13.9 5.1,9.3 1.6,6.3 6.2,5.9"/></svg></button>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn">Keys</button>
+      <div class="tick"></div>
+      <button class="btn" data-accent="fuchsia">Programmer</button>
+      <div class="tick"></div>
+      <button class="btn" data-accent="green">Fullscreen</button>
+      <div class="tick major"></div>
+      <button class="btn active primary">Edit</button>
+      <button class="btn" data-accent="amber">Live</button>
+    </div>
+
+    <!-- subbar -->
+    <div class="bar subbar">
+      <button class="btn primary">New</button>
+      <button class="btn">Open</button>
+      <button class="btn primary">Save</button>
+      <button class="btn">Save As</button>
+      <button class="btn">Copy</button>
+      <button class="btn">Setup</button>
+      <div class="tick"></div>
+      <button class="btn" data-accent="green">Step Patch</button>
+      <div class="tick"></div>
+      <button class="btn">Chart</button>
+      <span class="sub-lbl">Opacity</span>
+      <input class="rng" type="range" min="0" max="100" value="62" />
+      <button class="btn active">Mask</button>
+      <button class="btn">Sizes</button>
+      <div class="tick"></div>
+      <button class="btn danger">Remove</button>
+      <div class="spacer"></div>
+      <span class="mono-lbl">Canvas 1920 × 1080</span>
+    </div>
+
+    <!-- body -->
+    <div class="body">
+      <div class="canvas">
+        <svg width="100%" height="100%" viewBox="0 0 640 360" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <radialGradient id="halo" cx="50%" cy="40%" r="60%">
+              <stop offset="0%" stop-color="#10131a"/><stop offset="100%" stop-color="#0a0a0a"/>
+            </radialGradient>
+          </defs>
+          <rect width="640" height="360" fill="url(#halo)"/>
+          <!-- arch of neon -->
+          <path d="M120 250 Q320 70 520 250" fill="none" stroke="#7bc5e8" stroke-width="2.4" opacity="0.55"/>
+          <path d="M120 250 Q320 70 520 250" fill="none" stroke="#bfe6f7" stroke-width="0.8" opacity="0.7"/>
+          <!-- bulb festoon row -->
+          <g>
+            <!-- generated dots -->
+          </g>
+          <!-- ground bulbs -->
+          <g id="bulbs"></g>
+          <!-- uplights -->
+          <g id="uplights"></g>
+        </svg>
+        <span class="note">EDIT · 1920×1080</span>
+        <span class="hint">⌘ドラッグ=ドット描き / 囲んで複数選択</span>
+      </div>
+
+      <div class="rightcol">
+        <!-- layers -->
+        <div class="shelf">
+          <div class="sect-title">Layers</div>
+          <div class="layer-row sel"><span class="eye">◎</span><span class="nm">電飾 メイン</span><span class="ct">128</span></div>
+          <div class="layer-row"><span class="eye" style="opacity:.4">◎</span><span class="nm">アーチ Neon</span><span class="ct">2</span></div>
+          <div class="layer-row"><span class="eye">◎</span><span class="nm">UPLIGHT 列</span><span class="ct">12</span></div>
+        </div>
+        <!-- parts -->
+        <div class="shelf">
+          <div class="sect-title">Parts</div>
+          <div class="filters">
+            <span class="f on">All</span><span class="f">Light</span><span class="f">Decor</span>
+          </div>
+          <div class="parts">
+            <div class="part"><div class="sw" style="background:radial-gradient(circle,#ffe9b0,#8a6a2a)"></div><div class="pl">Ball Bulb</div><div class="pc">7CELL</div></div>
+            <div class="part"><div class="sw" style="background:linear-gradient(180deg,#cfe8ff,#3a6a8a)"></div><div class="pl">Pixel PAT</div><div class="pc">FRONT</div></div>
+            <div class="part"><div class="sw" style="background:linear-gradient(180deg,#ffd27a,#7a5320)"></div><div class="pl">PAR</div><div class="pc">MESH</div></div>
+            <div class="part"><div class="sw" style="background:repeating-linear-gradient(90deg,#ffd27a 0 4px,#2a2014 4px 8px)"></div><div class="pl">8-Lamp</div><div class="pc">8CELL</div></div>
+            <div class="part"><div class="sw" style="background:linear-gradient(180deg,#c186c8,#4a2a52)"></div><div class="pl">Neon</div><div class="pc">LINE</div></div>
+            <div class="part"><div class="sw" style="background:linear-gradient(180deg,#a8e8ff,#2a4a5a)"></div><div class="pl">UPLIGHT</div><div class="pc">WASH</div></div>
+          </div>
+        </div>
+        <!-- inspector -->
+        <div class="shelf" style="border-bottom:none">
+          <div class="sect-title">Inspector</div>
+          <div class="insp-group">
+            <div class="field"><label>Pos X</label><span class="inp">864</span></div>
+            <div class="field"><label>Pos Y</label><span class="inp">512</span></div>
+            <div class="field"><label>Size</label><span class="inp">12 mm</span></div>
+          </div>
+          <div class="insp-group">
+            <div class="field"><label>DMX</label><span class="inp">1 · 045</span></div>
+            <div class="field"><label>Color</label><span class="swatch" style="background:#7bc5e8"></span><span class="mono-lbl" style="color:#7bc5e8">#7BC5E8</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- statusbar -->
+    <div class="bar statusbar">
+      <span class="eyebrow" style="font-family:'JetBrains Mono',monospace">Art-Net In</span>
+      <span class="chip ok">U1 ●</span>
+      <span class="chip ok">U2 ●</span>
+      <div class="tick"></div>
+      <span class="eyebrow" style="font-family:'JetBrains Mono',monospace">MIDI In</span>
+      <span class="chip ok">● 1</span>
+      <div class="tick"></div>
+      <span class="chip ok">NDI OUT ● LIVE</span>
+      <div class="spacer"></div>
+      <span class="eyebrow" style="font-family:'JetBrains Mono',monospace">Interface</span>
+      <span class="mono-lbl">en0 · 192.168.0.12</span>
+    </div>
+  </div>
+
+  <div class="screen-label">② 本番（画像照明）— MASTER / 灯体フェーダー帯</div>
+  <div class="app stage2 after" id="app2">
+    <div class="bar masterbar">
+      <span class="mtitle">Light Sketch</span>
+      <div class="tick major"></div>
+      <button class="btn active primary">流す</button>
+      <button class="btn">パターン</button>
+      <button class="btn">保存</button>
+      <div class="spacer"></div>
+      <span class="sub-lbl">Master</span>
+      <input class="rng" type="range" min="0" max="100" value="80" />
+      <span class="mono-lbl" style="color:#7bc5e8">80%</span>
+    </div>
+    <div class="fixtures" id="fixtures"></div>
+  </div>
+
+<script>
+  function setTheme(t) {
+    for (const id of ['app1','app2']) {
+      const el = document.getElementById(id);
+      el.classList.remove('before','after'); el.classList.add(t);
+    }
+    document.getElementById('t-before').classList.toggle('sel', t==='before');
+    document.getElementById('t-after').classList.toggle('sel', t==='after');
+    for (const lg of document.querySelectorAll('#legend .lg')) lg.classList.toggle('on', t==='after');
+  }
+
+  // ground bulbs + uplights on canvas
+  (function(){
+    const bulbs = document.getElementById('bulbs');
+    const ups = document.getElementById('uplights');
+    if (bulbs) for (let i=0;i<13;i++){ const x=130+i*30; const c=document.createElementNS('http://www.w3.org/2000/svg','circle'); c.setAttribute('cx',x); c.setAttribute('cy',252-Math.sin((i/12)*Math.PI)*88); c.setAttribute('r','3.4'); c.setAttribute('fill','#ffe9b0'); c.setAttribute('opacity','0.92'); bulbs.appendChild(c);}
+    if (ups) for (let i=0;i<6;i++){ const x=120+i*80; const p=document.createElementNS('http://www.w3.org/2000/svg','path'); p.setAttribute('d',`M${x} 320 L${x-16} 240 L${x+16} 240 Z`); p.setAttribute('fill','#7bc5e8'); p.setAttribute('opacity','0.16'); ups.appendChild(p); const d=document.createElementNS('http://www.w3.org/2000/svg','circle'); d.setAttribute('cx',x); d.setAttribute('cy','322'); d.setAttribute('r','3'); d.setAttribute('fill','#7bc5e8'); ups.appendChild(d);}
+  })();
+
+  // fixture strip 1..10
+  (function(){
+    const wrap = document.getElementById('fixtures');
+    const hues = ['#7bc5e8','#a8e878','#f5c878','#c186c8','#7bc5e8','#ffe57a','#a8e878','#7bc5e8','#e0726a','#7bc5e8'];
+    for (let i=1;i<=10;i++){
+      const fx = document.createElement('div'); fx.className = 'fx' + (i===1?' sel':'');
+      fx.innerHTML = `<div class="cell"><div class="num">${i}</div><div class="dot" style="background:${hues[i-1]}"></div></div>`+
+        `<div class="ms"><span class="m${i===9?' on':''}">M</span><span class="s${i===1?' on':''}">S</span></div>`;
+      wrap.appendChild(fx);
+    }
+  })();
+</script>
+</body>
+</html>
