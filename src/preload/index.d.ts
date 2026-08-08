@@ -61,8 +61,29 @@ export interface DecorApi {
   getStatus: () => Promise<{ hasClients: boolean }>
   /** Save chart JSON via a native dialog; resolves to the path or null. */
   saveChart: (json: string, name: string) => Promise<string | null>
+  /** 画像照明の公演を、入口 .ledshow 入りのフォルダとして保存する。 */
+  saveImageLightShowPackage: (
+    bytes: Uint8Array,
+    name: string,
+    saveAs?: boolean,
+    targetPath?: string | null
+  ) => Promise<string | null>
+  /** 画像照明の公演を、単体 .ledshow ファイルとして保存する。 */
+  saveImageLightShowFile: (
+    bytes: Uint8Array,
+    name: string,
+    saveAs?: boolean,
+    targetPath?: string | null
+  ) => Promise<string | null>
   /** Open a chart file via a native dialog; resolves to its JSON or null. */
   openChartFile: () => Promise<string | null>
+  /** 画像照明の公演を開く。新フォルダ・単体 .ledshow・旧フォルダに対応。 */
+  openImageLightShow: () => Promise<
+    | { json: string; media: Record<string, string>; path?: string }
+    | { zip: Uint8Array; path: string }
+    | { error: string }
+    | null
+  >
   /** Crash net: mirror the chart to userData/autosave.decor.json (no dialog). */
   autosaveWrite: (json: string) => Promise<boolean>
   /** Read the crash-net mirror back (null if none). */

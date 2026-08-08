@@ -29,6 +29,12 @@ interface DecorApi {
     media: { file: string; dataUrl: string }[],
     name: string
   ) => Promise<string | null>
+  saveImageLightShowPackage?: (
+    bytes: Uint8Array,
+    name: string,
+    saveAs?: boolean,
+    targetPath?: string | null
+  ) => Promise<string | null>
   saveImageLightShowFile?: (
     bytes: Uint8Array,
     name: string,
@@ -37,7 +43,7 @@ interface DecorApi {
   ) => Promise<string | null>
   askSaveChoice?: (situation: string) => Promise<'save' | 'discard' | 'cancel'>
   openImageLightShow?: () => Promise<
-    | { json: string; media: Record<string, string> }
+    | { json: string; media: Record<string, string>; path?: string }
     | { zip: Uint8Array; path: string }
     | { error: string }
     | null
@@ -1559,7 +1565,7 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
     }
   }
 
-  // ---- 公演まるごと保存/開く（フォルダ＋写真/動画）。show.json＋media/ を1フォルダに。
+  // ---- 公演まるごと保存/開く。通常は「公演フォルダ＋入口 .ledshow」で保存する。
   const [showMsg, setShowMsg] = useState<string | null>(null)
   const flash = (m: string): void => {
     setShowMsg(m)
@@ -1573,8 +1579,9 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
   // 保存の本体。saveAs=false は上書き（初回だけ名前を聞く）、true は別名保存。成功で true。
   const saveShowCore = async (saveAs: boolean): Promise<boolean> => {
     const a = getApi()
-    // 既定は「1ファイル(.ledshow)」保存。写真/動画も中に包む。旧フォルダ保存は開く側で対応。
-    if (!a?.saveImageLightShowFile && !a?.saveImageLightShow) return false
+    // 既定は「公演フォルダ」保存。中の入口 .ledshow を開けば写真/動画も含めて全部戻る。
+    if (!a?.saveImageLightShowPackage && !a?.saveImageLightShowFile && !a?.saveImageLightShow)
+      return false
     if (savingRef.current) return false // 保存中の二重起動を防ぐ（⌘S 連打でダイアログが重なるのを止める）
     savingRef.current = true
     flash('保存中…')
@@ -1585,7 +1592,10 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const versionAtSerialize = engine.getVersion()
       const { json, media } = await engine.serializeShow()
       let path: string | null = null
-      if (a.saveImageLightShowFile) {
+      if (a.saveImageLightShowPackage) {
+        const bytes = await zipShow(json, media)
+        path = await a.saveImageLightShowPackage(bytes, 'show', saveAs, showPathRef.current)
+      } else if (a.saveImageLightShowFile) {
         const bytes = await zipShow(json, media)
         path = await a.saveImageLightShowFile(bytes, 'show', saveAs, showPathRef.current)
       } else if (a.saveImageLightShow) {
@@ -1632,12 +1642,12 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
       const res = await a.openImageLightShow()
       if (!res) return flash('キャンセル')
       if ('error' in res) return flash(res.error)
-      // .ledshow(1ファイル)なら中身を解凍、旧フォルダなら {json,media} がそのまま来る
+      // .ledshow/公演フォルダ入口なら中身を解凍、旧フォルダなら {json,media} がそのまま来る
       const jm = 'zip' in res ? await unzipShow(res.zip) : res
       const ok = await engine.restoreShow(jm.json, jm.media)
       if (ok) {
         savedVersionRef.current = engine.getVersion() // 開いた直後は「保存済み」扱い
-        showPathRef.current = 'zip' in res && res.path ? res.path : null // フォルダ(旧形式)は上書き先にしない
+        showPathRef.current = 'path' in res && res.path ? res.path : null
         setShowFileName(showPathRef.current ? baseName(showPathRef.current) : null)
       } else {
         // 途中まで読んで失敗＝中身が中途半端な可能性。上書き先を外して事故を防ぐ
@@ -1854,13 +1864,13 @@ export function ImageLightingMode({ onExit }: { onExit: () => void }): React.JSX
         >
           SHORTCUT
         </button>
-        <button className="il-mini" onClick={saveShow} title="公演を1ファイル(.ledshow)に保存。2回目からは同じファイルに上書き（写真/動画も中に一緒）／ ⌘S">
+        <button className="il-mini" onClick={saveShow} title="公演フォルダとして保存。中の入口ファイルを開けば写真/動画も一緒に戻ります／ ⌘S">
           保存
         </button>
-        <button className="il-mini" onClick={saveShowAs} title="新しい名前を付けて別ファイル(.ledshow)に保存／ ⇧⌘S">
+        <button className="il-mini" onClick={saveShowAs} title="新しい名前を付けて別の公演フォルダに保存／ ⇧⌘S">
           別名保存
         </button>
-        <button className="il-mini" onClick={openShow} title="保存した公演を開く（.ledshow の1ファイル・以前のフォルダ保存どちらも可）">
+        <button className="il-mini" onClick={openShow} title="保存した公演を開く（公演フォルダ・.ledshow単体・以前のフォルダ保存に対応）">
           開く
         </button>
         <button

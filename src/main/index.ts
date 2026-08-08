@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, screen, Menu, session } from 'electron'
-import { join, extname } from 'path'
+import { join, extname, basename, dirname } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, renameSync, statSync } from 'fs'
 import {
   writeFile as writeFileAsync,
@@ -52,6 +52,15 @@ let currentChartPath: string | null = null // 今開いている .ledimager の�
 let pendingOpenPath: string | null = null // 起動直後などで、画面が出来たら開くべきファイル
 let closeConfirmed = false // 「保存しますか？」確認が済んだら true＝そのまま閉じてよい
 let lastArtnetStatus: { ok: boolean; detail: string } | null = null // 受信機の最終状態（画面へ再送用）
+const SHOW_ENTRY_FILE = 'LED STAGE IMAGERで開く.ledshow'
+const LEDSHOW_EXT = '.ledshow'
+const isLedShowPath = (p: string): boolean => p.toLowerCase().endsWith(LEDSHOW_EXT)
+const showPackageEntryPath = (dir: string): string => join(dir, SHOW_ENTRY_FILE)
+const showTargetForOpenedFile = (p: string): string => {
+  // 公演フォルダ内の入口ファイルを開いた時は、次の Cmd+S で入口ファイルだけでなく
+  // そのフォルダを「今の公演」として更新する。
+  return basename(p) === SHOW_ENTRY_FILE ? dirname(p) : p
+}
 
 /**
  * 開発用「のぞき窓」（のむさん 2026-06-20）。127.0.0.1:7331 にローカル限定の小さなHTTPを立て、
@@ -245,14 +254,17 @@ function broadcast(channel: string, ...args: unknown[]): void {
 function deliverOpenFile(p: string, force?: boolean): void {
   const w = mainWindow
   const ready = w && !w.isDestroyed() && (force || !w.webContents.isLoading())
-  const isShow = p.toLowerCase().endsWith('.ledshow')
+  const isShow = isLedShowPath(p)
   // チャートの ⌘S 上書き先(currentChartPath)はここで eager に覚えない。renderer が「実際に開けた」時だけ
   // 'chart:opened' で確定する。ここで覚えると、開くのをキャンセル/読込失敗した後の ⌘S が、開こうと
   // した別ファイルを黙って上書きする事故になる（path を第2引数で渡す＝開けた時だけ確定に使う）。
   if (ready) {
     try {
       if (isShow) {
-        w!.webContents.send('imagelight:open-path', { bytes: readFileSync(p), path: p })
+        w!.webContents.send('imagelight:open-path', {
+          bytes: readFileSync(p),
+          path: showTargetForOpenedFile(p)
+        })
       } else {
         w!.webContents.send('chart:open-path', readFileSync(p, 'utf8'), p)
       }
@@ -279,7 +291,7 @@ ipcMain.on('open-file:renderer-ready', (e) => {
 // Windows/Linux: ダブルクリック起動時はファイルパスが引数で来る（macOS は open-file 経由）。
 if (process.platform !== 'darwin') {
   const arg = process.argv.find(
-    (a) => a.toLowerCase().endsWith('.ledimager') || a.toLowerCase().endsWith('.ledshow')
+    (a) => a.toLowerCase().endsWith('.ledimager') || isLedShowPath(a)
   )
   if (arg && existsSync(arg)) pendingOpenPath = arg
 }
@@ -292,7 +304,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', (_e, argv) => {
     const p = argv.find(
-      (a) => a.toLowerCase().endsWith('.ledimager') || a.toLowerCase().endsWith('.ledshow')
+      (a) => a.toLowerCase().endsWith('.ledimager') || isLedShowPath(a)
     )
     if (p && existsSync(p)) deliverOpenFile(p)
     const w = mainWindow
@@ -720,6 +732,60 @@ app.whenReady().then(() => {
     writeFileSync(tmp, Buffer.from(bytes))
     renameSync(tmp, p)
   }
+  const isDirectoryPath = (p: string): boolean => {
+    try {
+      return statSync(p).isDirectory()
+    } catch {
+      return false
+    }
+  }
+  const normalizeShowPackagePath = (p: string): string =>
+    isLedShowPath(p) ? p.slice(0, -LEDSHOW_EXT.length) : p
+  const showPackageDefaultPath = (targetPath: string | null | undefined, name: string): string => {
+    if (!targetPath) return name || 'show'
+    if (isDirectoryPath(targetPath)) return targetPath
+    return normalizeShowPackagePath(targetPath)
+  }
+  const writeShowPackageSafe = (dir: string, bytes: Uint8Array): void => {
+    mkdirSync(dir, { recursive: true })
+    writeShowFileSafe(showPackageEntryPath(dir), bytes)
+  }
+  // 公演フォルダ保存: フォルダの中に「LED STAGE IMAGERで開く.ledshow」を置く。
+  // その入口ファイルをダブルクリックすれば、写真/動画を含む公演全体が開く。
+  ipcMain.handle(
+    'imagelight:save-show-package',
+    async (_e, bytes: Uint8Array, name: string, saveAs?: boolean, targetPath?: string | null) => {
+      if (!saveAs && targetPath) {
+        try {
+          if (isDirectoryPath(targetPath)) {
+            writeShowPackageSafe(targetPath, bytes)
+            return targetPath
+          }
+          if (isLedShowPath(targetPath)) {
+            // 旧来の単体 .ledshow を開いている時だけは、Cmd+S で同じファイルを守る。
+            writeShowFileSafe(targetPath, bytes)
+            return targetPath
+          }
+          const dir = normalizeShowPackagePath(targetPath)
+          writeShowPackageSafe(dir, bytes)
+          return dir
+        } catch {
+          /* 書けない（削除・権限・ボリューム外れ）→ 下の名前を付けて保存へ落とす */
+        }
+      }
+      const w = mainWindow
+      if (!w || w.isDestroyed()) return null
+      const res = await dialog.showSaveDialog(w, {
+        title: saveAs ? '別名で公演フォルダを保存' : '公演フォルダを保存',
+        defaultPath: showPackageDefaultPath(targetPath, name || 'show'),
+        buttonLabel: '保存'
+      })
+      if (res.canceled || !res.filePath) return null
+      const dir = normalizeShowPackagePath(res.filePath)
+      writeShowPackageSafe(dir, bytes)
+      return dir
+    }
+  )
   // 1ファイル(.ledshow)保存: renderer で ZIP 済みのバイト列を書き出す。
   // saveAs=false は普通の書類アプリの⌘S＝2回目からは同じファイルへ黙って上書き。
   // 上書き先(targetPath)は renderer が渡す＝「実際に開けている公演」以外を絶対に上書きしない。
@@ -778,14 +844,22 @@ app.whenReady().then(() => {
     })
     if (res.canceled || res.filePaths.length === 0) return null
     const p = res.filePaths[0]
-    // ファイル(.ledshow)なら中身(バイト)を返す→renderer で解凍。フォルダなら従来どおり。
+    // ファイル(.ledshow)なら中身(バイト)を返す→renderer で解凍。フォルダならまず入口ファイルを探す。
     // 上書き先の確定は renderer が「実際に開けた」後に行う（開けなかった/やめた時に切り替えない）。
     try {
-      if (statSync(p).isFile()) return { zip: readFileSync(p), path: p }
+      if (statSync(p).isFile()) return { zip: readFileSync(p), path: showTargetForOpenedFile(p) }
     } catch {
       return { error: 'ファイルを読めませんでした' }
     }
     const dir = p
+    const entry = showPackageEntryPath(dir)
+    if (existsSync(entry)) {
+      try {
+        return { zip: readFileSync(entry), path: dir }
+      } catch {
+        return { error: '公演フォルダの入口ファイルを読めませんでした' }
+      }
+    }
     let json: string
     try {
       json = readFileSync(join(dir, 'show.json'), 'utf8')
@@ -801,7 +875,7 @@ app.whenReady().then(() => {
     } catch {
       /* media フォルダが無くても json だけは返す */
     }
-    return { json, media }
+    return { json, media, path: dir }
   })
   // Crash net: the editor mirrors its chart here (debounced) so a crash or an
   // accidental quit never loses the rig — the start screen offers it back as RESUME.

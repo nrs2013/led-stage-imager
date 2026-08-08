@@ -173,6 +173,14 @@ const api = {
     media: { file: string; dataUrl: string }[],
     name: string
   ): Promise<string | null> => ipcRenderer.invoke('imagelight:save-show', json, media, name),
+  // 公演フォルダとして保存。フォルダ内の「LED STAGE IMAGERで開く.ledshow」が入口になる。
+  saveImageLightShowPackage: (
+    bytes: Uint8Array,
+    name: string,
+    saveAs = false,
+    targetPath: string | null = null
+  ): Promise<string | null> =>
+    ipcRenderer.invoke('imagelight:save-show-package', bytes, name, saveAs, targetPath),
   // 1ファイル(.ledshow)で保存（写真/動画ごとZIP済みのバイト列を渡す）。
   // saveAs=false は上書き（初回だけ名前を聞く）、true は別名保存（毎回名前を聞く）。
   // targetPath＝上書き先（renderer が「実際に開けている公演」だけを渡す）。
