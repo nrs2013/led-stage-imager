@@ -110,6 +110,7 @@ export function StartScreen(): React.JSX.Element {
 
         <h1 className="ss-title">LED STAGE IMAGER</h1>
         <p className="ss-tag">DMX Visualizer&nbsp;·&nbsp;Syphon / NDI Output</p>
+        <p className="ss-version">Version 1.0.1&nbsp;—&nbsp;NDI調整版 2026-08-09</p>
 
         <div className="ss-modes">
           <button
@@ -220,6 +221,7 @@ const SS_CSS = `
 .ss-fix svg{opacity:.5;}
 .ss-title{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:52px;letter-spacing:.2em;color:#fafaf8;line-height:1;margin:0;text-indent:.2em;}
 .ss-tag{margin:20px 0 0;font-size:10.5px;font-weight:300;letter-spacing:.34em;text-transform:uppercase;color:#a8a8a0;font-family:'Inter',sans-serif;}
+.ss-version{margin:10px 0 0;font-size:10px;font-weight:300;letter-spacing:.14em;color:#777772;font-family:'Inter','Noto Sans JP',sans-serif;}
 .ss-modes{margin-top:54px;display:flex;flex-direction:column;gap:11px;text-align:left;}
 .ss-mode{width:100%;display:flex;align-items:center;gap:18px;padding:18px 22px;border:0.5px solid #2c2a27;border-radius:10px;background:rgba(255,255,255,0.008);cursor:pointer;transition:border-color .2s,background .2s;font-family:'Inter',sans-serif;}
 .ss-mode:hover{background:rgba(255,255,255,0.02);}
