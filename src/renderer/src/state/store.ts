@@ -189,6 +189,8 @@ interface AppState {
   /** Bulk-apply patch fields to every given shape's fixture (creating fixtures where
    *  missing) — ONE undo step; the multi-select Inspector's 一括変更. */
   bulkPatch: (shapeIds: string[], patch: Partial<Omit<Fixture, 'id' | 'shapeId'>>) => void
+  /** 複数の電飾本体へ同じ見た目・連続複製設定を一括反映する。 */
+  bulkUpdateShapes: (shapeIds: string[], patch: Partial<Shape>) => void
   setStepPatch: (on: boolean) => void
   /** Lock/unlock shapes (one undo step). Locking also drops them from the selection
    *  so they become untouchable immediately. */
@@ -933,6 +935,33 @@ export const useStore = create<AppState>()((set, get) => ({
           }
         })
       return { chart: { ...s.chart, fixtures: [...updated, ...created] } }
+    })
+  },
+
+  bulkUpdateShapes: (shapeIds, patch) => {
+    if (!shapeIds.length) return
+    get().beginHistory('bulk-shape')
+    set((s) => {
+      const ids = new Set(shapeIds)
+      return {
+        chart: {
+          ...s.chart,
+          shapes: s.chart.shapes.map((sh) => {
+            if (!ids.has(sh.id)) return sh
+            if (!patch.repeat) return { ...sh, ...patch } as Shape
+            const repeatPatch = patch.repeat as Partial<NonNullable<Shape['repeat']>>
+            return {
+              ...sh,
+              ...patch,
+              repeat: {
+                count: repeatPatch.count ?? sh.repeat?.count ?? 1,
+                dx: repeatPatch.dx ?? sh.repeat?.dx ?? 10,
+                dy: repeatPatch.dy ?? sh.repeat?.dy ?? 0
+              }
+            } as Shape
+          })
+        }
+      }
     })
   },
 

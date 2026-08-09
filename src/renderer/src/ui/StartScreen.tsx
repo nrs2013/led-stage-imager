@@ -110,7 +110,7 @@ export function StartScreen(): React.JSX.Element {
 
         <h1 className="ss-title">LED STAGE IMAGER</h1>
         <p className="ss-tag">DMX Visualizer&nbsp;·&nbsp;Syphon / NDI Output</p>
-        <p className="ss-version">Version 1.0.1&nbsp;—&nbsp;NDI調整版 2026-08-09</p>
+        <p className="ss-version">Version 1.0.2&nbsp;—&nbsp;NDI調整・複数編集版 2026-08-09</p>
 
         <div className="ss-modes">
           <button

@@ -123,6 +123,47 @@ describe('ステップアップモード (store)', () => {
   })
 })
 
+describe('複数選択の一括変更', () => {
+  beforeEach(() => {
+    const c = seed()
+    const second: Shape = {
+      ...c.shapes[0],
+      id: 'bar2',
+      fixtureId: 'fx2',
+      strokeWidth: 5,
+      repeat: { count: 2, dx: 30, dy: 4 }
+    }
+    useStore.setState({
+      chart: {
+        ...c,
+        shapes: [{ ...c.shapes[0], repeat: { count: 3, dx: 10, dy: 2 } }, second],
+        fixtures: [...c.fixtures, { ...c.fixtures[0], id: 'fx2', shapeId: 'bar2' }]
+      },
+      selectedId: null,
+      selectedIds: ['bar1', 'bar2'],
+      history: [],
+      future: []
+    })
+  })
+
+  it('太さとにじみを選択中の全部へ反映する', () => {
+    useStore.getState().bulkUpdateShapes(['bar1', 'bar2'], { strokeWidth: 12, glowPx: 7 })
+    for (const sh of useStore.getState().chart.shapes) {
+      expect(sh.strokeWidth).toBe(12)
+      expect(sh.glowPx).toBe(7)
+    }
+  })
+
+  it('間隔Xだけを変えた時、個数と間隔Yは各線の値を保つ', () => {
+    useStore
+      .getState()
+      .bulkUpdateShapes(['bar1', 'bar2'], { repeat: { dx: 99 } as Shape['repeat'] })
+    const [a, b] = useStore.getState().chart.shapes
+    expect(a.repeat).toEqual({ count: 3, dx: 99, dy: 2 })
+    expect(b.repeat).toEqual({ count: 2, dx: 99, dy: 4 })
+  })
+})
+
 describe('bulkPatch: 複数選択の一括変更', () => {
   beforeEach(() => {
     const c = seed()

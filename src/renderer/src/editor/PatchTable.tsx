@@ -13,6 +13,7 @@ export function PatchTable(): React.JSX.Element {
   const selectedId = useStore((s) => s.selectedId)
   const selectedIds = useStore((s) => s.selectedIds)
   const select = useStore((s) => s.select)
+  const toggleSelect = useStore((s) => s.toggleSelect)
   const showIds = useStore((s) => s.showIds)
   const setShowIds = useStore((s) => s.setShowIds)
 
@@ -91,7 +92,11 @@ export function PatchTable(): React.JSX.Element {
               <button
                 key={f.id}
                 data-shape={f.shapeId}
-                onClick={() => select(f.shapeId)}
+                onClick={(e) => {
+                  // 札を普通に押すと1個、Shift/⌘を押しながらで追加・解除。
+                  if (e.shiftKey || e.metaKey || e.ctrlKey) toggleSelect(f.shapeId)
+                  else select(f.shapeId)
+                }}
                 title={`#${i + 1}  ${shapeName(f.shapeId)}${cnt > 1 ? ` ×${cnt}` : ''} · ${f.mode} · ch ${s}–${e}`}
                 style={{
                   display: 'flex',
