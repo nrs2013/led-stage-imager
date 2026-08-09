@@ -33,7 +33,6 @@ import {
   pattDiameter
 } from '../render/fixtures'
 import { groupShapesByGlow } from './glow'
-import { sendSize } from './out-scale'
 import { drawRoomLampLit, roomLampDiameter } from '../render/roomlamp'
 import { drawStreetLampLit, streetLampDiameter } from '../render/streetlamp'
 import { drawChandelierLit, chandelierDiameter } from '../render/chandelier'
@@ -387,14 +386,15 @@ export class OutputRenderer {
     return premultiply(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data)
   }
 
-  /** 送出用に整数分の1へ縮めた絵（div<=1 は原寸＝readRGBA と同じ）。
+  /** 送出用に指定ピクセル数へ縮めた絵（原寸なら readRGBA と同じ）。
    *  縮めるのは「描き上がった絵」なので、にじみ(グロー)も一緒に縮む＝見た目の比率は変わらない。
    *  作業キャンバスは使い回す（毎コマ作ると重い）。 */
-  readRGBAScaled(div: number): { w: number; h: number; data: Uint8ClampedArray } {
+  readRGBAAtSize(w: number, h: number): { w: number; h: number; data: Uint8ClampedArray } {
     const W = this.canvas.width
     const H = this.canvas.height
-    if (!(div > 1)) return { w: W, h: H, data: this.readRGBA() }
-    const { w, h } = sendSize(W, H, div)
+    w = Math.max(1, Math.round(w))
+    h = Math.max(1, Math.round(h))
+    if (w === W && h === H) return { w: W, h: H, data: this.readRGBA() }
     if (!this.sendCv) this.sendCv = document.createElement('canvas')
     const cv = this.sendCv
     if (cv.width !== w) cv.width = w

@@ -3,7 +3,7 @@ import { useStore } from '../state/store'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
 import { NumberField } from './NumberField'
 import { mmPerPx, stageWidthMeters, countFittableFixtures } from '../model/scale'
-import { OUT_DIVS, outDivOf, sendSize, dividesEvenly } from '../output/out-scale'
+import { OUTPUT_PRESETS, outputSizeOf, percentSize } from '../output/out-scale'
 
 const MAX_W = 4096
 const MAX_H = 2160
@@ -23,13 +23,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const setGlow = useStore((s) => s.setGlow)
   const setGlowAmount = useStore((s) => s.setGlowAmount)
   const setLedGlowPx = useStore((s) => s.setLedGlowPx)
-  const setOutDiv = useStore((s) => s.setOutDiv)
+  const setOutputSize = useStore((s) => s.setOutputSize)
+  const setOutputAspectLocked = useStore((s) => s.setOutputAspectLocked)
   const setStageWidthMeters = useStore((s) => s.setStageWidthMeters)
   const fitFixturesToScale = useStore((s) => s.fitFixturesToScale)
 
   const tooBig = chart.canvas.w > MAX_W || chart.canvas.h > MAX_H
-  const outDiv = outDivOf(chart) // 送出だけの縮小率（1=原寸）
-  const evenly = dividesEvenly(chart.canvas.w, chart.canvas.h, outDiv)
+  const outputSize = outputSizeOf(chart)
+  const outputAspectLocked = chart.settings.outputAspectLocked !== false
   const mmpp = mmPerPx(chart) // 校正済みなら mm/px、未校正は null
   const widthM = stageWidthMeters(chart) ?? ''
   const fitCount = countFittableFixtures(chart.shapes) // 実寸に直せる灯体の数
@@ -151,16 +152,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
 
         <Field label="送出の解像度">
           <div style={{ display: 'flex', gap: 6 }}>
-            {OUT_DIVS.map((d) => {
-              const s = sendSize(chart.canvas.w, chart.canvas.h, d)
+            {OUTPUT_PRESETS.map((percent) => {
+              const s = percentSize(chart.canvas.w, chart.canvas.h, percent)
+              const active = outputSize.w === s.w && outputSize.h === s.h
               return (
                 <button
-                  key={d}
-                  style={{ ...buttonStyle({ active: outDiv === d }), flex: 1, padding: '10px 6px' }}
-                  onClick={() => setOutDiv(d)}
+                  key={percent}
+                  style={{ ...buttonStyle({ active }), flex: 1, padding: '10px 6px' }}
+                  onClick={() => setOutputSize(s.w, s.h)}
                   title="Syphon / NDI へ出す画素数だけを減らします。チャートも絵も変わりません。小さいほど動きが滑らかになり、そのぶん精細さが落ちます。"
                 >
-                  {d === 1 ? '原寸' : `1/${d}`}
+                  {percent}%
                   <span style={{ opacity: 0.6, marginLeft: 6 }}>
                     {s.w}×{s.h}
                   </span>
@@ -169,16 +171,57 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             })}
           </div>
         </Field>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Field label="送出幅（px）">
+            <NumberField
+              value={outputSize.w}
+              min={16}
+              max={chart.canvas.w}
+              onChange={(w) =>
+                setOutputSize(
+                  w,
+                  outputAspectLocked
+                    ? Math.max(16, Math.round((w * chart.canvas.h) / chart.canvas.w))
+                    : outputSize.h
+                )
+              }
+            />
+          </Field>
+          <Field label="送出高さ（px）">
+            <NumberField
+              value={outputSize.h}
+              min={16}
+              max={chart.canvas.h}
+              onChange={(h) =>
+                setOutputSize(
+                  outputAspectLocked
+                    ? Math.max(16, Math.round((h * chart.canvas.w) / chart.canvas.h))
+                    : outputSize.w,
+                  h
+                )
+              }
+            />
+          </Field>
+        </div>
+        <Toggle
+          label="縦横比を保つ"
+          on={outputAspectLocked}
+          onChange={(locked) => {
+            setOutputAspectLocked(locked)
+            if (locked) {
+              setOutputSize(
+                outputSize.w,
+                Math.max(16, Math.round((outputSize.w * chart.canvas.h) / chart.canvas.w))
+              )
+            }
+          }}
+          onText="ON"
+          offText="OFF"
+        />
         <div
           style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginTop: -6, marginBottom: 10 }}
         >
-          出す画素数だけを減らします（チャート・絵はそのまま）。動きを優先したい時に下げてください。
-          {!evenly && (
-            <span style={{ color: C.amber }}>
-              {' '}
-              いまの縮小率だとキャンバスが割り切れず、端の1列が半端になります。
-            </span>
-          )}
+          出す画素数だけを変えます（チャート・絵はそのまま）。OFFの時は幅と高さを別々に変えられます。
         </div>
 
         <Field label="Syphon の名前">

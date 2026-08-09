@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useStore } from '../state/store'
 import { OutputRenderer } from './OutputRenderer'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
-import { outDivOf } from './out-scale'
+import { outputSizeOf } from './out-scale'
 
 interface DecorApi {
   publishFrame?: (width: number, height: number, buffer: Uint8ClampedArray) => void
@@ -52,9 +52,10 @@ export function useChartOutput(): void {
           Date.now()
         )
         renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
-        // 描くのは常に原寸。送出だけ設定「送出の解像度」で整数分の1に縮める（原寸=素通り）。
+        // 描くのは常に原寸。送出だけ設定「送出の解像度」のピクセル数に縮める（原寸=素通り）。
         // 読み出し(getImageData)と NDI 送信の量がそのぶん減る＝ここが Windows の重さの本体。
-        const out = renderer.readRGBAScaled(outDivOf(chart))
+        const size = outputSizeOf(chart)
+        const out = renderer.readRGBAAtSize(size.w, size.h)
         api.publishFrame!(out.w, out.h, out.data)
       } catch (err) {
         const now = Date.now()

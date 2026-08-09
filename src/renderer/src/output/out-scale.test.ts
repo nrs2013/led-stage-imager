@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { outDivOf, sendSize, dividesEvenly } from './out-scale'
+import { outDivOf, outputSizeOf, percentSize, sendSize, dividesEvenly } from './out-scale'
 import type { Chart } from '../model/types'
 
 const chartWith = (outDiv?: number): Chart =>
@@ -34,5 +34,19 @@ describe('送出の縮小率（DECORの解像度）', () => {
 
   it('どんな値でも 1px 未満にはしない（退化フレームで出力が死ぬのを防ぐ）', () => {
     expect(sendSize(2, 2, 8)).toEqual({ w: 1, h: 1 })
+  })
+
+  it('4500×1080 の75% / 50% / 25%を正しく計算する', () => {
+    expect(percentSize(4500, 1080, 75)).toEqual({ w: 3375, h: 810 })
+    expect(percentSize(4500, 1080, 50)).toEqual({ w: 2250, h: 540 })
+    expect(percentSize(4500, 1080, 25)).toEqual({ w: 1125, h: 270 })
+  })
+
+  it('ピクセル指定を優先し、無ければ旧 outDiv を引き継ぐ', () => {
+    const chart = chartWith(2)
+    chart.canvas = { w: 4500, h: 1080 }
+    expect(outputSizeOf(chart)).toEqual({ w: 2250, h: 540 })
+    chart.settings.outputSize = { w: 1920, h: 600 }
+    expect(outputSizeOf(chart)).toEqual({ w: 1920, h: 600 })
   })
 })
