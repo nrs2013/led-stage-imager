@@ -196,6 +196,13 @@ export function mergeCand(...cands: SnapCand[]): SnapCand {
   return out
 }
 
+/** The chart frame's edge lines — a photo material (or any box) clicks flush onto the
+ *  chart borders while moving/resizing (のむさん要望 2026-06-12: 写真をチャートへ吸着).
+ *  The frame CENTRE lines come from centerCandidates. */
+export function frameCandidates(canvas: { w: number; h: number }): SnapCand {
+  return { xs: [0, canvas.w], ys: [0, canvas.h] }
+}
+
 /** 1D snap: alignment candidate (within tolAlign) > soft grid (within tolGrid) > 1px. */
 export function snap1D(
   raw: number,

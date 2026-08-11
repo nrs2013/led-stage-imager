@@ -853,6 +853,18 @@ export function Inspector(): React.JSX.Element {
                   const dataUrl = String(fr.result)
                   const im = new Image()
                   im.onload = () => {
+                    // チャートと同じピクセル数の写真は読み込んだ瞬間に全面へぴったり
+                    // 重ねる（のむさん要望 2026-06-12: 同サイズなのに合わせられない）
+                    if (im.naturalWidth === chart.canvas.w && im.naturalHeight === chart.canvas.h) {
+                      updateShape(shape.id, {
+                        imageData: dataUrl,
+                        points: [
+                          { x: 0, y: 0 },
+                          { x: chart.canvas.w, y: chart.canvas.h }
+                        ]
+                      })
+                      return
+                    }
                     const b = shapeBounds(shape)
                     const sc = Math.min(1, 480 / Math.max(1, im.naturalWidth))
                     const w = Math.max(8, Math.round(im.naturalWidth * sc))
@@ -874,6 +886,38 @@ export function Inspector(): React.JSX.Element {
           >
             {shape.imageData ? 'Replace Photo…' : 'Choose Photo…（PNG/JPG）'}
           </button>
+          {/* 写真をチャートへ合わせる2手（のむさん要望 2026-06-12） */}
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <button
+              style={{ ...buttonStyle({}), flex: 1, padding: '6px 0' }}
+              onClick={() =>
+                updateShape(shape.id, {
+                  points: [
+                    { x: 0, y: 0 },
+                    { x: chart.canvas.w, y: chart.canvas.h }
+                  ]
+                })
+              }
+            >
+              チャート全面にぴったり
+            </button>
+            <button
+              style={{ ...buttonStyle({}), flex: 1, padding: '6px 0' }}
+              onClick={() => {
+                const b2 = shapeBounds(shape)
+                const x0 = Math.round((chart.canvas.w - b2.w) / 2)
+                const y0 = Math.round((chart.canvas.h - b2.h) / 2)
+                updateShape(shape.id, {
+                  points: [
+                    { x: x0, y: y0 },
+                    { x: x0 + b2.w, y: y0 + b2.h }
+                  ]
+                })
+              }}
+            >
+              センターに置く
+            </button>
+          </div>
         </Field>
       )}
 

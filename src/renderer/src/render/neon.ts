@@ -230,9 +230,9 @@ export function drawNeonSchematic(
 /** One lit tube (instance i = glyphs[i]), additive-only so an off sign stays fully
  *  transparent on the Syphon output. `rgb` is the raw console colour — hue and gauge
  *  derive from it exactly like the bulb. Glow reach is the per-sign neonGlow dial
- *  (のむさん「光りすぎ防止のツマミ」); the fader curve follows the house law: the
- *  core starts burning white from 55% (clip) and past 88% the face blows out and
- *  leaks beyond the letter frame (blast). */
+ *  (のむさん「光りすぎ防止のツマミ」); the core starts burning white from 55% (clip)
+ *  but a neon sign never blasts — フルでも管は「明るいその色」のまま
+ *  (ネオンはブラストしない・のむさん判定 2026-06-12). */
 export function drawNeonGlyphLit(
   ctx: CanvasRenderingContext2D,
   shape: Shape,
@@ -250,7 +250,6 @@ export function drawNeonGlyphLit(
   const size = neonSize(shape)
   const glow = neonGlowAmount(shape) / 100
   const clip = I > 0.55 ? (I - 0.55) / 0.45 : 0 // 55%から芯がじわじわ白へ (家訓)
-  const blast = I > 0.88 ? (I - 0.88) / 0.12 : 0 // 88%超で面が吹き飛ぶ (家訓)
   // halo reach: scales with glyph size, the glow dial, and the gauge
   const B = size * (0.05 + 0.45 * glow) * (0.3 + 0.7 * I)
 
@@ -277,29 +276,10 @@ export function drawNeonGlyphLit(
   // 3) hot core: saturated while dim, burning towards white from 55% gauge (clip)
   const core = mixc(hue, [255, 255, 255], 0.45 + 0.55 * clip)
   paint(rgba(core, (0.35 + 0.6 * I) * I), B * 0.3, Math.max(0.8, tubeW * 0.45))
-  // 4) top-of-fader white surge
-  if (blast > 0) paint(rgba([255, 255, 255], 0.55 * blast), B * 0.6, Math.max(0.8, tubeW * 0.4))
-  ctx.shadowBlur = 0
-  // 5) full-tilt overflow: ONE one-size-larger white-leaning wash so the light leaks
-  //    past the letter frame (枠外に漏れる感) — steep falloff like the手本のsteep()
-  if (blast > 0) {
-    const gx = x + g.w / 2
-    const gy = baseline - (L.ascent - L.descent) / 2
-    const r = Math.max(g.w, L.ascent + L.descent) * (1.05 + 0.4 * blast)
-    const col = mixc(hue, [255, 255, 255], 0.7)
-    const ov = ctx.createRadialGradient(gx, gy, 0, gx, gy, r)
-    ov.addColorStop(0, rgba(col, 0.3 * blast))
-    ov.addColorStop(0.22, rgba(col, 0.15 * blast))
-    ov.addColorStop(0.45, rgba(col, 0.054 * blast))
-    ov.addColorStop(0.7, rgba(col, 0.015 * blast))
-    ov.addColorStop(1, rgba(col, 0))
-    ctx.fillStyle = ov
-    ctx.beginPath()
-    ctx.arc(gx, gy, r, 0, Math.PI * 2)
-    ctx.fill()
-  }
   ctx.restore()
 }
 
 // もらい光・背板ワッシュは 2026-06-11 のむさん判定で撤去（「逆に嘘っぽい」）。
 // 消灯した管は完全な闇に落ちるのが正 — スモーク感は Setup → Smoke が担当する。
+// 88%ブラスト（白サージ・枠外あふれ）は 2026-06-12 のむさん判定で撤去（「ネオンはブラストしなくていい」）。
+// フルでも管は「明るいその色」のまま。芯の55%白化のみ残す。ブラスト家訓は電球・PAR系に限る。

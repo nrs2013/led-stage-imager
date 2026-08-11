@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCandidates, buildGapCandidates, centerCandidates, salientOf, salientOfGroup, snap1D, snapMoveDelta, softAxis } from './snapping'
+import { buildCandidates, buildGapCandidates, centerCandidates, frameCandidates, salientOf, salientOfGroup, snap1D, snapMoveDelta, softAxis } from './snapping'
 import type { Shape } from '../model/types'
 
 describe('snap1D', () => {
@@ -52,6 +52,23 @@ describe('centerCandidates: island centres + canvas centre', () => {
     expect(c.cxs).toEqual([960, 60, 225])
     expect(c.cys).toEqual([540, 40, 25.5])
     expect(c.xs).toEqual([])
+  })
+})
+
+describe('frameCandidates: the chart frame edges', () => {
+  it('lists the four border lines', () => {
+    expect(frameCandidates({ w: 1920, h: 1080 })).toEqual({ xs: [0, 1920], ys: [0, 1080] })
+  })
+  it('a chart-sized photo clicks flush onto the frame while moving', () => {
+    // photo box dropped slightly off (3,2): salient = left/right/centre per axis
+    const sal = { xs: [3, 1923, 963], ys: [2, 1082, 542] }
+    const f = frameCandidates({ w: 1920, h: 1080 })
+    const r = snapMoveDelta(-1.2, -0.4, sal, f, 6)
+    expect(r.dx).toBe(-3) // left edge lands exactly on x=0
+    expect(r.dy).toBe(-2) // top edge lands exactly on y=0
+    // chart-sized box: BOTH edges land flush, so the guide may report either side
+    expect([0, 1920]).toContain(r.gx)
+    expect([0, 1080]).toContain(r.gy)
   })
 })
 

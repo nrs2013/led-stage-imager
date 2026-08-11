@@ -27,6 +27,7 @@ import {
 import {
   buildCandidates,
   centerCandidates,
+  frameCandidates,
   salientOf,
   salientOfGroup,
   snap1D,
@@ -401,10 +402,11 @@ export function EditorCanvas(): React.JSX.Element {
     () => (mask ? findDrawableRegions(mask.bitmap, mask.w, mask.h) : []),
     [mask]
   )
-  /** Island centres + the canvas centre: extra alignment-snap targets so parts land
-   *  dead-centre in their LED panel (のむさん要望 2026-06-11). */
+  /** Island centres + the canvas centre + the chart frame edges: extra alignment-snap
+   *  targets so parts land dead-centre in their LED panel (のむさん要望 2026-06-11) and
+   *  a photo material clicks flush onto the chart borders (のむさん要望 2026-06-12). */
   const centerCand = useMemo<SnapCand>(
-    () => centerCandidates(regions, chart.canvas),
+    () => mergeCand(centerCandidates(regions, chart.canvas), frameCandidates(chart.canvas)),
     [regions, chart.canvas]
   )
   const withCenters = (c: SnapCand): SnapCand => mergeCand(c, centerCand)
