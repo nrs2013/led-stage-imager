@@ -49,9 +49,13 @@ npm run build:mac        # → dist/mac-arm64/"LED STAGE IMAGER.app"
 
 - **Node v24 系**で動作確認済み（v24.14.0 / npm 11.9.0）。
 - `npm ci` が `EACCES` で落ちたら `npm ci --cache /tmp/npm-cache` で回避。
-- **UI だけ速く見たい時は `npm run dev:web`**（Electron 無しでブラウザ。SHOW MODE も LIGHT SKETCH も触れる）。
-- Electron 実機で見る時は `npm run dev`。
-- 🔴 **`npm start`（electron-vite preview）は使わないでください。** メモリを食い切って Mac ごと落ちた実績があります。確認は `npm run dev` か、ビルドした `.app` で。
+- 🔴🔴 **このリポジトリで dev サーバー／preview／ヘッドレスChrome を起動しないでください**
+  （`npm run dev` `npm run dev:web` `npm start` すべて）。**過去に Mac ごと固まった実害があります。**
+  Claude 側はフックが機械で止めますが、Codex にはその機械が無いので、この行が唯一の歯止めです。
+  確認は「ビルドした `.app` を目視」＋ `npm run typecheck` ＋ `npm test` で行ってください（鉄則）。
+  > 🚫 2026-08-22 まで、ここには逆に「UIだけ速く見たい時は `npm run dev:web`」「実機で見る時は `npm run dev`」と
+  > 書いてあった。Claude への全Mac共通の禁止（CLAUDE.md）と正反対の指示が Codex にだけ
+  > 出ている状態だった（監査#6）。
 - Windows 版（`npm run build:win`）は **Windows 実機が必須**。Mac では作れません。
 
 ---
