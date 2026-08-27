@@ -58,6 +58,8 @@ interface AppState {
   dmxRev: number
   manualMode: boolean
   manualByFixture: Record<string, [number, number, number]>
+  /** DMXチャート切替の一時的な手動上書き。nullなら卓に連動。保存しない。 */
+  pageSwitchManual: number | null
   /** 棚＆キャンバスの種別フィルタ（照明だけ/電飾だけ/両方）。UI状態でありchart(保存対象)には入れない。 */
   paletteFilter: PaletteFilter
   snapToPixel: boolean
@@ -197,6 +199,7 @@ interface AppState {
   setLocked: (shapeIds: string[], on: boolean) => void
   removeFixture: (shapeId: string) => void
   setManualMode: (on: boolean) => void
+  setPageSwitchManual: (value: number | null) => void
   setManualColor: (fixtureId: string, rgb: [number, number, number]) => void
   setManualAll: (rgb: [number, number, number] | null) => void
   /** Quick Light: paint several fixtures one colour in a single update (and switch
@@ -324,6 +327,7 @@ export const useStore = create<AppState>()((set, get) => ({
   dmxRev: 0,
   manualMode: false,
   manualByFixture: {},
+  pageSwitchManual: null,
   paletteFilter: 'all',
   snapToPixel: true,
   stepPatch: false,
@@ -431,7 +435,15 @@ export const useStore = create<AppState>()((set, get) => ({
   // 履歴も切る＝新規/別ファイルを開いた直後の ⌘Z で「前の作品」が戻ってきて、
   // そのまま保存すると開いたファイルを別作品で上書きしてしまう事故を防ぐ。
   setChart: (chart) =>
-    set({ chart, selectedId: null, selectedIds: [], history: [], future: [], histTag: null }),
+    set({
+      chart,
+      selectedId: null,
+      selectedIds: [],
+      pageSwitchManual: null,
+      history: [],
+      future: [],
+      histTag: null
+    }),
   chartFileName: null,
   savedChart: null,
   markChartFile: (chartFileName, savedChart) => set({ chartFileName, savedChart }),
@@ -981,6 +993,8 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   setManualMode: (on) => set({ manualMode: on }),
+  setPageSwitchManual: (value) =>
+    set({ pageSwitchManual: value == null ? null : Math.max(0, Math.min(255, Math.floor(value))) }),
   setManualColor: (fixtureId, rgb) =>
     set((s) => ({ manualByFixture: { ...s.manualByFixture, [fixtureId]: rgb } })),
   setManualMany: (fixtureIds, rgb) =>
@@ -1061,7 +1075,8 @@ export const useStore = create<AppState>()((set, get) => ({
             )
           }
         }
-      }
+      },
+      ...(patch.enabled === false ? { pageSwitchManual: null } : {})
     })),
   placingPart: null,
   setPlacingPart: (placingPart) => set({ placingPart }),

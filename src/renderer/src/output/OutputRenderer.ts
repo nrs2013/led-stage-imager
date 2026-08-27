@@ -90,7 +90,8 @@ export class OutputRenderer {
     chart: Chart,
     dmxByUniverse: Record<number, Uint8Array>,
     gamma: boolean,
-    manual: Record<string, RGB> | null = null
+    manual: Record<string, RGB> | null = null,
+    pageSwitchManual: number | null = null
   ): void {
     const { w, h } = chart.canvas
     if (this.canvas.width !== w) this.canvas.width = w
@@ -104,7 +105,7 @@ export class OutputRenderer {
     ctx.clearRect(0, 0, w, h)
 
     // DMXチャート切替がONなら、選ばれたページの図形だけをこのフレームへ出す。
-    const shapes = outputShapes(chart, dmxByUniverse)
+    const shapes = outputShapes(chart, dmxByUniverse, pageSwitchManual)
 
     // map shape -> fixture for colour resolution
     const fxByShape = new Map<string, Fixture>()

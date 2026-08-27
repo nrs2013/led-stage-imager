@@ -6,6 +6,7 @@ interface FileApi {
   saveChartAs?: (json: string, name: string) => Promise<string | null>
   chartNew?: () => Promise<boolean>
   openChartFile?: () => Promise<string | null>
+  currentChartFileName?: () => Promise<string | null>
 }
 const api = (): FileApi | undefined => (window as unknown as { api?: FileApi }).api
 
@@ -39,6 +40,11 @@ export async function saveChartAsToFile(chart: Chart): Promise<string | null> {
 /** 新規/別作品に切り替えた合図：main 側の「今のファイル」記憶を消す（次の保存で保存先を聞く）。 */
 export function markNewChart(): void {
   void api()?.chartNew?.()
+}
+
+/** 実際に開いているファイル名（パスは画面へ出さない）。 */
+export async function currentChartFileName(): Promise<string | null> {
+  return (await api()?.currentChartFileName?.()) ?? null
 }
 
 /** Opens a chart from disk (Electron dialog) or a browser file picker. Returns the chart or null. */

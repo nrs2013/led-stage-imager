@@ -18,10 +18,12 @@ export function LayersPanel(): React.JSX.Element {
   const setActiveLayer = useStore((s) => s.setActiveLayer)
   const setLayerVisible = useStore((s) => s.setLayerVisible)
   const renameLayer = useStore((s) => s.renameLayer)
+  const pageSwitchManual = useStore((s) => s.pageSwitchManual)
+  const setPageSwitchManual = useStore((s) => s.setPageSwitchManual)
   useStore((s) => s.chart.settings.pageSwitch)
   useStore((s) => s.dmxRev) // DMX値が変わった時だけ「送出中」表示を更新
   const chart = useStore.getState().chart
-  const pageIndex = outputLayerIndex(chart, useStore.getState().dmxByUniverse)
+  const pageIndex = outputLayerIndex(chart, useStore.getState().dmxByUniverse, pageSwitchManual)
   const pageSwitchOn = pageIndex != null
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -71,8 +73,19 @@ export function LayersPanel(): React.JSX.Element {
       </div>
       <div style={{ maxHeight: 168, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
         {pageSwitchOn && (
-          <div style={{ color: C.accent, fontSize: 10, fontFamily: F.mono, marginBottom: 5 }}>
-            DMX {pageIndex} → {layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+            <span style={{ color: C.accent, fontSize: 10, fontFamily: F.mono, flex: 1 }}>
+              {pageSwitchManual == null ? 'DMX' : '手動'} {pageIndex} →{' '}
+              {layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}
+            </span>
+            <button
+              style={{ ...smallBtn, minWidth: 74 }}
+              disabled={pageSwitchManual == null}
+              onClick={() => setPageSwitchManual(null)}
+              title="手動選択を解除して、設定したDMXチャンネルの値に連動します"
+            >
+              DMXに戻す
+            </button>
           </div>
         )}
         {layers.map((l, layerIndex) => {
@@ -154,6 +167,24 @@ export function LayersPanel(): React.JSX.Element {
                 <span style={{ fontSize: 9, color: C.accent, fontFamily: F.ui, whiteSpace: 'nowrap' }}>
                   送出中
                 </span>
+              )}
+              {pageSwitchOn && (
+                <button
+                  style={{
+                    ...smallBtn,
+                    minWidth: 48,
+                    ...(pageSwitchManual === layerIndex
+                      ? { border: `0.5px solid ${C.accent}`, color: C.white }
+                      : {})
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPageSwitchManual(layerIndex)
+                  }}
+                  title={`${l.name}を手動でSyphon / NDIへ送出します`}
+                >
+                  手動
+                </button>
               )}
               <button
                 style={{

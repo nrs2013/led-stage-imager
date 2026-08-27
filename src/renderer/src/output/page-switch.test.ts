@@ -49,4 +49,11 @@ describe('DMXチャート切り替え', () => {
     dmx[511] = 255
     expect(outputShapes(chart, { 2: dmx })).toEqual([])
   })
+
+  it('手動選択中はDMX値より手動番号を優先する', () => {
+    const chart = chartWithPages()
+    chart.settings.pageSwitch = { enabled: true, universe: 0, address: 1 }
+    expect(outputLayerIndex(chart, { 0: new Uint8Array(512) }, 1)).toBe(1)
+    expect(outputShapes(chart, {}, 1)[0].layerId).toBe(chart.layers[1].id)
+  })
 })

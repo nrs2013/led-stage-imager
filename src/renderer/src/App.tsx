@@ -77,7 +77,11 @@ function usePreviewMirror(): void {
       const st = useStore.getState()
       if (!st.started) return // 空チャートで本番出力を上書きしない
       sendChartNow()
-      a.sendManual?.({ on: st.manualMode, byFixture: st.manualByFixture })
+      a.sendManual?.({
+        on: st.manualMode,
+        byFixture: st.manualByFixture,
+        pageSwitchManual: st.pageSwitchManual
+      })
     }
     const off = a.onPreviewActive((active) => {
       activeRef.current = active
@@ -103,9 +107,15 @@ function usePreviewMirror(): void {
       if (state.chart !== prev.chart) queueChart()
       if (
         gpuRef.current &&
-        (state.manualMode !== prev.manualMode || state.manualByFixture !== prev.manualByFixture)
+        (state.manualMode !== prev.manualMode ||
+          state.manualByFixture !== prev.manualByFixture ||
+          state.pageSwitchManual !== prev.pageSwitchManual)
       )
-        a.sendManual?.({ on: state.manualMode, byFixture: state.manualByFixture })
+        a.sendManual?.({
+          on: state.manualMode,
+          byFixture: state.manualByFixture,
+          pageSwitchManual: state.pageSwitchManual
+        })
     })
     return () => {
       off?.()
@@ -247,7 +257,8 @@ function useOpenFile(): void {
         st.setImageLight(false)
         st.setChart(c)
         st.setTool('select')
-        st.markChartFile(c.name || '名前なし', c) // 上のバーの表示を実態に合わせる
+        const openedName = path?.split(/[\\/]/).pop() || c.name || '名前なし'
+        st.markChartFile(openedName, c) // 上のバーの表示を実際のファイル名に合わせる
         st.setStarted(true)
         // 実際に開けた時だけ ⌘S 上書き先を確定（キャンセル/失敗時はここに来ない＝別ファイル誤上書き防止）
         if (path) getApi()?.chartOpened?.(path)

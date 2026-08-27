@@ -77,6 +77,8 @@ export interface DecorApi {
   ) => Promise<string | null>
   /** Open a chart file via a native dialog; resolves to its JSON or null. */
   openChartFile: () => Promise<string | null>
+  /** 現在開いている実ファイルの名前。自動復元後も元ファイルが残っていれば返す。 */
+  currentChartFileName: () => Promise<string | null>
   /** 画像照明の公演を開く。新フォルダ・単体 .ledshow・旧フォルダに対応。 */
   openImageLightShow: () => Promise<
     | { json: string; media: Record<string, string>; path?: string }

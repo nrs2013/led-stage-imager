@@ -691,6 +691,9 @@ app.whenReady().then(() => {
     currentChartPath = null
     return true
   })
+  ipcMain.handle('chart:current-file-name', () =>
+    currentChartPath ? basename(currentChartPath) : null
+  )
 
   // 画像照明モード「公演まるごと保存/開く」: 1フォルダに show.json ＋ media/（写真・動画）。
   const mimeFromExt = (file: string): string => {
@@ -886,7 +889,13 @@ app.whenReady().then(() => {
       // 直書きだと書き込み中にクラッシュ＝唯一のクラッシュ復元ファイルが壊れて復元不能になる。
       const p = autosavePath()
       const tmp = p + '.tmp'
-      writeFileSync(tmp, json, 'utf8')
+      // チャート本体と「実際に開けた/保存できたファイル」を同じ瞬間の組として記録する。
+      // 別々に記録すると、古い自動バックアップを別ファイルへ上書きする事故になる。
+      writeFileSync(
+        tmp,
+        JSON.stringify({ kind: 'decor-autosave-v2', chartJson: json, chartPath: currentChartPath }),
+        'utf8'
+      )
       renameSync(tmp, p)
       return true
     } catch {
@@ -895,7 +904,25 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('chart:autosave-read', () => {
     try {
-      return readFileSync(autosavePath(), 'utf8')
+      const raw = readFileSync(autosavePath(), 'utf8')
+      try {
+        const saved = JSON.parse(raw) as {
+          kind?: string
+          chartJson?: string
+          chartPath?: string | null
+        }
+        if (saved.kind === 'decor-autosave-v2' && typeof saved.chartJson === 'string') {
+          currentChartPath =
+            typeof saved.chartPath === 'string' && existsSync(saved.chartPath)
+              ? saved.chartPath
+              : null
+          return saved.chartJson
+        }
+      } catch {
+        /* 旧形式はチャートJSONそのもの。下でそのまま返す。 */
+      }
+      currentChartPath = null
+      return raw
     } catch {
       return null
     }

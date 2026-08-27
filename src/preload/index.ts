@@ -145,6 +145,8 @@ const api = {
     ipcRenderer.invoke('chart:saveAs', json, name),
   chartNew: (): Promise<boolean> => ipcRenderer.invoke('chart:new'),
   openChartFile: (): Promise<string | null> => ipcRenderer.invoke('chart:open'),
+  currentChartFileName: (): Promise<string | null> =>
+    ipcRenderer.invoke('chart:current-file-name'),
   // ダブルクリックで開かれたファイルの中身(JSON)＋パスがメインから届く
   onOpenChartPath: (cb: (json: string, path?: string) => void): (() => void) => {
     const h = (_e: IpcRendererEvent, json: string, path?: string): void => cb(json, path)

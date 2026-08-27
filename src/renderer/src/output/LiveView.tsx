@@ -35,7 +35,7 @@ export function LiveView({
           chart.settings.holdOnTimeout,
           Date.now()
         )
-        renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
+        renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null, st.pageSwitchManual)
       } catch (err) {
         const now = Date.now()
         if (now - lastErrLog > 2000) {

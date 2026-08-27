@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../state/store'
 import { createChart } from '../model/chart-model'
-import { openChartFromFile, markNewChart } from '../io/file-ops'
+import { openChartFromFile, markNewChart, currentChartFileName } from '../io/file-ops'
 import { readBackup } from '../io/autosave'
 import type { Chart } from '../model/types'
 
@@ -20,10 +20,15 @@ export function StartScreen(): React.JSX.Element {
   const setLightingOnly = useStore((s) => s.setLightingOnly)
   const [error, setError] = useState<string | null>(null)
   const [backup, setBackup] = useState<Chart | null>(null)
+  const [backupFileName, setBackupFileName] = useState<string | null>(null)
 
   // crash net: offer the autosaved chart from the last session
   useEffect(() => {
-    void readBackup().then(setBackup)
+    void readBackup().then(async (chart) => {
+      const fileName = chart ? await currentChartFileName() : null
+      setBackupFileName(fileName)
+      setBackup(chart)
+    })
   }, [])
 
   const startBlank = (w: number, h: number): void => {
@@ -35,7 +40,8 @@ export function StartScreen(): React.JSX.Element {
 
   const resume = (): void => {
     if (!backup) return
-    markNewChart() // 自動バックアップからの復元はユーザーのファイルに紐づかない
+    if (backupFileName) useStore.getState().markChartFile(backupFileName, null)
+    else markNewChart() // 旧バックアップ等、元ファイルが分からない時は誤上書きしない
     setChart(backup)
     setTool('select')
     setStarted(true)
@@ -55,7 +61,7 @@ export function StartScreen(): React.JSX.Element {
       if (c) {
         setChart(c)
         // 上のバーの表示を実態に合わせる（ここを飛ばすと「未保存」と出るのに ⌘S は黙って上書きする）
-        useStore.getState().markChartFile(c.name || '名前なし', c)
+        useStore.getState().markChartFile((await currentChartFileName()) ?? (c.name || '名前なし'), c)
         setTool('select')
         setStarted(true)
       }
@@ -113,7 +119,7 @@ export function StartScreen(): React.JSX.Element {
 
         <h1 className="ss-title">LED STAGE IMAGER</h1>
         <p className="ss-tag">DMX Visualizer&nbsp;·&nbsp;Syphon / NDI Output</p>
-        <p className="ss-version">Version 1.0.4&nbsp;—&nbsp;DMXチャート切替版 2026-08-28</p>
+        <p className="ss-version">Version 1.0.5&nbsp;—&nbsp;ファイル名・手動チャート切替版 2026-08-28</p>
 
         <div className="ss-modes">
           <button

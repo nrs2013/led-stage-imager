@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore, activeLayerOf } from '../state/store'
 import { createChart, newId } from '../model/chart-model'
-import { saveChartToFile, saveChartAsToFile, openChartFromFile, markNewChart } from '../io/file-ops'
+import { saveChartToFile, saveChartAsToFile, openChartFromFile, markNewChart, currentChartFileName } from '../io/file-ops'
 import { pickImage, imageSize } from '../io/image-pick'
 import { exportPatchCsv, exportPatchMvr } from '../io/patch-export'
 import { SettingsDialog } from '../ui/SettingsDialog'
@@ -109,7 +109,7 @@ export function EditorMenus(): React.JSX.Element {
       if (c) {
         setChart(c)
         setTool('select')
-        markChartFile(c.name || '名前なし', c)
+        markChartFile((await currentChartFileName()) ?? (c.name || '名前なし'), c)
       }
     } catch (err) {
       // eslint-disable-next-line no-alert

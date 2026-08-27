@@ -34,8 +34,12 @@ export function GpuOutputView(): React.JSX.Element {
     const api = getApi()
     const offChart = api?.onChartUpdate?.((chart) => useStore.getState().setChart(chart as Chart))
     const offManual = api?.onManualUpdate?.((m) => {
-      const v = m as { on?: boolean; byFixture?: Record<string, [number, number, number]> } | null
-      useStore.setState({ manualMode: !!v?.on, manualByFixture: v?.byFixture ?? {} })
+      const v = m as { on?: boolean; byFixture?: Record<string, [number, number, number]>; pageSwitchManual?: number | null } | null
+      useStore.setState({
+        manualMode: !!v?.on,
+        manualByFixture: v?.byFixture ?? {},
+        pageSwitchManual: v?.pageSwitchManual ?? null
+      })
     })
     return () => {
       offChart?.()
@@ -75,14 +79,14 @@ export function GpuOutputView(): React.JSX.Element {
           Date.now()
         )
         if (out.w === chart.canvas.w && out.h === chart.canvas.h) {
-          renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
+          renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null, st.pageSwitchManual)
           return
         }
         // 縮める時: 原寸で描いてから、出来上がった絵を指定ピクセル数で焼き込む
         // （にじみ(グロー)も一緒に縮む＝原寸の時と見た目の比率が変わらない）。
         if (!fullCv) fullCv = document.createElement('canvas')
         if (!fullRenderer) fullRenderer = new OutputRenderer(fullCv)
-        fullRenderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
+        fullRenderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null, st.pageSwitchManual)
         const g = canvas.getContext('2d')
         if (!g) return
         if (canvas.width !== out.w) canvas.width = out.w
