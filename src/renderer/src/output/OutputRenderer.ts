@@ -36,6 +36,7 @@ import { groupShapesByGlow } from './glow'
 import { drawRoomLampLit, roomLampDiameter } from '../render/roomlamp'
 import { drawStreetLampLit, streetLampDiameter } from '../render/streetlamp'
 import { drawChandelierLit, chandelierDiameter } from '../render/chandelier'
+import { outputShapes } from './page-switch'
 
 const ZEROS = new Uint8Array(512)
 
@@ -102,6 +103,9 @@ export class OutputRenderer {
     ctx.globalAlpha = 1
     ctx.clearRect(0, 0, w, h)
 
+    // DMXチャート切替がONなら、選ばれたページの図形だけをこのフレームへ出す。
+    const shapes = outputShapes(chart, dmxByUniverse)
+
     // map shape -> fixture for colour resolution
     const fxByShape = new Map<string, Fixture>()
     for (const f of chart.fixtures) fxByShape.set(f.shapeId, f)
@@ -110,13 +114,13 @@ export class OutputRenderer {
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
 
-    this.drawShapesPass(chart.shapes, fxByShape, dmxByUniverse, gamma, manual)
+    this.drawShapesPass(shapes, fxByShape, dmxByUniverse, gamma, manual)
 
     // 電飾のにじみ(グロー): 半径ごとに「その図形だけを別キャンバスに描く→blur→加算」。
     // 本体はシャープなまま残る（芯＋にじみ）。blur は通常キャンバス(GPU)側で行う —
     // this.ctx は willReadFrequently=CPU なので、そこに filter を掛けると激重（地雷）。
     const glowGroups = groupShapesByGlow(
-      chart.shapes.filter((s) => fxByShape.has(s.id)),
+      shapes.filter((s) => fxByShape.has(s.id)),
       chart.settings
     )
     if (glowGroups.size > 0) {
@@ -151,7 +155,7 @@ export class OutputRenderer {
     }
 
     // Photo materials lit by uplight beams (light map → multiply → additive)
-    this.renderUplights(chart, fxByShape, dmxByUniverse, gamma, manual)
+    this.renderUplights({ ...chart, shapes }, fxByShape, dmxByUniverse, gamma, manual)
 
     // Optional global "smoke" glow: a whole-output bloom. The LEDs themselves stay crisp;
     // this just mimics how stage haze spreads them. Off by default.

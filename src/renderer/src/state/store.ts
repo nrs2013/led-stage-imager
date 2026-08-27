@@ -240,6 +240,7 @@ interface AppState {
   /** 送出(Syphon/NDI)のピクセル数だけを変える。チャート本体は原寸のまま。 */
   setOutputSize: (w: number, h: number) => void
   setOutputAspectLocked: (locked: boolean) => void
+  setPageSwitch: (patch: Partial<{ enabled: boolean; universe: number; address: number }>) => void
   /** 部品の連続配置モード：パレットのカードをクリック→キャンバスをクリック連打で
    *  置き続ける（Escで終了）。null=通常。ドラッグ&ドロップは従来どおり並存。 */
   placingPart: string | null
@@ -792,6 +793,7 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({ chart: patchActiveUnderlay(s.chart, (u) => (u ? { ...u, visible } : null)) })),
 
   addLayer: (init) => {
+    if (get().chart.layers.length >= 256) return get().chart.activeLayerId
     const id = newId('layer')
     get().beginHistory()
     set((s) => ({
@@ -1040,6 +1042,26 @@ export const useStore = create<AppState>()((set, get) => ({
   setOutputAspectLocked: (locked) =>
     set((s) => ({
       chart: { ...s.chart, settings: { ...s.chart.settings, outputAspectLocked: locked } }
+    })),
+  setPageSwitch: (patch) =>
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        settings: {
+          ...s.chart.settings,
+          pageSwitch: {
+            enabled: patch.enabled ?? s.chart.settings.pageSwitch?.enabled ?? false,
+            universe: Math.max(
+              0,
+              Math.min(32767, Math.floor(patch.universe ?? s.chart.settings.pageSwitch?.universe ?? 0))
+            ),
+            address: Math.max(
+              1,
+              Math.min(512, Math.floor(patch.address ?? s.chart.settings.pageSwitch?.address ?? 1))
+            )
+          }
+        }
+      }
     })),
   placingPart: null,
   setPlacingPart: (placingPart) => set({ placingPart }),

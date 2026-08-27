@@ -124,9 +124,9 @@ export interface Underlay {
   mask?: { enabled: boolean; invert: boolean }
 }
 
-/** One song's page: its chart image + the shapes drawn on it. Layers exist for the
- *  EDITOR only — the live output always renders every layer's shapes (unlit = invisible),
- *  so the console "calls up" a song simply by raising that song's addresses. */
+/** One song's page: its chart image + the shapes drawn on it. With DMX page switching
+ *  disabled the output renders every layer (legacy behavior); when enabled, one layer
+ *  is selected by the configured control channel's 0..255 value. */
 export interface Layer {
   id: string
   name: string
@@ -163,5 +163,7 @@ export interface Chart {
     outputSize?: { w: number; h: number }
     /** 設定画面で幅・高さを連動させるか。未設定は true。 */
     outputAspectLocked?: boolean
+    /** 1本のDMX値 0..255 で、レイヤー（CHART 1..256）の送出を切り替える。 */
+    pageSwitch?: { enabled: boolean; universe: number; address: number }
   }
 }

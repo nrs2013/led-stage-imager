@@ -9,6 +9,8 @@ import { FillDialog } from '../ui/FillDialog'
 import { MenuButton, MenuItem, MenuSep, MenuLabel } from '../ui/MenuButton'
 import { C, F } from '../ui/tokens'
 
+const fileBaseName = (path: string): string => path.split(/[\\/]/).pop() || path
+
 /** 上のバーの「ファイル」「チャート」＝以前は2段目に20個近く並んでいたボタンを、
  *  使う場面ごとに2つのまとめボタンへ畳んだもの（のむさん 2026-07-25）。
  *  ⌘S などのショートカットは従来どおり別経路で効く。 */
@@ -33,9 +35,11 @@ export function EditorMenus(): React.JSX.Element {
   // 今どのファイルを触っているか＋保存済みかは store に置く（モードを往復しても消えない・
    // StartScreen やダブルクリックで開いた時も同じ表示になる）
   const fileName = useStore((s) => s.chartFileName)
+  const chartName = useStore((s) => s.chart.name)
   const markChartFile = useStore((s) => s.markChartFile)
   // 真偽値だけを購読＝未保存の状態が変わった時しか作り直されない
   const dirty = useStore((s) => s.savedChart !== s.chart)
+  const shownFileName = fileName ? fileBaseName(fileName) : `${chartName || 'chart'}.ledimager`
   // 下絵は「差し替えた時」だけ参照が変わる＝図形を動かしても作り直されない
   const u = useStore((s) => activeLayerOf(s.chart).underlay)
 
@@ -135,13 +139,13 @@ export function EditorMenus(): React.JSX.Element {
             <MenuItem label="新規" onClick={() => { close(); newChart() }} />
             <MenuItem label="開く" onClick={() => { close(); void openChart() }} />
             <MenuItem
-              label="保存"
+              label={`「${shownFileName}」で保存`}
               hint="⌘S"
               title="今のファイルに上書き保存（初回だけ保存先を聞きます）"
               onClick={() => { close(); void saveChart() }}
             />
             <MenuItem
-              label="別名で保存"
+              label="別名で保存…"
               hint="⇧⌘S"
               title="新しいファイルとして保存し、以降はそちらに上書きします"
               onClick={() => { close(); void saveChartAs() }}
@@ -253,7 +257,7 @@ export function EditorMenus(): React.JSX.Element {
             : 'まだファイルにしていません（⌘S で保存先を聞きます）'
         }
       >
-        {fileName ? `${dirty ? '● ' : ''}${fileName}` : '● 未保存'}
+        ファイル: {fileName ? `${dirty ? '● ' : ''}${shownFileName}` : `● ${shownFileName}（未保存）`}
       </span>
       {savedFlash && (
         <span style={{ fontSize: 11, color: C.green, fontFamily: F.mono, whiteSpace: 'nowrap' }}>

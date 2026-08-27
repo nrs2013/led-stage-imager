@@ -2,12 +2,13 @@ import { useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { pickImage } from '../io/image-pick'
 import { C, F, buttonStyle } from '../ui/tokens'
+import { outputLayerIndex } from '../output/page-switch'
 
 const smallBtn = { ...buttonStyle({}), padding: '6px 8px', fontSize: 10, minHeight: 24 }
 
-/** Song pages. One layer = one chart image + its decorations. The console "calls up"
- *  a song by raising that song's addresses — the output always carries every layer,
- *  so this panel only drives what the EDITOR shows. */
+/** Song pages. One layer = one chart image + its decorations. Ordinarily the output
+ *  carries every layer; when DMX chart switching is enabled, its control value chooses
+ *  the single layer sent to Syphon/NDI. Clicking here still chooses the editor page. */
 export function LayersPanel(): React.JSX.Element {
   const layers = useStore((s) => s.chart.layers)
   const activeLayerId = useStore((s) => s.chart.activeLayerId)
@@ -17,6 +18,11 @@ export function LayersPanel(): React.JSX.Element {
   const setActiveLayer = useStore((s) => s.setActiveLayer)
   const setLayerVisible = useStore((s) => s.setLayerVisible)
   const renameLayer = useStore((s) => s.renameLayer)
+  useStore((s) => s.chart.settings.pageSwitch)
+  useStore((s) => s.dmxRev) // DMX値が変わった時だけ「送出中」表示を更新
+  const chart = useStore.getState().chart
+  const pageIndex = outputLayerIndex(chart, useStore.getState().dmxByUniverse)
+  const pageSwitchOn = pageIndex != null
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const cancelRename = useRef(false) // Esc=取り消し。blur(commit)を1回だけ握り潰す
@@ -46,16 +52,32 @@ export function LayersPanel(): React.JSX.Element {
         <span style={title}>レイヤー</span>
         <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1曲 = 1枚</span>
         <div style={{ flex: 1 }} />
-        <button style={smallBtn} onClick={addWithImage} title="チャート画像を選んで新しい曲ページを追加">
+        <button
+          style={smallBtn}
+          disabled={layers.length >= 256}
+          onClick={addWithImage}
+          title={layers.length >= 256 ? 'チャートは最大256枚です' : 'チャート画像を選んで新しい曲ページを追加'}
+        >
           ＋画像
         </button>
-        <button style={smallBtn} onClick={() => addLayer()} title="下絵なしの空ページを追加">
+        <button
+          style={smallBtn}
+          disabled={layers.length >= 256}
+          onClick={() => addLayer()}
+          title={layers.length >= 256 ? 'チャートは最大256枚です' : '下絵なしの空ページを追加'}
+        >
           ＋空ページ
         </button>
       </div>
       <div style={{ maxHeight: 168, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {layers.map((l) => {
+        {pageSwitchOn && (
+          <div style={{ color: C.accent, fontSize: 10, fontFamily: F.mono, marginBottom: 5 }}>
+            DMX {pageIndex} → {layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}
+          </div>
+        )}
+        {layers.map((l, layerIndex) => {
           const active = l.id === activeLayerId
+          const onAir = pageSwitchOn && layerIndex === pageIndex
           const count = shapes.filter((sh) => (sh.layerId ?? layers[0]?.id) === l.id).length
           return (
             <div
@@ -128,6 +150,11 @@ export function LayersPanel(): React.JSX.Element {
               >
                 {count}
               </span>
+              {onAir && (
+                <span style={{ fontSize: 9, color: C.accent, fontFamily: F.ui, whiteSpace: 'nowrap' }}>
+                  送出中
+                </span>
+              )}
               <button
                 style={{
                   ...smallBtn,

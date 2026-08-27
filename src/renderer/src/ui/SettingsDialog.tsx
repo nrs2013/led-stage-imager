@@ -25,12 +25,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const setLedGlowPx = useStore((s) => s.setLedGlowPx)
   const setOutputSize = useStore((s) => s.setOutputSize)
   const setOutputAspectLocked = useStore((s) => s.setOutputAspectLocked)
+  const setPageSwitch = useStore((s) => s.setPageSwitch)
   const setStageWidthMeters = useStore((s) => s.setStageWidthMeters)
   const fitFixturesToScale = useStore((s) => s.fitFixturesToScale)
 
   const tooBig = chart.canvas.w > MAX_W || chart.canvas.h > MAX_H
   const outputSize = outputSizeOf(chart)
   const outputAspectLocked = chart.settings.outputAspectLocked !== false
+  const pageSwitch = chart.settings.pageSwitch ?? { enabled: false, universe: 0, address: 1 }
   const mmpp = mmPerPx(chart) // 校正済みなら mm/px、未校正は null
   const widthM = stageWidthMeters(chart) ?? ''
   const fitCount = countFittableFixtures(chart.shapes) // 実寸に直せる灯体の数
@@ -224,6 +226,39 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
           出す画素数だけを変えます（チャート・絵はそのまま）。OFFの時は幅と高さを別々に変えられます。
         </div>
 
+        <Toggle
+          label="DMXでチャートを切り替える"
+          on={pageSwitch.enabled}
+          onChange={(enabled) => setPageSwitch({ enabled })}
+          onText="ON"
+          offText="OFF"
+        />
+        {pageSwitch.enabled && (
+          <>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Field label="切り替え Universe">
+                <NumberField
+                  value={pageSwitch.universe + 1}
+                  min={1}
+                  max={32768}
+                  onChange={(universe) => setPageSwitch({ universe: universe - 1 })}
+                />
+              </Field>
+              <Field label="切り替え DMX番地">
+                <NumberField
+                  value={pageSwitch.address}
+                  min={1}
+                  max={512}
+                  onChange={(address) => setPageSwitch({ address })}
+                />
+              </Field>
+            </div>
+            <div style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginTop: -6, marginBottom: 12 }}>
+              値 0 = CHART 1、値 1 = CHART 2、…、値 255 = CHART 256。まだ無い番号は黒で送出します。
+            </div>
+          </>
+        )}
+
         <Field label="Syphon の名前">
           <input
             type="text"
@@ -353,6 +388,8 @@ const backdrop: React.CSSProperties = {
 }
 const modal: React.CSSProperties = {
   width: 420,
+  maxHeight: 'calc(100vh - 40px)',
+  overflowY: 'auto',
   background: C.surface,
   border: `0.5px solid ${C.border}`,
   borderRadius: 8,
