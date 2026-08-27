@@ -7,7 +7,7 @@ import type { Chart } from '../model/types'
 
 /**
  * The doorway: first choose a MODE, not a file (cinematic-beam design・のむさん 2026-06-20).
- *  - SHOW MODE  … 本番。電飾・照明を配置図に置いて卓のDMXで可視化し Syphon/NDI 出力する。常に新規（空）で開始。
+ *  - SHOW MODE  … 本番。前回の自動バックアップがあれば続きから、無ければ空で開始。
  *  - LIGHT SKETCH … かんたん。写真を灯体で照らして見た目を作る簡易プレビュー（旧・画像照明モード）。
  * チャート画像（配置図）は SHOW MODE に入ってから上のバーの「チャート画像」で貼る。
  * 画面の文言は英語のみ（のむさん要望）。ロゴは Cormorant Garamond 300（同梱・CSP font-src 'self'）。
@@ -29,7 +29,7 @@ export function StartScreen(): React.JSX.Element {
   const startBlank = (w: number, h: number): void => {
     markNewChart() // 空チャート＝まだファイル未確定（最初の保存で保存先を聞く）
     setChart(createChart({ w, h }))
-    setTool('pixelpen')
+    setTool('select')
     setStarted(true)
   }
 
@@ -37,13 +37,15 @@ export function StartScreen(): React.JSX.Element {
     if (!backup) return
     markNewChart() // 自動バックアップからの復元はユーザーのファイルに紐づかない
     setChart(backup)
+    setTool('select')
     setStarted(true)
   }
 
-  // SHOW MODE に入る：いつでも「新規（空チャート）」で始める＝普通のアプリ(Excel/PowerPoint)と同じ。
-  // 前回の自動バックアップは下の「Recover last session」でだけ復元する（保存し忘れの保険）。
+  // SHOW MODE に入る：前回の自動バックアップがあれば安全に復元する。
+  // 元ファイルの上書き先とは結び付けず、保存時は改めて保存先を選ぶ（誤上書き防止）。
   const enterShowMode = (): void => {
-    startBlank(1920, 1080)
+    if (backup) resume()
+    else startBlank(1920, 1080)
   }
 
   const loadSaved = async (): Promise<void> => {
@@ -54,6 +56,7 @@ export function StartScreen(): React.JSX.Element {
         setChart(c)
         // 上のバーの表示を実態に合わせる（ここを飛ばすと「未保存」と出るのに ⌘S は黙って上書きする）
         useStore.getState().markChartFile(c.name || '名前なし', c)
+        setTool('select')
         setStarted(true)
       }
     } catch (err) {
@@ -110,7 +113,7 @@ export function StartScreen(): React.JSX.Element {
 
         <h1 className="ss-title">LED STAGE IMAGER</h1>
         <p className="ss-tag">DMX Visualizer&nbsp;·&nbsp;Syphon / NDI Output</p>
-        <p className="ss-version">Version 1.0.2&nbsp;—&nbsp;NDI調整・複数編集版 2026-08-09</p>
+        <p className="ss-version">Version 1.0.3&nbsp;—&nbsp;DECO復元・入力改善版 2026-08-27</p>
 
         <div className="ss-modes">
           <button

@@ -17,6 +17,7 @@ export function EditorMenus(): React.JSX.Element {
   // 電飾を1px動かすたびに上のバー全体（道具ボタン・太さ欄・図形メニュー）が作り直されて
   // 操作がもたつく。表示に要る所だけを細かく購読する（値は操作時に getState() で読む）。
   const setChart = useStore((s) => s.setChart)
+  const setTool = useStore((s) => s.setTool)
   const setUnderlay = useStore((s) => s.setUnderlay)
   const setUnderlayOpacity = useStore((s) => s.setUnderlayOpacity)
   const setUnderlayVisible = useStore((s) => s.setUnderlayVisible)
@@ -83,6 +84,7 @@ export function EditorMenus(): React.JSX.Element {
     }
     markNewChart() // 新規＝ファイル未確定。次の保存で保存先を聞く
     setChart(createChart({ w: 1920, h: 1080 }))
+    setTool('select')
     // 編集画面のまま空チャートにする。StartScreen へ戻すと SHOW MODE 再選択で
     // 「前回の続き(自動バックアップ)」が復活し、新規にならない不具合になるため戻さない。
     setSavedFlash(null)
@@ -102,6 +104,7 @@ export function EditorMenus(): React.JSX.Element {
       const c = await openChartFromFile()
       if (c) {
         setChart(c)
+        setTool('select')
         markChartFile(c.name || '名前なし', c)
       }
     } catch (err) {

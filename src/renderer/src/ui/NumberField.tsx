@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { inputStyle, C } from './tokens'
 
 /**
  * Console-style number field made easy to use:
- *  - ▲▼ spinner (right): click to step, press-and-hold to ramp up fast (big ranges).
- *  - Drag the field left/right to scrub (accelerates the farther you drag).
- *  - Click to focus + select-all and type an exact value; scroll wheel nudges while focused.
+ *  - ▲▼ spinner (right): one click always changes exactly one step.
+ *  - Click anywhere in the number to select-all and type an exact value.
  * Fits both full-width rows and tight 3-column rows (spinner is only 18px).
  */
 export function NumberField({
@@ -24,10 +23,8 @@ export function NumberField({
   style?: React.CSSProperties
 }): React.JSX.Element {
   const ref = useRef<HTMLInputElement>(null)
-  const scrub = useRef<{ x: number; v: number; active: boolean } | null>(null)
   const valRef = useRef(value)
   valRef.current = value
-  const holdRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // 入力中だけ生の打ち込み文字を保持（null=非編集中は value を表示）。これで「1文字ごとに
   // 丸まる/空にできず元へ戻る」を解消し、確定(blur/Enter)時にだけ clamp する（のむさん 2026-06-20）。
   const [draft, setDraft] = useState<string | null>(null)
@@ -39,31 +36,10 @@ export function NumberField({
     return r
   }
 
-  // press-and-hold on a spinner: step once, then repeat with acceleration so big
-  // ranges (e.g. line width 1–500) don't need a hundred clicks.
-  const startHold = (dir: number): void => {
-    endHold()
+  const stepOnce = (dir: number): void => {
     setDraft(null) // ▲▼で変えた値が表示に反映されるよう、編集中のドラフトは解除
-    let v = valRef.current
-    const apply = (mult: number): void => {
-      v = clamp(v + dir * step * mult)
-      onChange(v)
-    }
-    apply(1)
-    let n = 0
-    holdRef.current = setInterval(() => {
-      n++
-      apply(n > 26 ? 12 : n > 12 ? 4 : 1)
-    }, 55)
+    onChange(clamp(valRef.current + dir * step))
   }
-  const endHold = (): void => {
-    if (holdRef.current) {
-      clearInterval(holdRef.current)
-      holdRef.current = null
-    }
-  }
-  // 押しっぱなしの最中にこのフィールドが消えても（Inspector の作り替え等）タイマーを必ず止める。
-  useEffect(() => () => endHold(), [])
 
   const spinBtn: React.CSSProperties = {
     flex: 1,
@@ -85,7 +61,7 @@ export function NumberField({
   return (
     <div
       style={{ display: 'flex', width: '100%', alignItems: 'stretch', ...style }}
-      title="▲▼で増減（長押しで加速）／欄を左右ドラッグでも増減／クリックで直接入力（入力中はスクロールも可）"
+      title="▲▼は1回で1目盛り増減／数字をクリックすると全選択（入力中はスクロールも可）"
     >
       <input
         ref={ref}
@@ -96,6 +72,7 @@ export function NumberField({
           setDraft(String(value))
           e.currentTarget.select()
         }}
+        onClick={(e) => e.currentTarget.select()}
         onChange={(e) => {
           // 入力中は打った文字をそのまま表示（途中で空/範囲外でもOK）。有効な数なら即反映。
           const raw = e.target.value
@@ -127,29 +104,6 @@ export function NumberField({
           setDraft(null)
           onChange(clamp(valRef.current + (e.deltaY < 0 ? 1 : -1) * step * (e.shiftKey ? 10 : 1)))
         }}
-        onPointerDown={(e) => {
-          scrub.current = { x: e.clientX, v: value, active: false }
-        }}
-        onPointerMove={(e) => {
-          const s = scrub.current
-          if (!s) return
-          const dx = e.clientX - s.x
-          if (!s.active) {
-            // クリックして打つ時の指のわずかな揺れでドラッグ化しないよう、はっきり横に
-            // 動かした時だけスクラブ開始（トラックパッドでも入力できるように・のむさん 2026-06-20）
-            if (Math.abs(dx) < 8) return
-            s.active = true
-            ref.current?.blur()
-            ref.current?.setPointerCapture(e.pointerId)
-          }
-          // accelerate: fine near the start, fast the farther you drag (covers big ranges)
-          const accel = 1 + Math.abs(dx) / 120
-          onChange(clamp(s.v + Math.round((dx / 4) * accel) * step))
-        }}
-        onPointerUp={(e) => {
-          if (scrub.current?.active) ref.current?.releasePointerCapture(e.pointerId)
-          scrub.current = null
-        }}
         style={{
           ...inputStyle,
           flex: 1,
@@ -167,11 +121,11 @@ export function NumberField({
           style={{ ...spinBtn, borderRadius: '0 4px 0 0' }}
           onPointerDown={(e) => {
             e.preventDefault()
-            startHold(1)
+            stepOnce(1)
           }}
-          onPointerUp={endHold}
-          onPointerLeave={endHold}
-          onPointerCancel={endHold}
+          onClick={(e) => {
+            if (e.detail === 0) stepOnce(1) // キーボードの Enter / Space
+          }}
         >
           ▲
         </button>
@@ -181,11 +135,11 @@ export function NumberField({
           style={{ ...spinBtn, borderTop: 'none', borderRadius: '0 0 4px 0' }}
           onPointerDown={(e) => {
             e.preventDefault()
-            startHold(-1)
+            stepOnce(-1)
           }}
-          onPointerUp={endHold}
-          onPointerLeave={endHold}
-          onPointerCancel={endHold}
+          onClick={(e) => {
+            if (e.detail === 0) stepOnce(-1) // キーボードの Enter / Space
+          }}
         >
           ▼
         </button>

@@ -20,6 +20,7 @@ import { useMask } from './state/use-mask'
 import { useAutosave } from './io/autosave'
 import type { Chart } from './model/types'
 import { parseChart } from './io/chart-file'
+import { saveChartToFile } from './io/file-ops'
 import { C, chrome } from './ui/tokens'
 
 // GPU直結出力の見えない窓（?syphon-output）。'output' を部分一致で含むので先に判定する。
@@ -245,6 +246,7 @@ function useOpenFile(): void {
         }
         st.setImageLight(false)
         st.setChart(c)
+        st.setTool('select')
         st.markChartFile(c.name || '名前なし', c) // 上のバーの表示を実態に合わせる
         st.setStarted(true)
         // 実際に開けた時だけ ⌘S 上書き先を確定（キャンセル/失敗時はここに来ない＝別ファイル誤上書き防止）
@@ -303,6 +305,33 @@ function EditorApp(): React.JSX.Element {
   useOpenFile()
   useOpenShowFile()
   useChartOutput() // 電飾の Syphon/NDI 出力は常時（Live廃止・照明モードと同じ作法）
+  // DECOモードも終了時の保存確認を通す。画像照明モードは同名の橋を自前で設置するため、
+  // そちらへ入っている間は触らない。保存先をキャンセルした時は終了も中止する。
+  useEffect(() => {
+    if (imageLight) return
+    const w = window as typeof window & {
+      __ilDirty?: () => boolean
+      __ilSaveForClose?: () => Promise<boolean>
+    }
+    const dirty = (): boolean => {
+      const st = useStore.getState()
+      return st.started && st.savedChart !== st.chart
+    }
+    const save = async (): Promise<boolean> => {
+      const st = useStore.getState()
+      const label = await saveChartToFile(st.chart)
+      if (!label) return false
+      st.markChartFile(label, st.chart)
+      window.dispatchEvent(new CustomEvent('decor:saved', { detail: label }))
+      return true
+    }
+    w.__ilDirty = dirty
+    w.__ilSaveForClose = save
+    return () => {
+      if (w.__ilDirty === dirty) delete w.__ilDirty
+      if (w.__ilSaveForClose === save) delete w.__ilSaveForClose
+    }
+  }, [imageLight])
   // 出力方式（SETUPのトグル・localStorage永続）。互換を選んでいたら起動時に main へ伝えて
   // GPU出力窓を止める（既定は高速(GPU)＝何も送らなくても main が起動している）。
   useEffect(() => {

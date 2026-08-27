@@ -186,7 +186,7 @@ export function Toolbar({
         ))}
         <span
           style={{ display: 'flex', alignItems: 'center', gap: 5, width: 132, flexShrink: 0 }}
-          title="書く太さ（px）— 塗る・消しゴム・図形に効く。左右ドラッグで増減・クリックで入力"
+          title="書く太さ（px）— 塗る・消しゴム・図形に効く。クリックで全選択して入力"
         >
           <span style={{ fontSize: 10, color: C.hint, fontFamily: F.ui, whiteSpace: 'nowrap' }}>
             太さ

@@ -315,7 +315,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 }
 
-/** 閉じる/終了の前に「保存されていない変更」を確認する（画像照明モードのみ対象）。
+/** 閉じる/終了の前に「保存されていない変更」を確認する（DECO・画像照明の両モード）。
  *  renderer の window.__ilDirty / __ilSaveForClose を呼んで判断。1.5秒応答が無い時は
  *  安全側＝「未保存あり」とみなして確認ダイアログを出す（黙って閉じてデータを落とさない）。 */
 let confirmRunning = false
@@ -355,7 +355,7 @@ async function confirmAndClose(kind: 'quit' | 'window'): Promise<void> {
           cancelId: 2,
           message: '保存されていない変更があります',
           detail:
-            '公演ファイル(.ledshow)に保存してから閉じますか？\n（保存しなくても自動バックアップは残っています）'
+            'ファイル（.ledimager / .ledshow）に保存してから閉じますか？\n（保存しなくても自動バックアップは残っています）'
         })
       ).response
     } catch {
