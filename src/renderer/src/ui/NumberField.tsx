@@ -1,9 +1,9 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { inputStyle, C } from './tokens'
 
 /**
  * Console-style number field made easy to use:
- *  - ▲▼ spinner (right): one click always changes exactly one step.
+ *  - ▲▼ spinner (right): one click changes one step; press-and-hold repeats.
  *  - Click anywhere in the number to select-all and type an exact value.
  * Fits both full-width rows and tight 3-column rows (spinner is only 18px).
  */
@@ -27,6 +27,8 @@ export function NumberField({
 }): React.JSX.Element {
   const ref = useRef<HTMLInputElement>(null)
   const valRef = useRef(value)
+  const repeatDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const repeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   valRef.current = value
   // 入力中だけ生の打ち込み文字を保持（null=非編集中は value を表示）。これで「1文字ごとに
   // 丸まる/空にできず元へ戻る」を解消し、確定(blur/Enter)時にだけ clamp する（のむさん 2026-06-20）。
@@ -41,8 +43,27 @@ export function NumberField({
 
   const stepOnce = (dir: number): void => {
     setDraft(null) // ▲▼で変えた値が表示に反映されるよう、編集中のドラフトは解除
-    onChange(clamp(valRef.current + dir * step))
+    const next = clamp(valRef.current + dir * step)
+    valRef.current = next // 連続中もReactの再描画を待たず、必ず1目盛りずつ進める
+    onChange(next)
   }
+
+  const stopRepeat = (): void => {
+    if (repeatDelayRef.current) clearTimeout(repeatDelayRef.current)
+    if (repeatTimerRef.current) clearInterval(repeatTimerRef.current)
+    repeatDelayRef.current = null
+    repeatTimerRef.current = null
+  }
+
+  const startRepeat = (dir: number): void => {
+    stopRepeat()
+    stepOnce(dir) // 短いクリックは従来どおり、正確に1回だけ
+    repeatDelayRef.current = setTimeout(() => {
+      repeatTimerRef.current = setInterval(() => stepOnce(dir), 80)
+    }, 450)
+  }
+
+  useEffect(() => stopRepeat, [])
 
   const spinBtn: React.CSSProperties = {
     flex: 1,
@@ -64,7 +85,7 @@ export function NumberField({
   return (
     <div
       style={{ display: 'flex', width: '100%', alignItems: 'stretch', ...style }}
-      title="▲▼は1回で1目盛り増減／数字をクリックすると全選択（入力中はスクロールも可）"
+      title="▲▼は1回で1目盛り、押し続けると連続増減／数字をクリックすると全選択"
     >
       <input
         ref={ref}
@@ -124,8 +145,11 @@ export function NumberField({
           style={{ ...spinBtn, borderRadius: '0 4px 0 0' }}
           onPointerDown={(e) => {
             e.preventDefault()
-            stepOnce(1)
+            startRepeat(1)
           }}
+          onPointerUp={stopRepeat}
+          onPointerCancel={stopRepeat}
+          onPointerLeave={stopRepeat}
           onClick={(e) => {
             if (e.detail === 0) stepOnce(1) // キーボードの Enter / Space
           }}
@@ -138,8 +162,11 @@ export function NumberField({
           style={{ ...spinBtn, borderTop: 'none', borderRadius: '0 0 4px 0' }}
           onPointerDown={(e) => {
             e.preventDefault()
-            stepOnce(-1)
+            startRepeat(-1)
           }}
+          onPointerUp={stopRepeat}
+          onPointerCancel={stopRepeat}
+          onPointerLeave={stopRepeat}
           onClick={(e) => {
             if (e.detail === 0) stepOnce(-1) // キーボードの Enter / Space
           }}
