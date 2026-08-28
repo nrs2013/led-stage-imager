@@ -40,7 +40,7 @@ export class ArtNetReceiver extends EventEmitter {
       }
       if (!this.senderAllowed(rinfo.address)) return
       const pkt = parseArtDmx(msg)
-      if (pkt) this.emit('dmx', pkt) // { universe, sequence, data }
+      if (pkt) this.emit('dmx', { ...pkt, sourceIp: rinfo.address })
     })
     sock.on('error', (err) => this.emit('error', err))
     sock.on('listening', () => this.emit('listening'))
