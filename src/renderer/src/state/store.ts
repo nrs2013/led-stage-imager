@@ -144,6 +144,8 @@ interface AppState {
   pasteAt: (center: Point) => void
   /** 元から少し横にずらして即ペースト（マウス追従の連続スタンプはしない・LIGHT SKETCH と同じ）。 */
   pasteOffset: () => void
+  /** コピー元と全く同じ座標へ貼る。別CHARTへ配置を移す時の ⌘⇧V 用。 */
+  pasteSamePosition: () => void
   /** 選択中の図形を端/中央でそろえる（2個以上で有効・ロック分は対象外）。 */
   alignShapes: (edge: AlignEdge) => void
   /** 選択中の図形を等間隔に散らす（3個以上で有効・両端は固定して間を均す）。 */
@@ -561,6 +563,15 @@ export const useStore = create<AppState>()((set, get) => ({
     get().pasteAt({ x: -d0.x + OFF, y: -d0.y + OFF })
   },
 
+  pasteSamePosition: () => {
+    const cb = get().clipboard
+    if (!cb || cb.shapes.length === 0) return
+    // pasteAt は指定点へアンカーを合わせるため、原点に対する移動量を打ち消す点を渡せば
+    // コピー元と同じ座標になる。貼付先レイヤーだけは現在のCHARTへ置き換わる。
+    const d0 = pasteDelta(cb.shapes, { x: 0, y: 0 })
+    get().pasteAt({ x: -d0.x, y: -d0.y })
+  },
+
   // 選択した図形を各 points ごと平行移動して動かす共通処理（整列・等間隔の land）。
   // ロック分は触らない（掴めない＝動かさない、の一貫）。⌘Z で1手で戻せる。
   alignShapes: (edge) => {
@@ -809,19 +820,33 @@ export const useStore = create<AppState>()((set, get) => ({
     const id = newId('layer')
     get().beginHistory()
     set((s) => ({
-      chart: {
-        ...s.chart,
-        layers: [
-          ...s.chart.layers,
-          {
-            id,
-            name: init?.name ?? `CHART ${s.chart.layers.length + 1}`,
-            underlay: init?.underlay ?? null,
-            visible: true
-          }
-        ],
-        activeLayerId: id
-      },
+      chart: (() => {
+        const current = s.chart.layers.find((layer) => layer.id === s.chart.activeLayerId)
+        // 通常の「＋空ページ」はチャート画像だけを引き継ぐ。電飾と番地はレイヤーに
+        // 追加しないので空のまま。＋画像のように underlay が明示された時はそちらを使う。
+        const inherited = current?.underlay
+          ? {
+              ...current.underlay,
+              mask: current.underlay.mask ? { ...current.underlay.mask } : undefined
+            }
+          : null
+        const underlay = init && Object.prototype.hasOwnProperty.call(init, 'underlay')
+          ? (init.underlay ?? null)
+          : inherited
+        return {
+          ...s.chart,
+          layers: [
+            ...s.chart.layers,
+            {
+              id,
+              name: init?.name ?? `CHART ${s.chart.layers.length + 1}`,
+              underlay,
+              visible: true
+            }
+          ],
+          activeLayerId: id
+        }
+      })(),
       selectedId: null,
       selectedIds: []
     }))

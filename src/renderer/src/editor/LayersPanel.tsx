@@ -66,7 +66,7 @@ export function LayersPanel(): React.JSX.Element {
           style={smallBtn}
           disabled={layers.length >= 256}
           onClick={() => addLayer()}
-          title={layers.length >= 256 ? 'チャートは最大256枚です' : '下絵なしの空ページを追加'}
+          title={layers.length >= 256 ? 'チャートは最大256枚です' : '現在のチャート画像を引き継ぎ、電飾・番地は空のページを追加'}
         >
           ＋空ページ
         </button>

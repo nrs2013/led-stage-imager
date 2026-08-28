@@ -1005,7 +1005,10 @@ export function EditorCanvas(): React.JSX.Element {
       }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'V')) {
         if (st.clipboard) {
-          if (st.pasteMark) {
+          if (e.shiftKey) {
+            st.pasteSamePosition() // 別CHARTへ同じ配置を移す用途
+            st.setPasteMark(null)
+          } else if (st.pasteMark) {
             st.pasteAt(st.pasteMark) // クリックで印を付けた場所に貼る
             st.setPasteMark(null)
           } else {
