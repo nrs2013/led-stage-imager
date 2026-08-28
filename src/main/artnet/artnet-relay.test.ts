@@ -4,11 +4,11 @@ import { ArtNetRelay, buildArtDmx, defaultRelayConfig, isBroadcastIPv4, isUnicas
 afterEach(() => vi.useRealTimers())
 
 describe('Art-Net delay relay', () => {
-  it('256 universes default to safe OFF and same-number routing', () => {
+  it('starts with one safe-OFF route that can represent consecutive universes', () => {
     const c = defaultRelayConfig()
     expect(c.enabled).toBe(false)
-    expect(c.routes).toHaveLength(256)
-    expect(c.routes[255]).toMatchObject({ inputUniverse: 255, outputUniverse: 255, delayFrames: 0, outputMode: 'unicast', mergeMode: 'none' })
+    expect(c.routes).toHaveLength(1)
+    expect(c.routes[0]).toMatchObject({ inputUniverse: 0, outputUniverse: 0, universeCount: 1, delayFrames: 0, outputMode: 'unicast', mergeMode: 'none' })
   })
 
   it('clamps delay to 0..30 frames and universes to Art-Net range', () => {
@@ -102,5 +102,19 @@ describe('Art-Net delay relay', () => {
     relay.setConfig({ enabled: true, routes: [{ enabled: true, inputUniverse: 0, targetIp: '2.0.0.255', outputUniverse: 0, delayFrames: 0, outputMode: 'broadcast' }] }, ['2.0.0.5'])
     relay.handle({ universe: 0, sequence: 1, sourceIp: '2.0.0.5', data: Uint8Array.from([255, 0]) })
     expect(sent).toHaveLength(0)
+  })
+
+  it('maps one route with a count to consecutive input and output universes', () => {
+    const sent: Buffer[] = []
+    const relay = new ArtNetRelay((data) => sent.push(data))
+    relay.setConfig({ enabled: true, routes: [{ enabled: true, inputUniverse: 4, targetIp: '10.0.0.2', outputUniverse: 20, universeCount: 10, delayFrames: 0 }] })
+    relay.handle({ universe: 13, sequence: 1, sourceIp: '10.0.0.10', data: Uint8Array.from([255, 0]) })
+    expect(sent).toHaveLength(1)
+    expect(sent[0].readUInt16LE(14)).toBe(29)
+  })
+
+  it('folds the old 256 blank rows down to one row', () => {
+    const oldRows = Array.from({ length: 256 }, (_, i) => ({ enabled: false, inputUniverse: i, outputUniverse: i, targetIp: '', delayFrames: 0 }))
+    expect(normalizeRelayConfig({ enabled: false, routes: oldRows }).routes).toHaveLength(1)
   })
 })

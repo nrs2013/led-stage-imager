@@ -10,6 +10,7 @@ interface RelayRoute {
   delayFrames: number
   outputMode: 'unicast' | 'broadcast'
   mergeMode: 'none' | 'htp' | 'ltp'
+  universeCount: number
 }
 
 interface RelayConfig {
@@ -24,23 +25,33 @@ interface RelayApi {
 
 const defaultConfig = (): RelayConfig => ({
   enabled: false,
-  routes: Array.from({ length: 256 }, (_, i) => ({
+  routes: Array.from({ length: 1 }, (_, i) => ({
     enabled: false,
     inputUniverse: i,
     targetIp: '',
     outputUniverse: i,
     delayFrames: 0,
     outputMode: 'unicast',
-    mergeMode: 'none'
+    mergeMode: 'none',
+    universeCount: 1
   }))
 })
 
 const normalize = (value: unknown): RelayConfig => {
   const raw = (value && typeof value === 'object' ? value : {}) as Partial<RelayConfig>
-  const rows = Array.isArray(raw.routes) ? raw.routes : []
+  const sourceRows = Array.isArray(raw.routes) ? raw.routes.slice(0, 256) : []
+  let lastUsed = -1
+  sourceRows.forEach((value, i) => {
+    const row = (value && typeof value === 'object' ? value : {}) as Partial<RelayRoute>
+    if (row.enabled === true || (typeof row.targetIp === 'string' && row.targetIp.trim() !== '') ||
+      row.inputUniverse !== i || row.outputUniverse !== i || (row.delayFrames ?? 0) !== 0 ||
+      row.outputMode === 'broadcast' || row.mergeMode === 'htp' || row.mergeMode === 'ltp' ||
+      (row.universeCount ?? 1) !== 1) lastUsed = i
+  })
+  const rows = sourceRows.slice(0, Math.max(1, lastUsed + 1))
   return {
     enabled: raw.enabled === true,
-    routes: Array.from({ length: 256 }, (_, i) => {
+    routes: Array.from({ length: Math.max(1, rows.length) }, (_, i) => {
       const row = (rows[i] && typeof rows[i] === 'object' ? rows[i] : {}) as Partial<RelayRoute>
       return {
         enabled: row.enabled === true,
@@ -49,7 +60,12 @@ const normalize = (value: unknown): RelayConfig => {
         outputUniverse: integer(row.outputUniverse, 0, 32767, i),
         delayFrames: integer(row.delayFrames, 0, 30, 0),
         outputMode: row.outputMode === 'broadcast' ? 'broadcast' : 'unicast',
-        mergeMode: row.mergeMode === 'htp' || row.mergeMode === 'ltp' ? row.mergeMode : 'none'
+        mergeMode: row.mergeMode === 'htp' || row.mergeMode === 'ltp' ? row.mergeMode : 'none',
+        universeCount: integer(row.universeCount, 1, Math.min(
+          256,
+          32768 - integer(row.inputUniverse, 0, 32767, i),
+          32768 - integer(row.outputUniverse, 0, 32767, i)
+        ), 1)
       }
     })
   }
@@ -88,12 +104,6 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [rangeAnchor, setRangeAnchor] = useState<number | null>(null)
   const [dragging, setDragging] = useState(false)
-  const [bulkInput, setBulkInput] = useState(1)
-  const [bulkOutput, setBulkOutput] = useState(1)
-  const [bulkIp, setBulkIp] = useState('')
-  const [bulkOutputMode, setBulkOutputMode] = useState<'unicast' | 'broadcast'>('unicast')
-  const [bulkMerge, setBulkMerge] = useState<'none' | 'htp' | 'ltp'>('none')
-  const [bulkDelay, setBulkDelay] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -131,9 +141,10 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
 
   const updateRoute = (index: number, patch: Partial<RelayRoute>): void => {
     setMessage('')
+    const targets = selected.has(index) && selected.size > 1 ? selected : new Set([index])
     setConfig((current) => ({
       ...current,
-      routes: current.routes.map((route, i) => i === index ? { ...route, ...patch } : route)
+      routes: current.routes.map((route, i) => targets.has(i) ? { ...route, ...patch } : route)
     }))
   }
 
@@ -150,21 +161,25 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
     setDragging(true)
   }
 
-  const applySelected = (makePatch: (route: RelayRoute, order: number) => Partial<RelayRoute>): void => {
-    const ordered = [...selected].sort((a, b) => a - b)
-    if (!ordered.length) {
-      setMessage('先に左端の番号をドラッグして範囲を指定してください。')
-      return
-    }
-    const orderOf = new Map(ordered.map((index, order) => [index, order]))
-    setMessage('選んだ範囲へ反映しました。「保存して適用」で確定します。')
-    setConfig((current) => ({
-      ...current,
-      routes: current.routes.map((route, index) => {
-        const order = orderOf.get(index)
-        return order == null ? route : { ...route, ...makePatch(route, order) }
-      })
-    }))
+  const addRoute = (): void => {
+    setConfig((current) => {
+      if (current.routes.length >= 256) return current
+      const previous = current.routes[current.routes.length - 1]
+      return { ...current, routes: [...current.routes, {
+        ...previous,
+        enabled: false,
+        inputUniverse: Math.min(32767, previous.inputUniverse + previous.universeCount),
+        outputUniverse: Math.min(32767, previous.outputUniverse + previous.universeCount)
+      }] }
+    })
+  }
+
+  const removeRoute = (index: number): void => {
+    setConfig((current) => current.routes.length <= 1 ? current : {
+      ...current, routes: current.routes.filter((_, i) => i !== index)
+    })
+    setSelected(new Set())
+    setRangeAnchor(null)
   }
 
   const save = async (): Promise<void> => {
@@ -210,54 +225,30 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
           </span>
         </div>
 
-        <div style={bulkPanel}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <strong style={{ color: C.white, fontFamily: F.ui, fontSize: 11, minWidth: 120 }}>
-              範囲：{selected.size ? `${selected.size} Universe` : '未指定'}
-            </strong>
-            <button style={smallButton} onClick={() => setSelected(new Set(config.routes.map((_, i) => i)))}>全256</button>
-            <button style={smallButton} onClick={() => setSelected(new Set())}>解除</button>
-            <span style={{ color: C.hint, fontFamily: F.ui, fontSize: 10 }}>
-              一覧の左端の番号を押し、そのまま上下へドラッグ。Shift＋クリックでも範囲指定できます。
-            </span>
-          </div>
-          <div style={bulkRow}>
-            <span style={bulkLabel}>入力開始</span>
-            <NumberField compact value={bulkInput} min={1} max={32768} onChange={setBulkInput} style={{ width: 105 }} />
-            <button style={smallButton} onClick={() => applySelected((_route, order) => ({ inputUniverse: Math.min(32767, bulkInput - 1 + order) }))}>入力を連番</button>
-            <span style={bulkLabel}>送信方式</span>
-            <select style={selectStyle} value={bulkOutputMode} onChange={(e) => setBulkOutputMode(e.target.value as 'unicast' | 'broadcast')}>
-              <option value="unicast">ユニキャスト</option><option value="broadcast">ブロードキャスト</option>
-            </select>
-            <input value={bulkIp} placeholder={bulkOutputMode === 'broadcast' ? '例 2.0.0.255' : '例 2.0.0.101'} style={{ ...inputStyle, width: 145, minHeight: 30 }} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setBulkIp(e.target.value)} />
-            <button style={smallButton} onClick={() => applySelected(() => ({ outputMode: bulkOutputMode, targetIp: bulkIp }))}>方式・IPを反映</button>
-          </div>
-          <div style={bulkRow}>
-            <span style={bulkLabel}>出力開始</span>
-            <NumberField compact value={bulkOutput} min={1} max={32768} onChange={setBulkOutput} style={{ width: 105 }} />
-            <button style={smallButton} onClick={() => applySelected((_route, order) => ({ outputUniverse: Math.min(32767, bulkOutput - 1 + order) }))}>出力を連番</button>
-            <span style={bulkLabel}>マージ</span>
-            <select style={selectStyle} value={bulkMerge} onChange={(e) => setBulkMerge(e.target.value as 'none' | 'htp' | 'ltp')}>
-              <option value="none">なし</option><option value="htp">HTP</option><option value="ltp">LTP</option>
-            </select>
-            <button style={smallButton} onClick={() => applySelected(() => ({ mergeMode: bulkMerge }))}>マージを反映</button>
-            <span style={bulkLabel}>遅延</span>
-            <NumberField compact value={bulkDelay} min={0} max={30} onChange={setBulkDelay} style={{ width: 90 }} />
-            <button style={smallButton} onClick={() => applySelected(() => ({ delayFrames: bulkDelay }))}>遅延を反映</button>
-            <button style={smallButton} onClick={() => applySelected(() => ({ enabled: true }))}>使用ON</button>
-            <button style={smallButton} onClick={() => applySelected(() => ({ enabled: false }))}>使用OFF</button>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+          <button style={smallButton} onClick={addRoute}>＋ 行を追加</button>
+          <span style={{ color: selected.size > 1 ? C.accent : C.hint, fontFamily: F.ui, fontSize: 10 }}>
+            {selected.size > 1 ? `${selected.size}行を選択中 — どれか1行を変更すると全行へ反映` : '行のどこでも、最初をクリック→Shift＋最後をクリックでまとめて選べます。左端はドラッグもできます。'}
+          </span>
         </div>
 
         <div style={tableHeader}>
-          <span>範囲</span><span>使用</span><span>入力 U</span><span>方式</span><span>送信先 IP</span><span>出力 U</span><span>マージ</span><span>遅延</span><span>時間</span>
+          <span>行</span><span>使用</span><span>入力 U</span><span>連番数</span><span>方式</span><span>送信先 IP</span><span>出力 U</span><span>マージ</span><span>遅延</span><span>時間</span><span />
         </div>
-        <div style={{ maxHeight: 'calc(100vh - 470px)', overflowY: 'auto', border: `0.5px solid ${C.border}` }}>
+        <div style={{ maxHeight: 'calc(100vh - 350px)', overflowY: 'auto', border: `0.5px solid ${C.border}` }}>
           {config.routes.map((route, i) => {
             const invalid = route.enabled && !validTarget(route)
             const isSelected = selected.has(i)
             return (
-              <div key={i} style={{ ...tableRow, opacity: route.enabled || isSelected ? 1 : 0.58, background: isSelected ? 'rgba(123,197,232,0.09)' : 'transparent' }}>
+              <div
+                key={i}
+                style={{ ...tableRow, background: isSelected ? 'rgba(123,197,232,0.09)' : 'transparent' }}
+                onPointerDownCapture={(e) => {
+                  if (e.shiftKey) beginRange(i, true)
+                  else if (!selected.has(i)) { setSelected(new Set([i])); setRangeAnchor(i) }
+                }}
+                onPointerEnter={() => { if (dragging && rangeAnchor != null) selectRange(rangeAnchor, i) }}
+              >
                 <button
                   aria-label={`範囲 ${i + 1}`}
                   title="ここを押して上下へドラッグすると範囲指定"
@@ -270,6 +261,7 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
                   onClick={() => updateRoute(i, { enabled: !route.enabled })}
                 >{route.enabled ? 'ON' : 'OFF'}</button>
                 <NumberField compact value={route.inputUniverse + 1} min={1} max={32768} onChange={(v) => updateRoute(i, { inputUniverse: v - 1 })} />
+                <NumberField compact value={route.universeCount} min={1} max={Math.min(256, 32768 - route.inputUniverse, 32768 - route.outputUniverse)} onChange={(v) => updateRoute(i, { universeCount: v })} />
                 <select style={selectStyle} value={route.outputMode} onChange={(e) => updateRoute(i, { outputMode: e.target.value as 'unicast' | 'broadcast' })}>
                   <option value="unicast">UNI</option><option value="broadcast">BROAD</option>
                 </select>
@@ -288,6 +280,12 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
                 <span style={{ color: C.hint, fontFamily: F.mono, fontSize: 10, textAlign: 'right' }}>
                   {Math.round(route.delayFrames * 1000 / 30)} ms
                 </span>
+                <button
+                  style={{ ...smallButton, padding: '7px 8px' }}
+                  disabled={config.routes.length <= 1}
+                  title="この設定行を削除"
+                  onClick={() => removeRoute(i)}
+                >×</button>
               </div>
             )
           })}
@@ -320,7 +318,7 @@ const warning: React.CSSProperties = {
   color: C.amber, background: 'rgba(245,200,120,0.06)', border: '0.5px solid rgba(245,200,120,0.32)',
   borderRadius: 4, padding: '9px 11px', fontFamily: F.ui, fontSize: 11, lineHeight: 1.65, margin: '12px 0'
 }
-const gridColumns = '42px 48px 102px 80px minmax(140px,1fr) 102px 78px 92px 58px'
+const gridColumns = '36px 44px 82px 72px 68px minmax(120px,1fr) 82px 68px 72px 48px 32px'
 const tableHeader: React.CSSProperties = {
   display: 'grid', gridTemplateColumns: gridColumns, gap: 8, alignItems: 'center',
   color: C.label, fontFamily: F.ui, fontSize: 10, padding: '0 9px 5px'
@@ -328,16 +326,6 @@ const tableHeader: React.CSSProperties = {
 const tableRow: React.CSSProperties = {
   display: 'grid', gridTemplateColumns: gridColumns, gap: 8, alignItems: 'center',
   padding: '5px 8px', borderBottom: `0.5px solid ${C.borderFaint}`
-}
-const bulkPanel: React.CSSProperties = {
-  border: `0.5px solid ${C.border}`, background: C.surface2, borderRadius: 4,
-  padding: 9, marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 7
-}
-const bulkRow: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'
-}
-const bulkLabel: React.CSSProperties = {
-  color: C.label, fontFamily: F.ui, fontSize: 10, marginLeft: 4
 }
 const smallButton: React.CSSProperties = {
   ...buttonStyle({}), padding: '8px 9px', fontSize: 10

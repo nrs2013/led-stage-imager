@@ -9,6 +9,7 @@ export interface ArtNetRelayRoute {
   delayFrames: number
   outputMode: 'unicast' | 'broadcast'
   mergeMode: 'none' | 'htp' | 'ltp'
+  universeCount: number
 }
 
 export interface ArtNetRelayConfig {
@@ -21,21 +22,34 @@ const FRAME_MS = 1000 / 30
 
 export const defaultRelayConfig = (): ArtNetRelayConfig => ({
   enabled: false,
-  routes: Array.from({ length: 256 }, (_, universe) => ({
+  routes: Array.from({ length: 1 }, (_, universe) => ({
     enabled: false,
     inputUniverse: universe,
     targetIp: '',
     outputUniverse: universe,
     delayFrames: 0,
     outputMode: 'unicast',
-    mergeMode: 'none'
+    mergeMode: 'none',
+    universeCount: 1
   }))
 })
 
 export function normalizeRelayConfig(value: unknown): ArtNetRelayConfig {
   const raw = (value && typeof value === 'object' ? value : {}) as Partial<ArtNetRelayConfig>
-  const rows = Array.isArray(raw.routes) ? raw.routes.slice(0, 256) : []
-  const routes = Array.from({ length: 256 }, (_, i): ArtNetRelayRoute => {
+  const sourceRows = Array.isArray(raw.routes) ? raw.routes.slice(0, 256) : []
+  // v1.2.0/1.2.1 は未使用行も256個保存していた。実際に触った最後の行より後ろを
+  // 自動で畳み、新UIでは大量の空行を復活させない。
+  let lastUsed = -1
+  sourceRows.forEach((value, i) => {
+    const r = (value && typeof value === 'object' ? value : {}) as Partial<ArtNetRelayRoute>
+    if (r.enabled === true || (typeof r.targetIp === 'string' && r.targetIp.trim() !== '') ||
+      r.inputUniverse !== i || r.outputUniverse !== i || (r.delayFrames ?? 0) !== 0 ||
+      r.outputMode === 'broadcast' || r.mergeMode === 'htp' || r.mergeMode === 'ltp' ||
+      (r.universeCount ?? 1) !== 1) lastUsed = i
+  })
+  if (lastUsed < 0) lastUsed = 0
+  const rows = sourceRows.slice(0, Math.min(256, lastUsed + 1))
+  const routes = Array.from({ length: Math.max(1, rows.length) }, (_, i): ArtNetRelayRoute => {
     const r = (rows[i] && typeof rows[i] === 'object' ? rows[i] : {}) as Partial<ArtNetRelayRoute>
     return {
       enabled: r.enabled === true,
@@ -44,7 +58,12 @@ export function normalizeRelayConfig(value: unknown): ArtNetRelayConfig {
       outputUniverse: clampInt(r.outputUniverse, 0, 32767, i),
       delayFrames: clampInt(r.delayFrames, 0, 30, 0),
       outputMode: r.outputMode === 'broadcast' ? 'broadcast' : 'unicast',
-      mergeMode: r.mergeMode === 'htp' || r.mergeMode === 'ltp' ? r.mergeMode : 'none'
+      mergeMode: r.mergeMode === 'htp' || r.mergeMode === 'ltp' ? r.mergeMode : 'none',
+      universeCount: clampInt(r.universeCount, 1, Math.min(
+        256,
+        32768 - clampInt(r.inputUniverse, 0, 32767, i),
+        32768 - clampInt(r.outputUniverse, 0, 32767, i)
+      ), 1)
     }
   })
   return { enabled: raw.enabled === true, routes }
@@ -113,13 +132,14 @@ export class ArtNetRelay {
     if (packet.sourceIp && this.localIps.has(packet.sourceIp)) return
     this.rememberSource(packet)
     for (const route of this.config.routes) {
-      if (!route.enabled || route.inputUniverse !== packet.universe) continue
+      const universeOffset = packet.universe - route.inputUniverse
+      if (!route.enabled || universeOffset < 0 || universeOffset >= route.universeCount) continue
       const validTarget = route.outputMode === 'broadcast'
         ? isBroadcastIPv4(route.targetIp)
         : isUnicastIPv4(route.targetIp) && !this.localIps.has(route.targetIp)
       if (!validTarget) continue
       const merged = this.mergedPacket(packet, route.mergeMode)
-      const data = buildArtDmx(merged, route.outputUniverse)
+      const data = buildArtDmx(merged, Math.min(32767, route.outputUniverse + universeOffset))
       const send = (): void => {
         if (this.sendDatagram) this.sendDatagram(data, route.targetIp)
         else this.ensureSocket().send(data, PORT, route.targetIp, (error) => {
