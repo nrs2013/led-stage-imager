@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { pickImage } from '../io/image-pick'
 import { C, F, buttonStyle } from '../ui/tokens'
+import { NumberField } from '../ui/NumberField'
 import { outputLayerIndex } from '../output/page-switch'
 
 const smallBtn = { ...buttonStyle({}), padding: '6px 8px', fontSize: 10, minHeight: 24 }
@@ -19,12 +20,15 @@ export function LayersPanel(): React.JSX.Element {
   const renameLayer = useStore((s) => s.renameLayer)
   const pageSwitchManual = useStore((s) => s.pageSwitchManual)
   const setPageSwitchManual = useStore((s) => s.setPageSwitchManual)
+  const setPageSwitch = useStore((s) => s.setPageSwitch)
   const pageSwitch = useStore((s) => s.chart.settings.pageSwitch)
   useStore((s) => s.dmxRev) // DMX値が変わった時だけ「送出中」表示を更新
   const chart = useStore.getState().chart
   const pageIndex = outputLayerIndex(chart, useStore.getState().dmxByUniverse, pageSwitchManual)
   const pageSwitchOn = pageIndex != null
   const dmxSwitchOn = pageSwitch?.enabled === true
+  const switchUniverse = (pageSwitch?.universe ?? 0) + 1
+  const switchAddress = pageSwitch?.address ?? 1
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const cancelRename = useRef(false) // Esc=取り消し。blur(commit)を1回だけ握り潰す
@@ -70,6 +74,47 @@ export function LayersPanel(): React.JSX.Element {
         >
           ＋空ページ
         </button>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          marginBottom: 7,
+          padding: '6px',
+          border: `0.5px solid ${dmxSwitchOn ? C.accent : C.border}`,
+          borderRadius: 4,
+          background: dmxSwitchOn ? `rgba(${C.accentRGB},0.06)` : 'transparent'
+        }}
+      >
+        <span style={{ fontSize: 10, color: C.label, fontFamily: F.ui, whiteSpace: 'nowrap' }}>
+          DMX切替
+        </span>
+        <button
+          style={{ ...smallBtn, minWidth: 38, color: dmxSwitchOn ? C.white : C.hint }}
+          onClick={() => setPageSwitch({ enabled: !dmxSwitchOn })}
+          title="DMXの値でCHARTを切り替える機能をON／OFFします"
+        >
+          {dmxSwitchOn ? 'ON' : 'OFF'}
+        </button>
+        <span style={{ fontSize: 9, color: C.hint, fontFamily: F.ui }}>Universe</span>
+        <NumberField
+          value={switchUniverse}
+          min={1}
+          max={32768}
+          compact
+          style={{ width: 54, flex: '0 0 54px' }}
+          onChange={(universe) => setPageSwitch({ universe: universe - 1 })}
+        />
+        <span style={{ fontSize: 9, color: C.hint, fontFamily: F.ui }}>CH</span>
+        <NumberField
+          value={switchAddress}
+          min={1}
+          max={512}
+          compact
+          style={{ width: 54, flex: '0 0 54px' }}
+          onChange={(address) => setPageSwitch({ address })}
+        />
       </div>
       <div style={{ maxHeight: 168, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
