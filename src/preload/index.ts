@@ -106,6 +106,10 @@ const api = {
   getArtNetRelayConfig: (): Promise<unknown> => ipcRenderer.invoke('artnet-relay:get-config'),
   setArtNetRelayConfig: (config: unknown): Promise<unknown> =>
     ipcRenderer.invoke('artnet-relay:set-config', config),
+  exportArtNetRelayConfig: (config: unknown): Promise<string | null> =>
+    ipcRenderer.invoke('artnet-relay:export-config', config),
+  importArtNetRelayConfig: (): Promise<unknown | null> =>
+    ipcRenderer.invoke('artnet-relay:import-config'),
   getStatus: (): Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }> =>
     ipcRenderer.invoke('engine:status'),
   // renderer が検出した MIDI 入力ポート名をメインへ通知（ステータスバー表示用・Web MIDI 用の名残）

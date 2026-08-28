@@ -651,6 +651,34 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('artnet-relay:get-config', () => readRelayConfig())
   ipcMain.handle('artnet-relay:set-config', (_e, config: unknown) => writeRelayConfig(config))
+  ipcMain.handle('artnet-relay:export-config', async (_e, value: unknown) => {
+    const result = await dialog.showSaveDialog({
+      title: 'Art-Net出力設定を書き出す',
+      defaultPath: 'LED STAGE IMAGER Art-Net設定.ledartnet',
+      filters: [{ name: 'LED STAGE IMAGER Art-Net設定', extensions: ['ledartnet'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const bundle = { format: 'led-stage-imager-artnet', version: 1, config: normalizeRelayConfig(value) }
+    writeFileSync(result.filePath, JSON.stringify(bundle, null, 2), 'utf8')
+    return result.filePath
+  })
+  ipcMain.handle('artnet-relay:import-config', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Art-Net出力設定を読み込む',
+      properties: ['openFile'],
+      filters: [{ name: 'LED STAGE IMAGER Art-Net設定', extensions: ['ledartnet'] }]
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const bundle = JSON.parse(readFileSync(result.filePaths[0], 'utf8')) as {
+      format?: unknown
+      config?: unknown
+    }
+    if (bundle.format !== 'led-stage-imager-artnet' || !bundle.config || typeof bundle.config !== 'object') {
+      throw new Error('LED STAGE IMAGERのArt-Net設定ファイルではありません')
+    }
+    // 読み込むだけ。誤送出防止のため、この時点では保存も実出力への適用もしない。
+    return normalizeRelayConfig(bundle.config)
+  })
   ipcMain.handle('engine:status', () => {
     // Mac は Syphon→ブリッジ経路、Windows 等は直送(ndi-direct)から状態を取る。
     const ndi = process.platform === 'darwin' ? getNdiStatus() : getNdiDirectStatus()

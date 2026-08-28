@@ -21,6 +21,8 @@ interface RelayConfig {
 interface RelayApi {
   getArtNetRelayConfig?: () => Promise<unknown>
   setArtNetRelayConfig?: (config: unknown) => Promise<unknown>
+  exportArtNetRelayConfig?: (config: unknown) => Promise<string | null>
+  importArtNetRelayConfig?: () => Promise<unknown | null>
 }
 
 const defaultConfig = (): RelayConfig => ({
@@ -182,6 +184,28 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
     setRangeAnchor(null)
   }
 
+  const exportConfig = async (): Promise<void> => {
+    try {
+      const path = await relayApi()?.exportArtNetRelayConfig?.(config)
+      if (path) setMessage('Art-Net設定を書き出しました。')
+    } catch {
+      setMessage('Art-Net設定を書き出せませんでした。')
+    }
+  }
+
+  const importConfig = async (): Promise<void> => {
+    try {
+      const loaded = await relayApi()?.importArtNetRelayConfig?.()
+      if (!loaded) return
+      setConfig(normalize(loaded))
+      setSelected(new Set())
+      setRangeAnchor(null)
+      setMessage('設定を読み込みました。まだ出力には反映していません。右下の「保存して適用」で確定します。')
+    } catch {
+      setMessage('設定を読み込めませんでした。専用の .ledartnet ファイルを選んでください。')
+    }
+  }
+
   const save = async (): Promise<void> => {
     if (invalidRows.length) {
       setMessage(`送信先IPを確認してください（行 ${invalidRows.map((i) => i + 1).join(', ')}）`)
@@ -227,6 +251,8 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
           <button style={smallButton} onClick={addRoute}>＋ 行を追加</button>
+          <button style={smallButton} onClick={() => void exportConfig()}>設定を書き出す…</button>
+          <button style={smallButton} onClick={() => void importConfig()}>設定を読み込む…</button>
           <span style={{ color: selected.size > 1 ? C.accent : C.hint, fontFamily: F.ui, fontSize: 10 }}>
             {selected.size > 1 ? `${selected.size}行を選択中 — どれか1行を変更すると全行へ反映` : '行のどこでも、最初をクリック→Shift＋最後をクリックでまとめて選べます。左端はドラッグもできます。'}
           </span>
@@ -245,7 +271,7 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
                 style={{ ...tableRow, background: isSelected ? 'rgba(123,197,232,0.09)' : 'transparent' }}
                 onPointerDownCapture={(e) => {
                   if (e.shiftKey) beginRange(i, true)
-                  else if (!selected.has(i)) { setSelected(new Set([i])); setRangeAnchor(i) }
+                  else { setSelected(new Set([i])); setRangeAnchor(i) }
                 }}
                 onPointerEnter={() => { if (dragging && rangeAnchor != null) selectRange(rangeAnchor, i) }}
               >

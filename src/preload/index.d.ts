@@ -61,6 +61,10 @@ export interface DecorApi {
   getArtNetRelayConfig: () => Promise<unknown>
   /** Art-Netユニキャスト遅延出力を保存し、直ちに適用する。 */
   setArtNetRelayConfig: (config: unknown) => Promise<unknown>
+  /** Art-Net出力設定だけを専用ファイルへ書き出す。 */
+  exportArtNetRelayConfig: (config: unknown) => Promise<string | null>
+  /** 専用ファイルからArt-Net出力設定を読む（まだ実出力には適用しない）。 */
+  importArtNetRelayConfig: () => Promise<unknown | null>
   /** Engine status (Syphon client connected, etc). */
   getStatus: () => Promise<{ hasClients: boolean }>
   /** Save chart JSON via a native dialog; resolves to the path or null. */
