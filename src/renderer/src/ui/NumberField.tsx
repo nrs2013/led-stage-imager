@@ -13,7 +13,8 @@ export function NumberField({
   min,
   max,
   step = 1,
-  style
+  style,
+  compact = false
 }: {
   value: number
   onChange: (v: number) => void
@@ -21,6 +22,8 @@ export function NumberField({
   max?: number
   step?: number
   style?: React.CSSProperties
+  /** 上部ツールバー等の狭い1行へ収める。通常の入力欄の大きな当たり判定は変えない。 */
+  compact?: boolean
 }): React.JSX.Element {
   const ref = useRef<HTMLInputElement>(null)
   const valRef = useRef(value)
@@ -109,12 +112,12 @@ export function NumberField({
           flex: 1,
           minWidth: 0,
           width: 'auto',
-          minHeight: 44,
+          minHeight: compact ? 30 : 44,
           borderRadius: '4px 0 0 4px',
           cursor: 'text'
         }}
       />
-      <div style={{ display: 'flex', flexDirection: 'column', flex: '0 0 30px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', flex: compact ? '0 0 22px' : '0 0 30px' }}>
         <button
           type="button"
           aria-label="増やす"

@@ -553,17 +553,15 @@ export function EditorCanvas(): React.JSX.Element {
     }
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
-    // other songs' layers: hidden unless toggled visible, and then only as ghosts —
-    // the active layer is always full-strength and is the only editable one
-    const layerVisible = new Map(chart.layers.map((l) => [l.id, l.visible]))
+    // CHARTを切り替えた時は、そのCHARTの電飾だけを表示する。別CHARTを薄く重ねると
+    // 「今どちらを編集しているか」が判別しづらく、本番仕込みの誤操作につながる。
     const activeId = chart.activeLayerId
     const homeId = chart.layers[0]?.id // layerless shapes = first layer (v1 rule)
     chart.shapes.forEach((shape, i) => {
       const lid = shape.layerId ?? homeId
-      const ghost = lid !== activeId
-      if (ghost && !layerVisible.get(lid)) return
+      if (lid !== activeId) return
       if (!visibleByFilter(shape, paletteFilter)) return // 種別フィルタ（照明だけ/電飾だけ）
-      ctx.globalAlpha = ghost ? 0.22 : shape.locked ? 0.4 : 1
+      ctx.globalAlpha = shape.locked ? 0.4 : 1
       drawShapeInto(ctx, shape, shapeColor(i), shapeFill(i), boostRef.current)
       ctx.globalAlpha = 1
     })
@@ -769,6 +767,7 @@ export function EditorCanvas(): React.JSX.Element {
         if (dense && !isSel) return
         const sh = chart.shapes.find((x) => x.id === f.shapeId)
         if (!sh || !sh.points.length) return
+        if ((sh.layerId ?? chart.layers[0]?.id) !== chart.activeLayerId) return
         const p0 = sh.points[0]
         const sx = v.tx + p0.x * v.scale
         const sy = v.ty + p0.y * v.scale - 11

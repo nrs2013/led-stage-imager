@@ -185,13 +185,20 @@ export function Toolbar({
           </button>
         ))}
         <span
-          style={{ display: 'flex', alignItems: 'center', gap: 5, width: 132, flexShrink: 0 }}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, width: 150, flexShrink: 0 }}
           title="書く太さ（px）— 塗る・消しゴム・図形に効く。クリックで全選択して入力"
         >
           <span style={{ fontSize: 10, color: C.hint, fontFamily: F.ui, whiteSpace: 'nowrap' }}>
             太さ
           </span>
-          <NumberField value={penWidth} min={1} max={500} onChange={setPenWidth} />
+          <NumberField
+            value={penWidth}
+            min={1}
+            max={500}
+            onChange={setPenWidth}
+            compact
+            style={{ width: 88, flex: '0 0 88px' }}
+          />
           <span style={{ fontSize: 10, color: C.hint, fontFamily: F.ui }}>px</span>
         </span>
 

@@ -16,15 +16,15 @@ export function LayersPanel(): React.JSX.Element {
   const addLayer = useStore((s) => s.addLayer)
   const removeLayer = useStore((s) => s.removeLayer)
   const setActiveLayer = useStore((s) => s.setActiveLayer)
-  const setLayerVisible = useStore((s) => s.setLayerVisible)
   const renameLayer = useStore((s) => s.renameLayer)
   const pageSwitchManual = useStore((s) => s.pageSwitchManual)
   const setPageSwitchManual = useStore((s) => s.setPageSwitchManual)
-  useStore((s) => s.chart.settings.pageSwitch)
+  const pageSwitch = useStore((s) => s.chart.settings.pageSwitch)
   useStore((s) => s.dmxRev) // DMX値が変わった時だけ「送出中」表示を更新
   const chart = useStore.getState().chart
   const pageIndex = outputLayerIndex(chart, useStore.getState().dmxByUniverse, pageSwitchManual)
   const pageSwitchOn = pageIndex != null
+  const dmxSwitchOn = pageSwitch?.enabled === true
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const cancelRename = useRef(false) // Esc=取り消し。blur(commit)を1回だけ握り潰す
@@ -72,22 +72,23 @@ export function LayersPanel(): React.JSX.Element {
         </button>
       </div>
       <div style={{ maxHeight: 168, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {pageSwitchOn && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-            <span style={{ color: C.accent, fontSize: 10, fontFamily: F.mono, flex: 1 }}>
-              {pageSwitchManual == null ? 'DMX' : '手動'} {pageIndex} →{' '}
-              {layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}
-            </span>
-            <button
-              style={{ ...smallBtn, minWidth: 74 }}
-              disabled={pageSwitchManual == null}
-              onClick={() => setPageSwitchManual(null)}
-              title="手動選択を解除して、設定したDMXチャンネルの値に連動します"
-            >
-              DMXに戻す
-            </button>
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+          <span style={{ color: pageSwitchOn ? C.accent : C.hint, fontSize: 10, fontFamily: F.mono, flex: 1 }}>
+            {pageSwitchOn
+              ? `${pageSwitchManual == null ? 'DMX' : '手動'} ${pageIndex} → ${layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}`
+              : 'DMX切替 OFF — 全CHART送出'}
+          </span>
+          <button
+            style={{ ...smallBtn, minWidth: dmxSwitchOn ? 74 : 92 }}
+            disabled={pageSwitchManual == null}
+            onClick={() => setPageSwitchManual(null)}
+            title={dmxSwitchOn
+              ? '手動選択を解除して、設定したDMXチャンネルの値に連動します'
+              : '手動選択を解除して、従来どおり全CHARTを送出します'}
+          >
+            {dmxSwitchOn ? 'DMXに戻す' : '全体送出に戻す'}
+          </button>
+        </div>
         {layers.map((l, layerIndex) => {
           const active = l.id === activeLayerId
           const onAir = pageSwitchOn && layerIndex === pageIndex
@@ -168,47 +169,22 @@ export function LayersPanel(): React.JSX.Element {
                   送出中
                 </span>
               )}
-              {pageSwitchOn && (
-                <button
-                  style={{
-                    ...smallBtn,
-                    minWidth: 48,
-                    ...(pageSwitchManual === layerIndex
-                      ? { border: `0.5px solid ${C.accent}`, color: C.white }
-                      : {})
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setPageSwitchManual(layerIndex)
-                  }}
-                  title={`${l.name}を手動でSyphon / NDIへ送出します`}
-                >
-                  手動
-                </button>
-              )}
               <button
                 style={{
                   ...smallBtn,
-                  padding: '6px 8px',
-                  fontSize: 9,
-                  minHeight: 24,
-                  minWidth: 40,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  lineHeight: 1,
-                  ...(l.visible
-                    ? { background: 'transparent', border: `0.5px solid ${C.border}`, color: C.label }
-                    : { background: 'transparent', border: `0.5px solid ${C.borderFaint}`, color: C.faint })
+                  minWidth: 48,
+                  ...(pageSwitchManual === layerIndex
+                    ? { border: `0.5px solid ${C.accent}`, color: C.white }
+                    : {})
                 }}
-                title={active ? '編集中のページは常に表示' : '他ページをうっすら重ねて表示/隠す'}
-                disabled={active}
                 onClick={(e) => {
                   e.stopPropagation()
-                  setLayerVisible(l.id, !l.visible)
+                  setActiveLayer(l.id)
+                  setPageSwitchManual(layerIndex)
                 }}
+                title={`${l.name}へ完全に切り替え、Syphon / NDIへ手動送出します`}
               >
-                {l.visible ? '表示' : '非表示'}
+                切替
               </button>
               <button
                 style={{

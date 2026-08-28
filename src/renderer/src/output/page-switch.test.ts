@@ -56,4 +56,11 @@ describe('DMXチャート切り替え', () => {
     expect(outputLayerIndex(chart, { 0: new Uint8Array(512) }, 1)).toBe(1)
     expect(outputShapes(chart, {}, 1)[0].layerId).toBe(chart.layers[1].id)
   })
+
+  it('DMX切替がOFFでも表の切替ボタンによる手動選択は効く', () => {
+    const chart = chartWithPages()
+    chart.settings.pageSwitch = { enabled: false, universe: 0, address: 1 }
+    expect(outputLayerIndex(chart, {}, 1)).toBe(1)
+    expect(outputShapes(chart, {}, 1)[0].layerId).toBe(chart.layers[1].id)
+  })
 })
