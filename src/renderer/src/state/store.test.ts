@@ -302,6 +302,23 @@ describe('layers (song pages)', () => {
     })).toHaveLength(0)
   })
 
+  it('addLayer finds the previous chart image when an old empty page is active', () => {
+    const base = useStore.getState().chart
+    useStore.setState({
+      chart: {
+        ...base,
+        layers: base.layers.map((layer) => ({
+          ...layer,
+          underlay: { dataUrl: 'chart-one', opacity: 0.5, visible: true }
+        }))
+      }
+    })
+    useStore.getState().addLayer({ underlay: null }) // 旧版で作られた画像なしCHART 2を再現
+    const third = useStore.getState().addLayer()
+    const layer = useStore.getState().chart.layers.find((item) => item.id === third)!
+    expect(layer.underlay?.dataUrl).toBe('chart-one')
+  })
+
   it('removeLayer deletes its shapes and fixtures, keeps the rest', () => {
     const baseLayer = useStore.getState().chart.activeLayerId
     const id = useStore.getState().addLayer({ name: 'SONG 2' })

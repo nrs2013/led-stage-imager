@@ -821,13 +821,19 @@ export const useStore = create<AppState>()((set, get) => ({
     get().beginHistory()
     set((s) => ({
       chart: (() => {
-        const current = s.chart.layers.find((layer) => layer.id === s.chart.activeLayerId)
+        const currentIndex = s.chart.layers.findIndex((layer) => layer.id === s.chart.activeLayerId)
+        const current = s.chart.layers[currentIndex] ?? s.chart.layers[0]
         // 通常の「＋空ページ」はチャート画像だけを引き継ぐ。電飾と番地はレイヤーに
-        // 追加しないので空のまま。＋画像のように underlay が明示された時はそちらを使う。
-        const inherited = current?.underlay
+        // 追加しないので空のまま。旧版で作った空ページから追加する場合は、手前にある
+        // 一番近いチャート画像まで遡る。＋画像のように明示された時はそちらを使う。
+        const sourceUnderlay = current?.underlay ?? s.chart.layers
+          .slice(0, Math.max(0, currentIndex))
+          .reverse()
+          .find((layer) => layer.underlay)?.underlay ?? null
+        const inherited = sourceUnderlay
           ? {
-              ...current.underlay,
-              mask: current.underlay.mask ? { ...current.underlay.mask } : undefined
+              ...sourceUnderlay,
+              mask: sourceUnderlay.mask ? { ...sourceUnderlay.mask } : undefined
             }
           : null
         const underlay = init && Object.prototype.hasOwnProperty.call(init, 'underlay')
