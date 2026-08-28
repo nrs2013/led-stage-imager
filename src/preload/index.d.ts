@@ -57,6 +57,10 @@ export interface DecorApi {
   listInterfaces: () => Promise<{ name: string; address: string }[]>
   /** Re-bind the Art-Net receiver to a NIC address. */
   setBind: (ip: string) => Promise<boolean>
+  /** Art-Netユニキャスト遅延出力の、Mac本体に保存した設定。 */
+  getArtNetRelayConfig: () => Promise<unknown>
+  /** Art-Netユニキャスト遅延出力を保存し、直ちに適用する。 */
+  setArtNetRelayConfig: (config: unknown) => Promise<unknown>
   /** Engine status (Syphon client connected, etc). */
   getStatus: () => Promise<{ hasClients: boolean }>
   /** Save chart JSON via a native dialog; resolves to the path or null. */

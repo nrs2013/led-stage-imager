@@ -15,6 +15,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { ArtNetReceiver } from './artnet/artnet-receiver'
 import type { ArtDmxPacket } from './artnet/artdmx-parser'
+import { ArtNetRelay, defaultRelayConfig, normalizeRelayConfig } from './artnet/artnet-relay'
 import { OutputPublisher } from './output/syphon-publisher'
 import { startNdiBridge, stopNdiBridge, restartNdiBridge, getNdiStatus } from './output/ndi-bridge'
 import {
@@ -40,6 +41,7 @@ import {
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
 const receiver = new ArtNetReceiver()
+const artnetRelay = new ArtNetRelay()
 const publisher = new OutputPublisher()
 let mainWindow: BrowserWindow | null = null
 let previewWindow: BrowserWindow | null = null
@@ -55,6 +57,28 @@ let lastArtnetStatus: { ok: boolean; detail: string } | null = null // 受信機
 const SHOW_ENTRY_FILE = 'LED STAGE IMAGERで開く.ledshow'
 const LEDSHOW_EXT = '.ledshow'
 const isLedShowPath = (p: string): boolean => p.toLowerCase().endsWith(LEDSHOW_EXT)
+const relayConfigPath = (): string => join(app.getPath('userData'), 'artnet-relay.json')
+const localIPv4s = (): string[] => Object.values(networkInterfaces())
+  .flatMap((addrs) => addrs ?? [])
+  .filter((a) => a.family === 'IPv4')
+  .map((a) => a.address)
+const readRelayConfig = (): ReturnType<typeof defaultRelayConfig> => {
+  try {
+    return normalizeRelayConfig(JSON.parse(readFileSync(relayConfigPath(), 'utf8')))
+  } catch {
+    return defaultRelayConfig()
+  }
+}
+const writeRelayConfig = (value: unknown): ReturnType<typeof defaultRelayConfig> => {
+  const config = normalizeRelayConfig(value)
+  const p = relayConfigPath()
+  const tmp = `${p}.tmp`
+  writeFileSync(tmp, JSON.stringify(config, null, 2), 'utf8')
+  renameSync(tmp, p)
+  // 保存が成功した後だけ本番出力へ反映する。ディスクエラー時に画面表示と実出力が
+  // 食い違わないための順序。
+  return artnetRelay.setConfig(config, localIPv4s())
+}
 const showPackageEntryPath = (dir: string): string => join(dir, SHOW_ENTRY_FILE)
 const showTargetForOpenedFile = (p: string): string => {
   // 公演フォルダ内の入口ファイルを開いた時は、次の Cmd+S で入口ファイルだけでなく
@@ -141,6 +165,7 @@ function startEngine(): void {
   receiver.on('dmx', (pkt: ArtDmxPacket) => {
     const msg = { universe: pkt.universe, sequence: pkt.sequence, data: pkt.data }
     broadcast('artnet:dmx', msg)
+    artnetRelay.handle(pkt)
   })
   // CoreMIDI 直読みの MIDI 入力（Web MIDI が効かないため）。受信を renderer(engine) へ転送。
   startMidiInput((s, d1, d2) => {
@@ -166,6 +191,7 @@ function startEngine(): void {
 function stopEngine(): void {
   stopGpuOutput() // publisher より先に（破棄後の publish を出さない）
   receiver.stop()
+  artnetRelay.stop()
   publisher.stop()
   stopNdiBridge()
   stopNdiDirect()
@@ -623,6 +649,8 @@ app.whenReady().then(() => {
     // 送り方が全滅する）。選択は「その回線の送り主だけ受ける絞り込み」として効かせる。
     return receiver.setSourceFilter(ip || '0.0.0.0')
   })
+  ipcMain.handle('artnet-relay:get-config', () => readRelayConfig())
+  ipcMain.handle('artnet-relay:set-config', (_e, config: unknown) => writeRelayConfig(config))
   ipcMain.handle('engine:status', () => {
     // Mac は Syphon→ブリッジ経路、Windows 等は直送(ndi-direct)から状態を取る。
     const ndi = process.platform === 'darwin' ? getNdiStatus() : getNdiDirectStatus()
@@ -1074,6 +1102,7 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  artnetRelay.setConfig(readRelayConfig(), localIPv4s())
   startEngine()
   startGpu()
 

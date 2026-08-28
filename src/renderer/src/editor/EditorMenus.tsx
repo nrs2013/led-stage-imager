@@ -6,6 +6,7 @@ import { pickImage, imageSize } from '../io/image-pick'
 import { exportPatchCsv, exportPatchMvr } from '../io/patch-export'
 import { SettingsDialog } from '../ui/SettingsDialog'
 import { FillDialog } from '../ui/FillDialog'
+import { ArtNetRelayDialog } from '../ui/ArtNetRelayDialog'
 import { MenuButton, MenuItem, MenuSep, MenuLabel } from '../ui/MenuButton'
 import { C, F } from '../ui/tokens'
 
@@ -30,6 +31,7 @@ export function EditorMenus(): React.JSX.Element {
   const setShowDims = useStore((s) => s.setShowDims)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fillOpen, setFillOpen] = useState(false)
+  const [relayOpen, setRelayOpen] = useState(false)
   const [savedFlash, setSavedFlash] = useState<string | null>(null)
   const [newFlash, setNewFlash] = useState(false)
   // 今どのファイルを触っているか＋保存済みかは store に置く（モードを往復しても消えない・
@@ -167,6 +169,11 @@ export function EditorMenus(): React.JSX.Element {
               onClick={() => { close(); exportPatchCsv(useStore.getState().chart) }}
             />
             <MenuSep />
+            <MenuItem
+              label="Art-Net遅延出力…"
+              title="GrandMA3から受けたArt-Netを、Universeごとに遅らせてDMXノードへ送ります"
+              onClick={() => { close(); setRelayOpen(true) }}
+            />
             <MenuItem label="設定" title="キャンバスの大きさ・出力名・にじみなど" onClick={() => { close(); setSettingsOpen(true) }} />
           </>
         )}
@@ -277,6 +284,7 @@ export function EditorMenus(): React.JSX.Element {
 
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {fillOpen && <FillDialog onClose={() => setFillOpen(false)} />}
+      {relayOpen && <ArtNetRelayDialog onClose={() => setRelayOpen(false)} />}
     </>
   )
 }
