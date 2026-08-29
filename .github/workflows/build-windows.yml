@@ -2,9 +2,9 @@ name: Windows版を作成
 
 on:
   workflow_dispatch:
-  push:
+  pull_request:
     branches:
-      - codex/windows-build-v1.3.4
+      - main
 
 permissions:
   contents: read
