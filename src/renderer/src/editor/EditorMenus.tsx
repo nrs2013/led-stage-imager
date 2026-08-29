@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useStore, activeLayerOf } from '../state/store'
 import { createChart, newId } from '../model/chart-model'
-import { saveChartToFile, saveChartAsToFile, openChartFromFile, markNewChart } from '../io/file-ops'
+import { saveChartToFile, saveChartAsToFile, openChartFromFile, markNewChart, currentChartFileName } from '../io/file-ops'
 import { pickImage, imageSize } from '../io/image-pick'
 import { exportPatchCsv, exportPatchMvr } from '../io/patch-export'
 import { SettingsDialog } from '../ui/SettingsDialog'
 import { FillDialog } from '../ui/FillDialog'
+import { ArtNetRelayDialog } from '../ui/ArtNetRelayDialog'
 import { MenuButton, MenuItem, MenuSep, MenuLabel } from '../ui/MenuButton'
 import { C, F } from '../ui/tokens'
+
+const fileBaseName = (path: string): string => path.split(/[\\/]/).pop() || path
 
 /** 上のバーの「ファイル」「チャート」＝以前は2段目に20個近く並んでいたボタンを、
  *  使う場面ごとに2つのまとめボタンへ畳んだもの（のむさん 2026-07-25）。
@@ -17,6 +20,7 @@ export function EditorMenus(): React.JSX.Element {
   // 電飾を1px動かすたびに上のバー全体（道具ボタン・太さ欄・図形メニュー）が作り直されて
   // 操作がもたつく。表示に要る所だけを細かく購読する（値は操作時に getState() で読む）。
   const setChart = useStore((s) => s.setChart)
+  const setTool = useStore((s) => s.setTool)
   const setUnderlay = useStore((s) => s.setUnderlay)
   const setUnderlayOpacity = useStore((s) => s.setUnderlayOpacity)
   const setUnderlayVisible = useStore((s) => s.setUnderlayVisible)
@@ -27,14 +31,15 @@ export function EditorMenus(): React.JSX.Element {
   const setShowDims = useStore((s) => s.setShowDims)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fillOpen, setFillOpen] = useState(false)
+  const [relayOpen, setRelayOpen] = useState(false)
   const [savedFlash, setSavedFlash] = useState<string | null>(null)
   const [newFlash, setNewFlash] = useState(false)
   // 今どのファイルを触っているか＋保存済みかは store に置く（モードを往復しても消えない・
    // StartScreen やダブルクリックで開いた時も同じ表示になる）
   const fileName = useStore((s) => s.chartFileName)
+  const chartName = useStore((s) => s.chart.name)
   const markChartFile = useStore((s) => s.markChartFile)
-  // 真偽値だけを購読＝未保存の状態が変わった時しか作り直されない
-  const dirty = useStore((s) => s.savedChart !== s.chart)
+  const shownFileName = fileName ? fileBaseName(fileName) : `${chartName || 'chart'}.ledimager`
   // 下絵は「差し替えた時」だけ参照が変わる＝図形を動かしても作り直されない
   const u = useStore((s) => activeLayerOf(s.chart).underlay)
 
@@ -83,6 +88,7 @@ export function EditorMenus(): React.JSX.Element {
     }
     markNewChart() // 新規＝ファイル未確定。次の保存で保存先を聞く
     setChart(createChart({ w: 1920, h: 1080 }))
+    setTool('select')
     // 編集画面のまま空チャートにする。StartScreen へ戻すと SHOW MODE 再選択で
     // 「前回の続き(自動バックアップ)」が復活し、新規にならない不具合になるため戻さない。
     setSavedFlash(null)
@@ -102,7 +108,8 @@ export function EditorMenus(): React.JSX.Element {
       const c = await openChartFromFile()
       if (c) {
         setChart(c)
-        markChartFile(c.name || '名前なし', c)
+        setTool('select')
+        markChartFile((await currentChartFileName()) ?? (c.name || '名前なし'), c)
       }
     } catch (err) {
       // eslint-disable-next-line no-alert
@@ -132,13 +139,13 @@ export function EditorMenus(): React.JSX.Element {
             <MenuItem label="新規" onClick={() => { close(); newChart() }} />
             <MenuItem label="開く" onClick={() => { close(); void openChart() }} />
             <MenuItem
-              label="保存"
+              label={`「${shownFileName}」で保存`}
               hint="⌘S"
               title="今のファイルに上書き保存（初回だけ保存先を聞きます）"
               onClick={() => { close(); void saveChart() }}
             />
             <MenuItem
-              label="別名で保存"
+              label="別名で保存…"
               hint="⇧⌘S"
               title="新しいファイルとして保存し、以降はそちらに上書きします"
               onClick={() => { close(); void saveChartAs() }}
@@ -160,6 +167,11 @@ export function EditorMenus(): React.JSX.Element {
               onClick={() => { close(); exportPatchCsv(useStore.getState().chart) }}
             />
             <MenuSep />
+            <MenuItem
+              label="Art-Net遅延出力…"
+              title="GrandMA3から受けたArt-Netを、Universeごとに遅らせてDMXノードへ送ります"
+              onClick={() => { close(); setRelayOpen(true) }}
+            />
             <MenuItem label="設定" title="キャンバスの大きさ・出力名・にじみなど" onClick={() => { close(); setSettingsOpen(true) }} />
           </>
         )}
@@ -232,26 +244,6 @@ export function EditorMenus(): React.JSX.Element {
         )}
       </MenuButton>
 
-      <span
-        style={{
-          fontSize: 11,
-          color: dirty ? C.amber : C.label,
-          fontFamily: F.mono,
-          whiteSpace: 'nowrap',
-          maxWidth: 220,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis'
-        }}
-        title={
-          fileName
-            ? dirty
-              ? `${fileName} — 保存していない変更があります（⌘S で保存）`
-              : `${fileName} — 保存済み`
-            : 'まだファイルにしていません（⌘S で保存先を聞きます）'
-        }
-      >
-        {fileName ? `${dirty ? '● ' : ''}${fileName}` : '● 未保存'}
-      </span>
       {savedFlash && (
         <span style={{ fontSize: 11, color: C.green, fontFamily: F.mono, whiteSpace: 'nowrap' }}>
           保存しました
@@ -270,6 +262,7 @@ export function EditorMenus(): React.JSX.Element {
 
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {fillOpen && <FillDialog onClose={() => setFillOpen(false)} />}
+      {relayOpen && <ArtNetRelayDialog onClose={() => setRelayOpen(false)} />}
     </>
   )
 }

@@ -15,6 +15,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { ArtNetReceiver } from './artnet/artnet-receiver'
 import type { ArtDmxPacket } from './artnet/artdmx-parser'
+import { ArtNetRelay, defaultRelayConfig, normalizeRelayConfig } from './artnet/artnet-relay'
 import { OutputPublisher } from './output/syphon-publisher'
 import { startNdiBridge, stopNdiBridge, restartNdiBridge, getNdiStatus } from './output/ndi-bridge'
 import {
@@ -46,6 +47,7 @@ if (IS_TEST_BUILD) app.setPath('userData', join(app.getPath('appData'), 'LED STA
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
 const receiver = new ArtNetReceiver()
+const artnetRelay = new ArtNetRelay()
 const publisher = new OutputPublisher()
 let mainWindow: BrowserWindow | null = null
 let previewWindow: BrowserWindow | null = null
@@ -61,6 +63,28 @@ let lastArtnetStatus: { ok: boolean; detail: string } | null = null // 受信機
 const SHOW_ENTRY_FILE = 'LED STAGE IMAGERで開く.ledshow'
 const LEDSHOW_EXT = '.ledshow'
 const isLedShowPath = (p: string): boolean => p.toLowerCase().endsWith(LEDSHOW_EXT)
+const relayConfigPath = (): string => join(app.getPath('userData'), 'artnet-relay.json')
+const localIPv4s = (): string[] => Object.values(networkInterfaces())
+  .flatMap((addrs) => addrs ?? [])
+  .filter((a) => a.family === 'IPv4')
+  .map((a) => a.address)
+const readRelayConfig = (): ReturnType<typeof defaultRelayConfig> => {
+  try {
+    return normalizeRelayConfig(JSON.parse(readFileSync(relayConfigPath(), 'utf8')))
+  } catch {
+    return defaultRelayConfig()
+  }
+}
+const writeRelayConfig = (value: unknown): ReturnType<typeof defaultRelayConfig> => {
+  const config = normalizeRelayConfig(value)
+  const p = relayConfigPath()
+  const tmp = `${p}.tmp`
+  writeFileSync(tmp, JSON.stringify(config, null, 2), 'utf8')
+  renameSync(tmp, p)
+  // 保存が成功した後だけ本番出力へ反映する。ディスクエラー時に画面表示と実出力が
+  // 食い違わないための順序。
+  return artnetRelay.setConfig(config, localIPv4s())
+}
 const showPackageEntryPath = (dir: string): string => join(dir, SHOW_ENTRY_FILE)
 const showTargetForOpenedFile = (p: string): string => {
   // 公演フォルダ内の入口ファイルを開いた時は、次の Cmd+S で入口ファイルだけでなく
@@ -147,6 +171,7 @@ function startEngine(): void {
   receiver.on('dmx', (pkt: ArtDmxPacket) => {
     const msg = { universe: pkt.universe, sequence: pkt.sequence, data: pkt.data }
     broadcast('artnet:dmx', msg)
+    artnetRelay.handle(pkt)
   })
   // CoreMIDI 直読みの MIDI 入力（Web MIDI が効かないため）。受信を renderer(engine) へ転送。
   startMidiInput((s, d1, d2) => {
@@ -172,6 +197,7 @@ function startEngine(): void {
 function stopEngine(): void {
   stopGpuOutput() // publisher より先に（破棄後の publish を出さない）
   receiver.stop()
+  artnetRelay.stop()
   publisher.stop()
   stopNdiBridge()
   stopNdiDirect()
@@ -321,7 +347,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 }
 
-/** 閉じる/終了の前に「保存されていない変更」を確認する（画像照明モードのみ対象）。
+/** 閉じる/終了の前に「保存されていない変更」を確認する（DECO・画像照明の両モード）。
  *  renderer の window.__ilDirty / __ilSaveForClose を呼んで判断。1.5秒応答が無い時は
  *  安全側＝「未保存あり」とみなして確認ダイアログを出す（黙って閉じてデータを落とさない）。 */
 let confirmRunning = false
@@ -361,7 +387,7 @@ async function confirmAndClose(kind: 'quit' | 'window'): Promise<void> {
           cancelId: 2,
           message: '保存されていない変更があります',
           detail:
-            '公演ファイル(.ledshow)に保存してから閉じますか？\n（保存しなくても自動バックアップは残っています）'
+            'ファイル（.ledimager / .ledshow）に保存してから閉じますか？\n（保存しなくても自動バックアップは残っています）'
         })
       ).response
     } catch {
@@ -395,6 +421,7 @@ async function confirmAndClose(kind: 'quit' | 'window'): Promise<void> {
 function createWindow(): void {
   closeConfirmed = false // ウィンドウを作り直したら確認もやり直し（Dockから再表示など）
   mainWindow = new BrowserWindow({
+    title: 'Untitled.ledimager（未保存）',
     width: 1280,
     height: 820,
     show: false,
@@ -629,6 +656,41 @@ app.whenReady().then(() => {
     // 送り方が全滅する）。選択は「その回線の送り主だけ受ける絞り込み」として効かせる。
     return receiver.setSourceFilter(ip || '0.0.0.0')
   })
+  ipcMain.handle('artnet-relay:get-config', () => readRelayConfig())
+  ipcMain.handle('artnet-relay:set-config', (_e, config: unknown) => writeRelayConfig(config))
+  ipcMain.handle('artnet-relay:export-config', async (_e, value: unknown) => {
+    const result = await dialog.showSaveDialog({
+      title: 'Art-Net出力設定を書き出す',
+      defaultPath: 'LED STAGE IMAGER Art-Net設定.ledartnet',
+      filters: [{ name: 'LED STAGE IMAGER Art-Net設定', extensions: ['ledartnet'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const bundle = { format: 'led-stage-imager-artnet', version: 1, config: normalizeRelayConfig(value) }
+    writeFileSync(result.filePath, JSON.stringify(bundle, null, 2), 'utf8')
+    return result.filePath
+  })
+  ipcMain.handle('artnet-relay:import-config', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Art-Net出力設定を読み込む',
+      properties: ['openFile'],
+      filters: [{ name: 'LED STAGE IMAGER Art-Net設定', extensions: ['ledartnet'] }]
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const bundle = JSON.parse(readFileSync(result.filePaths[0], 'utf8')) as {
+      format?: unknown
+      config?: unknown
+    }
+    if (bundle.format !== 'led-stage-imager-artnet' || !bundle.config || typeof bundle.config !== 'object') {
+      throw new Error('LED STAGE IMAGERのArt-Net設定ファイルではありません')
+    }
+    // 読み込むだけ。誤送出防止のため、この時点では保存も実出力への適用もしない。
+    return normalizeRelayConfig(bundle.config)
+  })
+  ipcMain.on('window:set-title', (event, title: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return
+    const text = typeof title === 'string' ? title.trim().slice(0, 240) : ''
+    mainWindow.setTitle(text || 'Untitled.ledimager（未保存）')
+  })
   ipcMain.handle('engine:status', () => {
     // Mac は Syphon→ブリッジ経路、Windows 等は直送(ndi-direct)から状態を取る。
     const ndi = process.platform === 'darwin' ? getNdiStatus() : getNdiDirectStatus()
@@ -697,6 +759,9 @@ app.whenReady().then(() => {
     currentChartPath = null
     return true
   })
+  ipcMain.handle('chart:current-file-name', () =>
+    currentChartPath ? basename(currentChartPath) : null
+  )
 
   // 画像照明モード「公演まるごと保存/開く」: 1フォルダに show.json ＋ media/（写真・動画）。
   const mimeFromExt = (file: string): string => {
@@ -892,7 +957,13 @@ app.whenReady().then(() => {
       // 直書きだと書き込み中にクラッシュ＝唯一のクラッシュ復元ファイルが壊れて復元不能になる。
       const p = autosavePath()
       const tmp = p + '.tmp'
-      writeFileSync(tmp, json, 'utf8')
+      // チャート本体と「実際に開けた/保存できたファイル」を同じ瞬間の組として記録する。
+      // 別々に記録すると、古い自動バックアップを別ファイルへ上書きする事故になる。
+      writeFileSync(
+        tmp,
+        JSON.stringify({ kind: 'decor-autosave-v2', chartJson: json, chartPath: currentChartPath }),
+        'utf8'
+      )
       renameSync(tmp, p)
       return true
     } catch {
@@ -901,7 +972,25 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('chart:autosave-read', () => {
     try {
-      return readFileSync(autosavePath(), 'utf8')
+      const raw = readFileSync(autosavePath(), 'utf8')
+      try {
+        const saved = JSON.parse(raw) as {
+          kind?: string
+          chartJson?: string
+          chartPath?: string | null
+        }
+        if (saved.kind === 'decor-autosave-v2' && typeof saved.chartJson === 'string') {
+          currentChartPath =
+            typeof saved.chartPath === 'string' && existsSync(saved.chartPath)
+              ? saved.chartPath
+              : null
+          return saved.chartJson
+        }
+      } catch {
+        /* 旧形式はチャートJSONそのもの。下でそのまま返す。 */
+      }
+      currentChartPath = null
+      return raw
     } catch {
       return null
     }
@@ -1053,6 +1142,7 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  artnetRelay.setConfig(readRelayConfig(), localIPv4s())
   startEngine()
   startGpu()
 

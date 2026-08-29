@@ -98,8 +98,15 @@ interface PreviewApi {
   togglePreview?: () => Promise<boolean>
   onPreviewActive?: (cb: (active: boolean) => void) => (() => void) | void
 }
+interface WindowInfoApi {
+  getStatus?: () => Promise<{ platform?: string }>
+  setWindowTitle?: (title: string) => void
+}
 const previewApi = (): PreviewApi | undefined =>
   (window as unknown as { api?: PreviewApi }).api
+const windowInfoApi = (): WindowInfoApi | undefined =>
+  (window as unknown as { api?: WindowInfoApi }).api
+const fileBaseName = (path: string): string => path.split(/[\\/]/).pop() || path
 
 export function Toolbar({
   testOpen = false,
@@ -115,15 +122,38 @@ export function Toolbar({
   const setPenWidth = useStore((s) => s.setPenWidth)
   const stepPatch = useStore((s) => s.stepPatch)
   const setStepPatch = useStore((s) => s.setStepPatch)
+  const chartFileName = useStore((s) => s.chartFileName)
+  const chartName = useStore((s) => s.chart.name)
+  const dirty = useStore((s) => s.savedChart !== s.chart)
   const editing = mode === 'edit'
   const shapeTool = SHAPE_TOOLS.find((t) => t.id === tool) // 図形を選んでいる時はボタンに出す
 
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [platformLabel, setPlatformLabel] = useState(
+    navigator.userAgent.includes('Windows') ? 'Windows版' : 'Mac版'
+  )
   const hasPreview = !!previewApi()?.togglePreview
   useEffect(() => {
     const off = previewApi()?.onPreviewActive?.(setPreviewOpen)
     return () => off?.()
   }, [])
+
+  useEffect(() => {
+    void windowInfoApi()?.getStatus?.().then((status) => {
+      if (status.platform === 'win32') setPlatformLabel('Windows版')
+      else if (status.platform === 'darwin') setPlatformLabel('Mac版')
+      else if (status.platform) setPlatformLabel(`${status.platform}版`)
+    }).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    const base = chartFileName
+      ? fileBaseName(chartFileName)
+      : `${chartName || 'Untitled'}.ledimager（未保存）`
+    const title = chartFileName && dirty ? `${base} — 未保存` : base
+    document.title = title
+    windowInfoApi()?.setWindowTitle?.(title)
+  }, [chartFileName, chartName, dirty])
 
   return (
     <header
@@ -139,16 +169,22 @@ export function Toolbar({
         flexShrink: 0
       }}
     >
-      <div
-        style={{
-          fontFamily: F.serif,
-          fontSize: 23,
-          fontWeight: 400,
-          letterSpacing: '0.16em',
-          color: C.white
-        }}
-      >
-        LED&nbsp;STAGE&nbsp;<span style={{ color: C.accent }}>IMAGER</span>
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', flexShrink: 0 }}>
+        <div
+          style={{
+            fontFamily: F.serif,
+            fontSize: 21,
+            fontWeight: 400,
+            letterSpacing: '0.13em',
+            color: C.white,
+            lineHeight: 1
+          }}
+        >
+          LED&nbsp;STAGE&nbsp;<span style={{ color: C.accent }}>IMAGER</span>
+        </div>
+        <div style={{ color: C.hint, fontFamily: F.mono, fontSize: 9, letterSpacing: '0.08em', marginTop: 4 }}>
+          Version 1.3.3&nbsp;·&nbsp;{platformLabel}
+        </div>
       </div>
 
       <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
@@ -185,13 +221,20 @@ export function Toolbar({
           </button>
         ))}
         <span
-          style={{ display: 'flex', alignItems: 'center', gap: 5, width: 132, flexShrink: 0 }}
-          title="書く太さ（px）— 塗る・消しゴム・図形に効く。左右ドラッグで増減・クリックで入力"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, width: 150, flexShrink: 0 }}
+          title="書く太さ（px）— 塗る・消しゴム・図形に効く。クリックで全選択して入力"
         >
           <span style={{ fontSize: 10, color: C.hint, fontFamily: F.ui, whiteSpace: 'nowrap' }}>
             太さ
           </span>
-          <NumberField value={penWidth} min={1} max={500} onChange={setPenWidth} />
+          <NumberField
+            value={penWidth}
+            min={1}
+            max={500}
+            onChange={setPenWidth}
+            compact
+            style={{ width: 88, flex: '0 0 88px' }}
+          />
           <span style={{ fontSize: 10, color: C.hint, fontFamily: F.ui }}>px</span>
         </span>
 

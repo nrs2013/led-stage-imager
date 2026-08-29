@@ -156,6 +156,7 @@ export function Inspector(): React.JSX.Element {
   const updateShape = useStore((s) => s.updateShape)
   const upsertFixture = useStore((s) => s.upsertFixture)
   const bulkPatch = useStore((s) => s.bulkPatch)
+  const bulkUpdateShapes = useStore((s) => s.bulkUpdateShapes)
   const removeShape = useStore((s) => s.removeShape)
   const removeShapes = useStore((s) => s.removeShapes)
   const setLocked = useStore((s) => s.setLocked)
@@ -173,6 +174,18 @@ export function Inspector(): React.JSX.Element {
       // toggle lock for the whole selection: only "unlock" when every selected shape
       // is already locked, otherwise "lock" (mirrors the single-panel button)
       const selShapes = chart.shapes.filter((sh) => ids.includes(sh.id))
+      const firstShape = selShapes[0]
+      const lineLike =
+        selShapes.length === ids.length &&
+        selShapes.every((sh) => sh.type === 'line' || sh.type === 'polyline' || sh.type === 'freehand')
+      const commonShapeNumber = (
+        getValue: (sh: Shape) => number,
+        fallback: number
+      ): { value: number; mixed: boolean } => {
+        if (!selShapes.length) return { value: fallback, mixed: false }
+        const value = getValue(selShapes[0])
+        return { value, mixed: selShapes.some((sh) => getValue(sh) !== value) }
+      }
       const allLocked = selShapes.length > 0 && selShapes.every((sh) => !!sh.locked)
       const common = <K extends 'universe' | 'start'>(k: K, fallback: number): number => {
         if (!fxs.length) return fallback
@@ -302,6 +315,99 @@ export function Inspector(): React.JSX.Element {
               ))}
             </select>
           </Field>
+          {fxs.length > 0 && fxs.every((f) => f.mode === 'dim') && (
+            <Field label="色（選択中の全部）">
+              <input
+                type="color"
+                value={rgbToHex(fxs[0].fixedColor ?? [255, 255, 255])}
+                style={{ width: '100%', height: 30, background: C.inputBg, border: `0.5px solid ${C.border}`, borderRadius: 4 }}
+                onChange={(e) => bulkPatch(ids, { fixedColor: hexToRgb(e.target.value) })}
+              />
+            </Field>
+          )}
+          {lineLike && firstShape && (
+            <>
+              <SectionTitle>見た目・連続複製</SectionTitle>
+              {(() => {
+                const stroke = commonShapeNumber((sh) => sh.strokeWidth, 1)
+                return (
+                  <Field label={`太さ${stroke.mixed ? '（混在）' : ''}`}>
+                    <NumberField
+                      value={stroke.value}
+                      min={1}
+                      max={500}
+                      onChange={(v) => bulkUpdateShapes(ids, { strokeWidth: v })}
+                    />
+                  </Field>
+                )
+              })()}
+              <div style={{ display: 'flex', gap: 8 }}>
+                {(() => {
+                  const count = commonShapeNumber((sh) => sh.repeat?.count ?? 1, 1)
+                  return (
+                    <Field label={`個数${count.mixed ? '（混在）' : ''}`} flex={1}>
+                      <NumberField
+                        value={count.value}
+                        min={1}
+                        max={4096}
+                        onChange={(v) =>
+                          bulkUpdateShapes(ids, {
+                            repeat: { count: Math.round(v) } as Shape['repeat']
+                          })
+                        }
+                      />
+                    </Field>
+                  )
+                })()}
+                {(() => {
+                  const dx = commonShapeNumber((sh) => sh.repeat?.dx ?? 10, 10)
+                  return (
+                    <Field label={`間隔 X${dx.mixed ? '（混在）' : ''}`} flex={1}>
+                      <NumberField
+                        value={dx.value}
+                        min={-2000}
+                        max={2000}
+                        onChange={(v) =>
+                          bulkUpdateShapes(ids, { repeat: { dx: v } as Shape['repeat'] })
+                        }
+                      />
+                    </Field>
+                  )
+                })()}
+                {(() => {
+                  const dy = commonShapeNumber((sh) => sh.repeat?.dy ?? 0, 0)
+                  return (
+                    <Field label={`間隔 Y${dy.mixed ? '（混在）' : ''}`} flex={1}>
+                      <NumberField
+                        value={dy.value}
+                        min={-2000}
+                        max={2000}
+                        onChange={(v) =>
+                          bulkUpdateShapes(ids, { repeat: { dy: v } as Shape['repeat'] })
+                        }
+                      />
+                    </Field>
+                  )
+                })()}
+              </div>
+              {(() => {
+                const glow = commonShapeNumber(
+                  (sh) => sh.glowPx ?? chart.settings.ledGlowPx ?? 0,
+                  chart.settings.ledGlowPx ?? 0
+                )
+                return (
+                  <Field label={`にじみ（px）${glow.mixed ? '（混在）' : ''}`}>
+                    <NumberField
+                      value={glow.value}
+                      min={0}
+                      max={50}
+                      onChange={(v) => bulkUpdateShapes(ids, { glowPx: Math.max(0, Math.min(50, v)) })}
+                    />
+                  </Field>
+                )
+              })()}
+            </>
+          )}
           <div style={{ fontFamily: F.ui, fontSize: 11, color: C.faint }}>
             同じ番地にすれば全部が1本のフェーダーで一斉点灯になります
           </div>

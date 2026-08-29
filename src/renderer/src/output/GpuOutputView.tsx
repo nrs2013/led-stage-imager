@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useStore } from '../state/store'
 import { OutputRenderer } from './OutputRenderer'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
-import { outDivOf, sendSize } from './out-scale'
+import { outputSizeOf } from './out-scale'
 import type { Chart } from '../model/types'
 
 interface DecorApi {
@@ -34,8 +34,12 @@ export function GpuOutputView(): React.JSX.Element {
     const api = getApi()
     const offChart = api?.onChartUpdate?.((chart) => useStore.getState().setChart(chart as Chart))
     const offManual = api?.onManualUpdate?.((m) => {
-      const v = m as { on?: boolean; byFixture?: Record<string, [number, number, number]> } | null
-      useStore.setState({ manualMode: !!v?.on, manualByFixture: v?.byFixture ?? {} })
+      const v = m as { on?: boolean; byFixture?: Record<string, [number, number, number]>; pageSwitchManual?: number | null } | null
+      useStore.setState({
+        manualMode: !!v?.on,
+        manualByFixture: v?.byFixture ?? {},
+        pageSwitchManual: v?.pageSwitchManual ?? null
+      })
     })
     return () => {
       offChart?.()
@@ -61,8 +65,7 @@ export function GpuOutputView(): React.JSX.Element {
         const st = useStore.getState()
         const { chart, dmxByUniverse } = st
         if (chart.canvas.w <= 0 || chart.canvas.h <= 0) return // 退化フレームはスキップ
-        const div = outDivOf(chart)
-        const out = sendSize(chart.canvas.w, chart.canvas.h, div)
+        const out = outputSizeOf(chart)
         // 窓サイズ＝出力解像度。チャートのサイズ＋縮小率に追従させる（mainが窓をリサイズ）。
         if (out.w !== lastW || out.h !== lastH) {
           lastW = out.w
@@ -75,15 +78,15 @@ export function GpuOutputView(): React.JSX.Element {
           chart.settings.holdOnTimeout,
           Date.now()
         )
-        if (div <= 1) {
-          renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
+        if (out.w === chart.canvas.w && out.h === chart.canvas.h) {
+          renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null, st.pageSwitchManual)
           return
         }
-        // 縮める時: 原寸で描いてから、出来上がった絵を整数分の1で焼き込む
+        // 縮める時: 原寸で描いてから、出来上がった絵を指定ピクセル数で焼き込む
         // （にじみ(グロー)も一緒に縮む＝原寸の時と見た目の比率が変わらない）。
         if (!fullCv) fullCv = document.createElement('canvas')
         if (!fullRenderer) fullRenderer = new OutputRenderer(fullCv)
-        fullRenderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null)
+        fullRenderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null, st.pageSwitchManual)
         const g = canvas.getContext('2d')
         if (!g) return
         if (canvas.width !== out.w) canvas.width = out.w

@@ -1,0 +1,120 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ArtNetRelay, buildArtDmx, defaultRelayConfig, isBroadcastIPv4, isUnicastIPv4, normalizeRelayConfig } from './artnet-relay'
+
+afterEach(() => vi.useRealTimers())
+
+describe('Art-Net delay relay', () => {
+  it('starts with one safe-OFF route that can represent consecutive universes', () => {
+    const c = defaultRelayConfig()
+    expect(c.enabled).toBe(false)
+    expect(c.routes).toHaveLength(1)
+    expect(c.routes[0]).toMatchObject({ inputUniverse: 0, outputUniverse: 0, universeCount: 1, delayFrames: 0, outputMode: 'unicast', mergeMode: 'none' })
+  })
+
+  it('clamps delay to 0..30 frames and universes to Art-Net range', () => {
+    const c = normalizeRelayConfig({
+      enabled: true,
+      routes: [{ enabled: true, inputUniverse: -2, outputUniverse: 99999, delayFrames: 88, targetIp: '10.0.0.2' }]
+    })
+    expect(c.routes[0]).toMatchObject({ inputUniverse: 0, outputUniverse: 32767, delayFrames: 30 })
+  })
+
+  it('accepts unicast node IPs but rejects loop/multicast/broadcast addresses', () => {
+    expect(isUnicastIPv4('10.0.0.20')).toBe(true)
+    expect(isUnicastIPv4('127.0.0.1')).toBe(false)
+    expect(isUnicastIPv4('239.1.1.1')).toBe(false)
+    expect(isUnicastIPv4('255.255.255.255')).toBe(false)
+    expect(isBroadcastIPv4('2.0.0.255')).toBe(true)
+    expect(isBroadcastIPv4('255.255.255.255')).toBe(true)
+    expect(isBroadcastIPv4('2.0.0.20')).toBe(false)
+  })
+
+  it('builds an ArtDMX packet with remapped universe and even payload length', () => {
+    const b = buildArtDmx({ universe: 0, sequence: 9, data: Uint8Array.from([1, 2, 3]) }, 513)
+    expect(b.toString('latin1', 0, 8)).toBe('Art-Net\0')
+    expect(b.readUInt16LE(8)).toBe(0x5000)
+    expect(b.readUInt8(12)).toBe(9)
+    expect(b.readUInt8(14)).toBe(1)
+    expect(b.readUInt8(15)).toBe(2)
+    expect(b.readUInt16BE(16)).toBe(4)
+    expect(Array.from(b.subarray(18))).toEqual([1, 2, 3, 0])
+  })
+
+  it('sends each universe after its own 30fps frame delay', () => {
+    vi.useFakeTimers()
+    const sent: { data: Buffer; ip: string }[] = []
+    const relay = new ArtNetRelay((data, ip) => sent.push({ data, ip }))
+    relay.setConfig({
+      enabled: true,
+      routes: [{
+        enabled: true,
+        inputUniverse: 3,
+        targetIp: '10.0.0.20',
+        outputUniverse: 8,
+        delayFrames: 4
+      }]
+    })
+    relay.handle({ universe: 3, sequence: 1, data: Uint8Array.from([255, 0]) })
+    vi.advanceTimersByTime(132)
+    expect(sent).toHaveLength(0)
+    vi.advanceTimersByTime(2)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].ip).toBe('10.0.0.20')
+    expect(sent[0].data.readUInt16LE(14)).toBe(8)
+  })
+
+  it('cancels delayed output as soon as the master output is switched off', () => {
+    vi.useFakeTimers()
+    const sent: Buffer[] = []
+    const relay = new ArtNetRelay((data) => sent.push(data))
+    relay.setConfig({ enabled: true, routes: [{ enabled: true, inputUniverse: 0, targetIp: '10.0.0.2', outputUniverse: 0, delayFrames: 30 }] })
+    relay.handle({ universe: 0, sequence: 1, data: Uint8Array.from([1, 2]) })
+    relay.setConfig({ enabled: false, routes: [] })
+    vi.runAllTimers()
+    expect(sent).toHaveLength(0)
+  })
+
+  it('HTP merges each channel to the highest value from active sources', () => {
+    const sent: Buffer[] = []
+    const relay = new ArtNetRelay((data) => sent.push(data))
+    relay.setConfig({ enabled: true, routes: [{ enabled: true, inputUniverse: 0, targetIp: '10.0.0.2', outputUniverse: 0, delayFrames: 0, mergeMode: 'htp' }] })
+    relay.handle({ universe: 0, sequence: 1, sourceIp: '10.0.0.10', data: Uint8Array.from([200, 20]) })
+    relay.handle({ universe: 0, sequence: 1, sourceIp: '10.0.0.11', data: Uint8Array.from([100, 220]) })
+    expect(Array.from(sent[1].subarray(18, 20))).toEqual([200, 220])
+  })
+
+  it('LTP keeps the most recently changed value per channel', () => {
+    vi.useFakeTimers()
+    const sent: Buffer[] = []
+    const relay = new ArtNetRelay((data) => sent.push(data))
+    relay.setConfig({ enabled: true, routes: [{ enabled: true, inputUniverse: 0, targetIp: '10.0.0.2', outputUniverse: 0, delayFrames: 0, mergeMode: 'ltp' }] })
+    relay.handle({ universe: 0, sequence: 1, sourceIp: '10.0.0.10', data: Uint8Array.from([200, 20]) })
+    vi.advanceTimersByTime(10)
+    relay.handle({ universe: 0, sequence: 1, sourceIp: '10.0.0.11', data: Uint8Array.from([100, 220]) })
+    vi.advanceTimersByTime(10)
+    relay.handle({ universe: 0, sequence: 2, sourceIp: '10.0.0.10', data: Uint8Array.from([201, 20]) })
+    expect(Array.from(sent[2].subarray(18, 20))).toEqual([201, 220])
+  })
+
+  it('does not relay its own broadcast packet back into the network', () => {
+    const sent: Buffer[] = []
+    const relay = new ArtNetRelay((data) => sent.push(data))
+    relay.setConfig({ enabled: true, routes: [{ enabled: true, inputUniverse: 0, targetIp: '2.0.0.255', outputUniverse: 0, delayFrames: 0, outputMode: 'broadcast' }] }, ['2.0.0.5'])
+    relay.handle({ universe: 0, sequence: 1, sourceIp: '2.0.0.5', data: Uint8Array.from([255, 0]) })
+    expect(sent).toHaveLength(0)
+  })
+
+  it('maps one route with a count to consecutive input and output universes', () => {
+    const sent: Buffer[] = []
+    const relay = new ArtNetRelay((data) => sent.push(data))
+    relay.setConfig({ enabled: true, routes: [{ enabled: true, inputUniverse: 4, targetIp: '10.0.0.2', outputUniverse: 20, universeCount: 10, delayFrames: 0 }] })
+    relay.handle({ universe: 13, sequence: 1, sourceIp: '10.0.0.10', data: Uint8Array.from([255, 0]) })
+    expect(sent).toHaveLength(1)
+    expect(sent[0].readUInt16LE(14)).toBe(29)
+  })
+
+  it('folds the old 256 blank rows down to one row', () => {
+    const oldRows = Array.from({ length: 256 }, (_, i) => ({ enabled: false, inputUniverse: i, outputUniverse: i, targetIp: '', delayFrames: 0 }))
+    expect(normalizeRelayConfig({ enabled: false, routes: oldRows }).routes).toHaveLength(1)
+  })
+})

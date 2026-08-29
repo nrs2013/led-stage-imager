@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../state/store'
 import { createChart } from '../model/chart-model'
-import { openChartFromFile, markNewChart } from '../io/file-ops'
+import { openChartFromFile, markNewChart, currentChartFileName } from '../io/file-ops'
 import { readBackup } from '../io/autosave'
 import type { Chart } from '../model/types'
 
 /**
  * The doorway: first choose a MODE, not a file (cinematic-beam design・のむさん 2026-06-20).
- *  - SHOW MODE  … 本番。電飾・照明を配置図に置いて卓のDMXで可視化し Syphon/NDI 出力する。常に新規（空）で開始。
+ *  - SHOW MODE  … 本番。前回の自動バックアップがあれば続きから、無ければ空で開始。
  *  - LIGHT SKETCH … かんたん。写真を灯体で照らして見た目を作る簡易プレビュー（旧・画像照明モード）。
  * チャート画像（配置図）は SHOW MODE に入ってから上のバーの「チャート画像」で貼る。
  * 画面の文言は英語のみ（のむさん要望）。ロゴは Cormorant Garamond 300（同梱・CSP font-src 'self'）。
@@ -20,30 +20,38 @@ export function StartScreen(): React.JSX.Element {
   const setLightingOnly = useStore((s) => s.setLightingOnly)
   const [error, setError] = useState<string | null>(null)
   const [backup, setBackup] = useState<Chart | null>(null)
+  const [backupFileName, setBackupFileName] = useState<string | null>(null)
 
   // crash net: offer the autosaved chart from the last session
   useEffect(() => {
-    void readBackup().then(setBackup)
+    void readBackup().then(async (chart) => {
+      const fileName = chart ? await currentChartFileName() : null
+      setBackupFileName(fileName)
+      setBackup(chart)
+    })
   }, [])
 
   const startBlank = (w: number, h: number): void => {
     markNewChart() // 空チャート＝まだファイル未確定（最初の保存で保存先を聞く）
     setChart(createChart({ w, h }))
-    setTool('pixelpen')
+    setTool('select')
     setStarted(true)
   }
 
   const resume = (): void => {
     if (!backup) return
-    markNewChart() // 自動バックアップからの復元はユーザーのファイルに紐づかない
+    if (backupFileName) useStore.getState().markChartFile(backupFileName, null)
+    else markNewChart() // 旧バックアップ等、元ファイルが分からない時は誤上書きしない
     setChart(backup)
+    setTool('select')
     setStarted(true)
   }
 
-  // SHOW MODE に入る：いつでも「新規（空チャート）」で始める＝普通のアプリ(Excel/PowerPoint)と同じ。
-  // 前回の自動バックアップは下の「Recover last session」でだけ復元する（保存し忘れの保険）。
+  // SHOW MODE に入る：前回の自動バックアップがあれば安全に復元する。
+  // 元ファイルの上書き先とは結び付けず、保存時は改めて保存先を選ぶ（誤上書き防止）。
   const enterShowMode = (): void => {
-    startBlank(1920, 1080)
+    if (backup) resume()
+    else startBlank(1920, 1080)
   }
 
   const loadSaved = async (): Promise<void> => {
@@ -53,7 +61,8 @@ export function StartScreen(): React.JSX.Element {
       if (c) {
         setChart(c)
         // 上のバーの表示を実態に合わせる（ここを飛ばすと「未保存」と出るのに ⌘S は黙って上書きする）
-        useStore.getState().markChartFile(c.name || '名前なし', c)
+        useStore.getState().markChartFile((await currentChartFileName()) ?? (c.name || '名前なし'), c)
+        setTool('select')
         setStarted(true)
       }
     } catch (err) {
@@ -110,6 +119,7 @@ export function StartScreen(): React.JSX.Element {
 
         <h1 className="ss-title">LED STAGE IMAGER</h1>
         <p className="ss-tag">DMX Visualizer&nbsp;·&nbsp;Syphon / NDI Output</p>
+        <p className="ss-version">Version 1.3.3&nbsp;—&nbsp;ファイル名タイトル表示版 2026-08-29</p>
 
         <div className="ss-modes">
           <button
@@ -220,6 +230,7 @@ const SS_CSS = `
 .ss-fix svg{opacity:.5;}
 .ss-title{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:52px;letter-spacing:.2em;color:#fafaf8;line-height:1;margin:0;text-indent:.2em;}
 .ss-tag{margin:20px 0 0;font-size:10.5px;font-weight:300;letter-spacing:.34em;text-transform:uppercase;color:#a8a8a0;font-family:'Inter',sans-serif;}
+.ss-version{margin:10px 0 0;font-size:10px;font-weight:300;letter-spacing:.14em;color:#777772;font-family:'Inter','Noto Sans JP',sans-serif;}
 .ss-modes{margin-top:54px;display:flex;flex-direction:column;gap:11px;text-align:left;}
 .ss-mode{width:100%;display:flex;align-items:center;gap:18px;padding:18px 22px;border:0.5px solid #2c2a27;border-radius:10px;background:rgba(255,255,255,0.008);cursor:pointer;transition:border-color .2s,background .2s;font-family:'Inter',sans-serif;}
 .ss-mode:hover{background:rgba(255,255,255,0.02);}
