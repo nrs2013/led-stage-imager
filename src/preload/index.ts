@@ -103,8 +103,16 @@ const api = {
   listInterfaces: (): Promise<{ name: string; address: string }[]> =>
     ipcRenderer.invoke('net:interfaces'),
   setBind: (ip: string): Promise<boolean> => ipcRenderer.invoke('net:bind', ip),
+  getArtNetRelayConfig: (): Promise<unknown> => ipcRenderer.invoke('artnet-relay:get-config'),
+  setArtNetRelayConfig: (config: unknown): Promise<unknown> =>
+    ipcRenderer.invoke('artnet-relay:set-config', config),
+  exportArtNetRelayConfig: (config: unknown): Promise<string | null> =>
+    ipcRenderer.invoke('artnet-relay:export-config', config),
+  importArtNetRelayConfig: (): Promise<unknown | null> =>
+    ipcRenderer.invoke('artnet-relay:import-config'),
   getStatus: (): Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }> =>
     ipcRenderer.invoke('engine:status'),
+  setWindowTitle: (title: string): void => ipcRenderer.send('window:set-title', title),
   // renderer が検出した MIDI 入力ポート名をメインへ通知（ステータスバー表示用・Web MIDI 用の名残）
   reportMidiInputs: (names: string[]): void => ipcRenderer.send('midi:inputs', names),
   /** MIDI をつなぎ直す。つながっている入力ポート名を返す。 */
@@ -145,6 +153,8 @@ const api = {
     ipcRenderer.invoke('chart:saveAs', json, name),
   chartNew: (): Promise<boolean> => ipcRenderer.invoke('chart:new'),
   openChartFile: (): Promise<string | null> => ipcRenderer.invoke('chart:open'),
+  currentChartFileName: (): Promise<string | null> =>
+    ipcRenderer.invoke('chart:current-file-name'),
   // ダブルクリックで開かれたファイルの中身(JSON)＋パスがメインから届く
   onOpenChartPath: (cb: (json: string, path?: string) => void): (() => void) => {
     const h = (_e: IpcRendererEvent, json: string, path?: string): void => cb(json, path)

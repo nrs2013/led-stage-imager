@@ -112,6 +112,7 @@ import { drawRoomLampSchematic, ROOMLAMP_DEFAULT_DIAMETER } from '../render/room
 import { drawStreetLampSchematic, STREETLAMP_DEFAULT_DIAMETER } from '../render/streetlamp'
 import { drawChandelierSchematic, CHANDELIER_DEFAULT_DIAMETER } from '../render/chandelier'
 import { mmToCanvasPx, mmPerPx } from '../model/scale'
+import { resolveColor } from '../dmx/resolve'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 
@@ -119,17 +120,10 @@ const MIN_SIZE = 3
 const clamp = (n: number, lo: number, hi: number): number => (n < lo ? lo : n > hi ? hi : n)
 const dist = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y)
 
-// Editor-only display colours: each shape gets its own so adjacent runs are tellable
-// apart at a glance. (The real colour on stage comes from the console via DMX.)
-const SHAPE_COLORS = ['#7bc5e8', '#a8e878', '#f5c878', '#c186c8', '#ffe57a', '#e0726a', '#8fd8c8']
-const shapeColor = (i: number): string => SHAPE_COLORS[i % SHAPE_COLORS.length]
-const shapeFill = (i: number): string => {
-  const hx = SHAPE_COLORS[i % SHAPE_COLORS.length]
-  const r = parseInt(hx.slice(1, 3), 16)
-  const g = parseInt(hx.slice(3, 5), 16)
-  const b = parseInt(hx.slice(5, 7), 16)
-  return `rgba(${r},${g},${b},0.16)`
-}
+// 電飾の平常色は黒。実際の色は Art-Net（または手動テスト）を受けた時だけ、
+// 下の番地札と同じ解決処理でキャンバス上へ重ねて表示する。
+const SHAPE_IDLE_STROKE = '#000000'
+const SHAPE_IDLE_FILL = '#000000'
 const SELECT_STROKE = '#ffffff'
 
 type DrawType = Exclude<Shape['type'], never>
@@ -553,18 +547,16 @@ export function EditorCanvas(): React.JSX.Element {
     }
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
-    // other songs' layers: hidden unless toggled visible, and then only as ghosts —
-    // the active layer is always full-strength and is the only editable one
-    const layerVisible = new Map(chart.layers.map((l) => [l.id, l.visible]))
+    // CHARTを切り替えた時は、そのCHARTの電飾だけを表示する。別CHARTを薄く重ねると
+    // 「今どちらを編集しているか」が判別しづらく、本番仕込みの誤操作につながる。
     const activeId = chart.activeLayerId
     const homeId = chart.layers[0]?.id // layerless shapes = first layer (v1 rule)
-    chart.shapes.forEach((shape, i) => {
+    chart.shapes.forEach((shape) => {
       const lid = shape.layerId ?? homeId
-      const ghost = lid !== activeId
-      if (ghost && !layerVisible.get(lid)) return
+      if (lid !== activeId) return
       if (!visibleByFilter(shape, paletteFilter)) return // 種別フィルタ（照明だけ/電飾だけ）
-      ctx.globalAlpha = ghost ? 0.22 : shape.locked ? 0.4 : 1
-      drawShapeInto(ctx, shape, shapeColor(i), shapeFill(i), boostRef.current)
+      ctx.globalAlpha = shape.locked ? 0.4 : 1
+      drawShapeInto(ctx, shape, SHAPE_IDLE_STROKE, SHAPE_IDLE_FILL, boostRef.current)
       ctx.globalAlpha = 1
     })
   }
@@ -639,6 +631,31 @@ export function EditorCanvas(): React.JSX.Element {
     ctx.imageSmoothingEnabled = v.scale < 1
     ctx.setTransform(v.scale, 0, 0, v.scale, v.tx, v.ty)
     if (contentRef.current) ctx.drawImage(contentRef.current, 0, 0)
+
+    // 番地一覧だけでなく、チャート上の実際の場所を Art-Net の受信色で光らせる。
+    // 保存データと Syphon/NDI 出力には触れない、編集画面だけの確認表示。
+    const st = useStore.getState()
+    const homeId = chart.layers[0]?.id
+    const fxByShape = new Map(chart.fixtures.map((fixture) => [fixture.shapeId, fixture]))
+    ctx.globalCompositeOperation = 'lighter'
+    for (const shape of chart.shapes) {
+      if ((shape.layerId ?? homeId) !== chart.activeLayerId) continue
+      if (!visibleByFilter(shape, paletteFilter)) continue
+      const fixture = fxByShape.get(shape.id)
+      if (!fixture) continue
+      const [r, g, b] = resolveColor(
+        fixture,
+        st.dmxByUniverse,
+        chart.settings.gamma,
+        st.manualMode ? st.manualByFixture : null
+      )
+      if (r === 0 && g === 0 && b === 0) continue
+      const color = `rgb(${r},${g},${b})`
+      ctx.globalAlpha = shape.locked ? 0.4 : 1
+      drawShapeInto(ctx, shape, color, color, boostRef.current)
+    }
+    ctx.globalAlpha = 1
+    ctx.globalCompositeOperation = 'source-over'
 
     // canvas border (screen space)
     ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -769,6 +786,7 @@ export function EditorCanvas(): React.JSX.Element {
         if (dense && !isSel) return
         const sh = chart.shapes.find((x) => x.id === f.shapeId)
         if (!sh || !sh.points.length) return
+        if ((sh.layerId ?? chart.layers[0]?.id) !== chart.activeLayerId) return
         const p0 = sh.points[0]
         const sx = v.tx + p0.x * v.scale
         const sy = v.ty + p0.y * v.scale - 11
@@ -851,6 +869,21 @@ export function EditorCanvas(): React.JSX.Element {
     cancelAnimationFrame(rafRef.current)
     rafRef.current = requestAnimationFrame(() => drawRef.current())
   })
+
+  // Art-Net は React の画面全体を毎フレーム作り直さず、キャンバスだけを更新する。
+  useEffect(() => {
+    const unsubscribe = useStore.subscribe((state, previous) => {
+      if (
+        state.dmxRev !== previous.dmxRev ||
+        state.manualMode !== previous.manualMode ||
+        state.manualByFixture !== previous.manualByFixture
+      ) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = requestAnimationFrame(() => drawRef.current())
+      }
+    })
+    return unsubscribe
+  }, [])
 
   // mark content dirty when chart / layers / mask change
   useEffect(() => {
@@ -1005,7 +1038,10 @@ export function EditorCanvas(): React.JSX.Element {
       }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'v' || e.key === 'V')) {
         if (st.clipboard) {
-          if (st.pasteMark) {
+          if (e.shiftKey) {
+            st.pasteSamePosition() // 別CHARTへ同じ配置を移す用途
+            st.setPasteMark(null)
+          } else if (st.pasteMark) {
             st.pasteAt(st.pasteMark) // クリックで印を付けた場所に貼る
             st.setPasteMark(null)
           } else {

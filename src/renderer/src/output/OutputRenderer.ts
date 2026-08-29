@@ -33,10 +33,10 @@ import {
   pattDiameter
 } from '../render/fixtures'
 import { groupShapesByGlow } from './glow'
-import { sendSize } from './out-scale'
 import { drawRoomLampLit, roomLampDiameter } from '../render/roomlamp'
 import { drawStreetLampLit, streetLampDiameter } from '../render/streetlamp'
 import { drawChandelierLit, chandelierDiameter } from '../render/chandelier'
+import { outputShapes } from './page-switch'
 
 const ZEROS = new Uint8Array(512)
 
@@ -90,7 +90,8 @@ export class OutputRenderer {
     chart: Chart,
     dmxByUniverse: Record<number, Uint8Array>,
     gamma: boolean,
-    manual: Record<string, RGB> | null = null
+    manual: Record<string, RGB> | null = null,
+    pageSwitchManual: number | null = null
   ): void {
     const { w, h } = chart.canvas
     if (this.canvas.width !== w) this.canvas.width = w
@@ -103,6 +104,9 @@ export class OutputRenderer {
     ctx.globalAlpha = 1
     ctx.clearRect(0, 0, w, h)
 
+    // DMXチャート切替がONなら、選ばれたページの図形だけをこのフレームへ出す。
+    const shapes = outputShapes(chart, dmxByUniverse, pageSwitchManual)
+
     // map shape -> fixture for colour resolution
     const fxByShape = new Map<string, Fixture>()
     for (const f of chart.fixtures) fxByShape.set(f.shapeId, f)
@@ -111,13 +115,13 @@ export class OutputRenderer {
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
 
-    this.drawShapesPass(chart.shapes, fxByShape, dmxByUniverse, gamma, manual)
+    this.drawShapesPass(shapes, fxByShape, dmxByUniverse, gamma, manual)
 
     // 電飾のにじみ(グロー): 半径ごとに「その図形だけを別キャンバスに描く→blur→加算」。
     // 本体はシャープなまま残る（芯＋にじみ）。blur は通常キャンバス(GPU)側で行う —
     // this.ctx は willReadFrequently=CPU なので、そこに filter を掛けると激重（地雷）。
     const glowGroups = groupShapesByGlow(
-      chart.shapes.filter((s) => fxByShape.has(s.id)),
+      shapes.filter((s) => fxByShape.has(s.id)),
       chart.settings
     )
     if (glowGroups.size > 0) {
@@ -152,7 +156,7 @@ export class OutputRenderer {
     }
 
     // Photo materials lit by uplight beams (light map → multiply → additive)
-    this.renderUplights(chart, fxByShape, dmxByUniverse, gamma, manual)
+    this.renderUplights({ ...chart, shapes }, fxByShape, dmxByUniverse, gamma, manual)
 
     // Optional global "smoke" glow: a whole-output bloom. The LEDs themselves stay crisp;
     // this just mimics how stage haze spreads them. Off by default.
@@ -387,14 +391,15 @@ export class OutputRenderer {
     return premultiply(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data)
   }
 
-  /** 送出用に整数分の1へ縮めた絵（div<=1 は原寸＝readRGBA と同じ）。
+  /** 送出用に指定ピクセル数へ縮めた絵（原寸なら readRGBA と同じ）。
    *  縮めるのは「描き上がった絵」なので、にじみ(グロー)も一緒に縮む＝見た目の比率は変わらない。
    *  作業キャンバスは使い回す（毎コマ作ると重い）。 */
-  readRGBAScaled(div: number): { w: number; h: number; data: Uint8ClampedArray } {
+  readRGBAAtSize(w: number, h: number): { w: number; h: number; data: Uint8ClampedArray } {
     const W = this.canvas.width
     const H = this.canvas.height
-    if (!(div > 1)) return { w: W, h: H, data: this.readRGBA() }
-    const { w, h } = sendSize(W, H, div)
+    w = Math.max(1, Math.round(w))
+    h = Math.max(1, Math.round(h))
+    if (w === W && h === H) return { w: W, h: H, data: this.readRGBA() }
     if (!this.sendCv) this.sendCv = document.createElement('canvas')
     const cv = this.sendCv
     if (cv.width !== w) cv.width = w

@@ -71,6 +71,19 @@ describe('stamp copy/paste (store)', () => {
     useStore.getState().pasteAt({ x: 50, y: 50 })
     expect(useStore.getState().chart.shapes).toHaveLength(1)
   })
+
+  it('pasteSamePosition puts copied fixtures on another CHART at identical coordinates', () => {
+    useStore.getState().select('bar1')
+    useStore.getState().copySelection()
+    const nextLayer = useStore.getState().addLayer()
+    useStore.getState().pasteSamePosition()
+    const st = useStore.getState()
+    const copy = st.chart.shapes.find((shape) => shape.layerId === nextLayer)!
+    expect(copy.points).toEqual(seed().shapes[0].points)
+    const fixture = st.chart.fixtures.find((f) => f.shapeId === copy.id)!
+    expect(fixture.universe).toBe(2)
+    expect(fixture.start).toBe(33)
+  })
 })
 
 describe('ステップアップモード (store)', () => {
@@ -120,6 +133,47 @@ describe('ステップアップモード (store)', () => {
       ]
     })
     expect(useStore.getState().chart.fixtures.find((f) => f.shapeId === id)).toBeUndefined()
+  })
+})
+
+describe('複数選択の一括変更', () => {
+  beforeEach(() => {
+    const c = seed()
+    const second: Shape = {
+      ...c.shapes[0],
+      id: 'bar2',
+      fixtureId: 'fx2',
+      strokeWidth: 5,
+      repeat: { count: 2, dx: 30, dy: 4 }
+    }
+    useStore.setState({
+      chart: {
+        ...c,
+        shapes: [{ ...c.shapes[0], repeat: { count: 3, dx: 10, dy: 2 } }, second],
+        fixtures: [...c.fixtures, { ...c.fixtures[0], id: 'fx2', shapeId: 'bar2' }]
+      },
+      selectedId: null,
+      selectedIds: ['bar1', 'bar2'],
+      history: [],
+      future: []
+    })
+  })
+
+  it('太さとにじみを選択中の全部へ反映する', () => {
+    useStore.getState().bulkUpdateShapes(['bar1', 'bar2'], { strokeWidth: 12, glowPx: 7 })
+    for (const sh of useStore.getState().chart.shapes) {
+      expect(sh.strokeWidth).toBe(12)
+      expect(sh.glowPx).toBe(7)
+    }
+  })
+
+  it('間隔Xだけを変えた時、個数と間隔Yは各線の値を保つ', () => {
+    useStore
+      .getState()
+      .bulkUpdateShapes(['bar1', 'bar2'], { repeat: { dx: 99 } as Shape['repeat'] })
+    const [a, b] = useStore.getState().chart.shapes
+    expect(a.repeat).toEqual({ count: 3, dx: 99, dy: 2 })
+    expect(b.repeat).toEqual({ count: 2, dx: 99, dy: 4 })
   })
 })
 
@@ -219,6 +273,50 @@ describe('layers (song pages)', () => {
     expect(st.chart.activeLayerId).toBe(id)
     const sid = st.addShape({ type: 'bulb', points: [{ x: 5, y: 5 }] })
     expect(useStore.getState().chart.shapes.find((s) => s.id === sid)!.layerId).toBe(id)
+  })
+
+  it('addLayer inherits only the current chart image', () => {
+    const base = useStore.getState().chart
+    useStore.setState({
+      chart: {
+        ...base,
+        layers: base.layers.map((layer) => ({
+          ...layer,
+          underlay: {
+            dataUrl: 'data:image/png;base64,chart',
+            opacity: 0.5,
+            visible: true,
+            mask: { enabled: true, invert: false }
+          }
+        }))
+      }
+    })
+    const id = useStore.getState().addLayer()
+    const st = useStore.getState()
+    const layer = st.chart.layers.find((item) => item.id === id)!
+    expect(layer.underlay?.dataUrl).toBe('data:image/png;base64,chart')
+    expect(st.chart.shapes.filter((shape) => shape.layerId === id)).toHaveLength(0)
+    expect(st.chart.fixtures.filter((fixture) => {
+      const shape = st.chart.shapes.find((item) => item.id === fixture.shapeId)
+      return shape?.layerId === id
+    })).toHaveLength(0)
+  })
+
+  it('addLayer finds the previous chart image when an old empty page is active', () => {
+    const base = useStore.getState().chart
+    useStore.setState({
+      chart: {
+        ...base,
+        layers: base.layers.map((layer) => ({
+          ...layer,
+          underlay: { dataUrl: 'chart-one', opacity: 0.5, visible: true }
+        }))
+      }
+    })
+    useStore.getState().addLayer({ underlay: null }) // 旧版で作られた画像なしCHART 2を再現
+    const third = useStore.getState().addLayer()
+    const layer = useStore.getState().chart.layers.find((item) => item.id === third)!
+    expect(layer.underlay?.dataUrl).toBe('chart-one')
   })
 
   it('removeLayer deletes its shapes and fixtures, keeps the rest', () => {

@@ -124,9 +124,9 @@ export interface Underlay {
   mask?: { enabled: boolean; invert: boolean }
 }
 
-/** One song's page: its chart image + the shapes drawn on it. Layers exist for the
- *  EDITOR only — the live output always renders every layer's shapes (unlit = invisible),
- *  so the console "calls up" a song simply by raising that song's addresses. */
+/** One song's page: its chart image + the shapes drawn on it. With DMX page switching
+ *  disabled the output renders every layer (legacy behavior); when enabled, one layer
+ *  is selected by the configured control channel's 0..255 value. */
 export interface Layer {
   id: string
   name: string
@@ -157,10 +157,13 @@ export interface Chart {
      *  scale (1px = stageWidthMm / canvas.w mm) and parts drop at true physical size
      *  via model/scale.mmToCanvasPx. Absent = uncalibrated (parts use raw px). */
     stageWidthMm?: number
-    /** 送出（Syphon/NDI）だけを整数分の1に縮める。1/未設定=原寸（従来）・2=1/2・3=1/3。
-     *  チャート本体と描く絵は原寸のまま＝見た目は変わらず、外へ出す画素数だけ減る。
-     *  🔴 整数割りだけにしているのは、LEDの縦ラインが等間隔のまま残るようにするため
-     *  （半端な倍率だと、間引かれる列とされない列ができてラインがガタつく）。 */
+    /** 旧チャートの送出縮小率。outputSize がない時だけ後方互換に使う。 */
     outDiv?: number
+    /** Syphon/NDI の送出ピクセル数。チャート本体の寸法は変えない。 */
+    outputSize?: { w: number; h: number }
+    /** 設定画面で幅・高さを連動させるか。未設定は true。 */
+    outputAspectLocked?: boolean
+    /** 1本のDMX値 0..255 で、レイヤー（CHART 1..256）の送出を切り替える。 */
+    pageSwitch?: { enabled: boolean; universe: number; address: number }
   }
 }

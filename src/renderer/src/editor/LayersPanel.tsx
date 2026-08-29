@@ -2,12 +2,14 @@ import { useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { pickImage } from '../io/image-pick'
 import { C, F, buttonStyle } from '../ui/tokens'
+import { NumberField } from '../ui/NumberField'
+import { outputLayerIndex } from '../output/page-switch'
 
 const smallBtn = { ...buttonStyle({}), padding: '6px 8px', fontSize: 10, minHeight: 24 }
 
-/** Song pages. One layer = one chart image + its decorations. The console "calls up"
- *  a song by raising that song's addresses — the output always carries every layer,
- *  so this panel only drives what the EDITOR shows. */
+/** Song pages. One layer = one chart image + its decorations. Ordinarily the output
+ *  carries every layer; when DMX chart switching is enabled, its control value chooses
+ *  the single layer sent to Syphon/NDI. Clicking here still chooses the editor page. */
 export function LayersPanel(): React.JSX.Element {
   const layers = useStore((s) => s.chart.layers)
   const activeLayerId = useStore((s) => s.chart.activeLayerId)
@@ -15,8 +17,18 @@ export function LayersPanel(): React.JSX.Element {
   const addLayer = useStore((s) => s.addLayer)
   const removeLayer = useStore((s) => s.removeLayer)
   const setActiveLayer = useStore((s) => s.setActiveLayer)
-  const setLayerVisible = useStore((s) => s.setLayerVisible)
   const renameLayer = useStore((s) => s.renameLayer)
+  const pageSwitchManual = useStore((s) => s.pageSwitchManual)
+  const setPageSwitchManual = useStore((s) => s.setPageSwitchManual)
+  const setPageSwitch = useStore((s) => s.setPageSwitch)
+  const pageSwitch = useStore((s) => s.chart.settings.pageSwitch)
+  useStore((s) => s.dmxRev) // DMX値が変わった時だけ「送出中」表示を更新
+  const chart = useStore.getState().chart
+  const pageIndex = outputLayerIndex(chart, useStore.getState().dmxByUniverse, pageSwitchManual)
+  const pageSwitchOn = pageIndex != null
+  const dmxSwitchOn = pageSwitch?.enabled === true
+  const switchUniverse = (pageSwitch?.universe ?? 0) + 1
+  const switchAddress = pageSwitch?.address ?? 1
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const cancelRename = useRef(false) // Esc=取り消し。blur(commit)を1回だけ握り潰す
@@ -46,16 +58,85 @@ export function LayersPanel(): React.JSX.Element {
         <span style={title}>レイヤー</span>
         <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1曲 = 1枚</span>
         <div style={{ flex: 1 }} />
-        <button style={smallBtn} onClick={addWithImage} title="チャート画像を選んで新しい曲ページを追加">
+        <button
+          style={smallBtn}
+          disabled={layers.length >= 256}
+          onClick={addWithImage}
+          title={layers.length >= 256 ? 'チャートは最大256枚です' : 'チャート画像を選んで新しい曲ページを追加'}
+        >
           ＋画像
         </button>
-        <button style={smallBtn} onClick={() => addLayer()} title="下絵なしの空ページを追加">
+        <button
+          style={smallBtn}
+          disabled={layers.length >= 256}
+          onClick={() => addLayer()}
+          title={layers.length >= 256 ? 'チャートは最大256枚です' : '現在のチャート画像を引き継ぎ、電飾・番地は空のページを追加'}
+        >
           ＋空ページ
         </button>
       </div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          marginBottom: 7,
+          padding: '6px',
+          border: `0.5px solid ${dmxSwitchOn ? C.accent : C.border}`,
+          borderRadius: 4,
+          background: dmxSwitchOn ? `rgba(${C.accentRGB},0.06)` : 'transparent'
+        }}
+      >
+        <span style={{ fontSize: 10, color: C.label, fontFamily: F.ui, whiteSpace: 'nowrap' }}>
+          DMX切替
+        </span>
+        <button
+          style={{ ...smallBtn, minWidth: 38, color: dmxSwitchOn ? C.white : C.hint }}
+          onClick={() => setPageSwitch({ enabled: !dmxSwitchOn })}
+          title="DMXの値でCHARTを切り替える機能をON／OFFします"
+        >
+          {dmxSwitchOn ? 'ON' : 'OFF'}
+        </button>
+        <span style={{ fontSize: 9, color: C.hint, fontFamily: F.ui }}>Universe</span>
+        <NumberField
+          value={switchUniverse}
+          min={1}
+          max={32768}
+          compact
+          style={{ width: 54, flex: '0 0 54px' }}
+          onChange={(universe) => setPageSwitch({ universe: universe - 1 })}
+        />
+        <span style={{ fontSize: 9, color: C.hint, fontFamily: F.ui }}>CH</span>
+        <NumberField
+          value={switchAddress}
+          min={1}
+          max={512}
+          compact
+          style={{ width: 54, flex: '0 0 54px' }}
+          onChange={(address) => setPageSwitch({ address })}
+        />
+      </div>
       <div style={{ maxHeight: 168, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {layers.map((l) => {
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+          <span style={{ color: pageSwitchOn ? C.accent : C.hint, fontSize: 10, fontFamily: F.mono, flex: 1 }}>
+            {pageSwitchOn
+              ? `${pageSwitchManual == null ? 'DMX' : '手動'} ${pageIndex} → ${layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}`
+              : 'DMX切替 OFF — 全CHART送出'}
+          </span>
+          <button
+            style={{ ...smallBtn, minWidth: dmxSwitchOn ? 74 : 92 }}
+            disabled={pageSwitchManual == null}
+            onClick={() => setPageSwitchManual(null)}
+            title={dmxSwitchOn
+              ? '手動選択を解除して、設定したDMXチャンネルの値に連動します'
+              : '手動選択を解除して、従来どおり全CHARTを送出します'}
+          >
+            {dmxSwitchOn ? 'DMXに戻す' : '全体送出に戻す'}
+          </button>
+        </div>
+        {layers.map((l, layerIndex) => {
           const active = l.id === activeLayerId
+          const onAir = pageSwitchOn && layerIndex === pageIndex
           const count = shapes.filter((sh) => (sh.layerId ?? layers[0]?.id) === l.id).length
           return (
             <div
@@ -128,29 +209,27 @@ export function LayersPanel(): React.JSX.Element {
               >
                 {count}
               </span>
+              {onAir && (
+                <span style={{ fontSize: 9, color: C.accent, fontFamily: F.ui, whiteSpace: 'nowrap' }}>
+                  送出中
+                </span>
+              )}
               <button
                 style={{
                   ...smallBtn,
-                  padding: '6px 8px',
-                  fontSize: 9,
-                  minHeight: 24,
-                  minWidth: 40,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  lineHeight: 1,
-                  ...(l.visible
-                    ? { background: 'transparent', border: `0.5px solid ${C.border}`, color: C.label }
-                    : { background: 'transparent', border: `0.5px solid ${C.borderFaint}`, color: C.faint })
+                  minWidth: 48,
+                  ...(pageSwitchManual === layerIndex
+                    ? { border: `0.5px solid ${C.accent}`, color: C.white }
+                    : {})
                 }}
-                title={active ? '編集中のページは常に表示' : '他ページをうっすら重ねて表示/隠す'}
-                disabled={active}
                 onClick={(e) => {
                   e.stopPropagation()
-                  setLayerVisible(l.id, !l.visible)
+                  setActiveLayer(l.id)
+                  setPageSwitchManual(layerIndex)
                 }}
+                title={`${l.name}へ完全に切り替え、Syphon / NDIへ手動送出します`}
               >
-                {l.visible ? '表示' : '非表示'}
+                切替
               </button>
               <button
                 style={{

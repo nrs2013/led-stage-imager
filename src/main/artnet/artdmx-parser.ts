@@ -2,6 +2,8 @@ export interface ArtDmxPacket {
   universe: number // 0..32767 (Net<<8 | SubUni)
   sequence: number
   data: Uint8Array // length 1..512
+  /** 受信時に receiver が付ける送信元。マージ判定と自己ループ防止に使う。 */
+  sourceIp?: string
 }
 
 const ART_NET_ID = 'Art-Net\0'

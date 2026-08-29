@@ -57,8 +57,18 @@ export interface DecorApi {
   listInterfaces: () => Promise<{ name: string; address: string }[]>
   /** Re-bind the Art-Net receiver to a NIC address. */
   setBind: (ip: string) => Promise<boolean>
+  /** Art-Netユニキャスト遅延出力の、Mac本体に保存した設定。 */
+  getArtNetRelayConfig: () => Promise<unknown>
+  /** Art-Netユニキャスト遅延出力を保存し、直ちに適用する。 */
+  setArtNetRelayConfig: (config: unknown) => Promise<unknown>
+  /** Art-Net出力設定だけを専用ファイルへ書き出す。 */
+  exportArtNetRelayConfig: (config: unknown) => Promise<string | null>
+  /** 専用ファイルからArt-Net出力設定を読む（まだ実出力には適用しない）。 */
+  importArtNetRelayConfig: () => Promise<unknown | null>
   /** Engine status (Syphon client connected, etc). */
-  getStatus: () => Promise<{ hasClients: boolean }>
+  getStatus: () => Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }>
+  /** 現在のファイル名をOSのウインドウタイトルへ表示する。 */
+  setWindowTitle: (title: string) => void
   /** Save chart JSON via a native dialog; resolves to the path or null. */
   saveChart: (json: string, name: string) => Promise<string | null>
   /** 画像照明の公演を、入口 .ledshow 入りのフォルダとして保存する。 */
@@ -77,6 +87,8 @@ export interface DecorApi {
   ) => Promise<string | null>
   /** Open a chart file via a native dialog; resolves to its JSON or null. */
   openChartFile: () => Promise<string | null>
+  /** 現在開いている実ファイルの名前。自動復元後も元ファイルが残っていれば返す。 */
+  currentChartFileName: () => Promise<string | null>
   /** 画像照明の公演を開く。新フォルダ・単体 .ledshow・旧フォルダに対応。 */
   openImageLightShow: () => Promise<
     | { json: string; media: Record<string, string>; path?: string }

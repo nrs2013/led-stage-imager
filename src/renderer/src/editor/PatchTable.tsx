@@ -13,8 +13,21 @@ export function PatchTable(): React.JSX.Element {
   const selectedId = useStore((s) => s.selectedId)
   const selectedIds = useStore((s) => s.selectedIds)
   const select = useStore((s) => s.select)
+  const toggleSelect = useStore((s) => s.toggleSelect)
   const showIds = useStore((s) => s.showIds)
   const setShowIds = useStore((s) => s.setShowIds)
+  const activeShapeIds = useMemo(
+    () => new Set(
+      chart.shapes
+        .filter((shape) => (shape.layerId ?? chart.layers[0]?.id) === chart.activeLayerId)
+        .map((shape) => shape.id)
+    ),
+    [chart.shapes, chart.layers, chart.activeLayerId]
+  )
+  const activeFixtures = useMemo(
+    () => chart.fixtures.filter((fixture) => activeShapeIds.has(fixture.shapeId)),
+    [chart.fixtures, activeShapeIds]
+  )
 
   // when a shape is picked on the canvas, bring its chip into view
   const listRef = useRef<HTMLDivElement>(null)
@@ -32,9 +45,9 @@ export function PatchTable(): React.JSX.Element {
       const sh = chart.shapes.find((x) => x.id === fx.shapeId)
       return sh ? repeatCount(sh) : 1
     }
-    const ov = detectOverlaps(chart.fixtures, repsOf)
+    const ov = detectOverlaps(activeFixtures, repsOf)
     return { overlaps: ov, flagged: new Set(ov.flat()) }
-  }, [chart.fixtures, chart.shapes])
+  }, [activeFixtures, chart.shapes])
 
   const shapeName = (shapeId: string): string => {
     const sh = chart.shapes.find((s) => s.id === shapeId)
@@ -47,7 +60,7 @@ export function PatchTable(): React.JSX.Element {
     <div style={wrapStyle}>
       <div style={headerRow}>
         <div style={{ fontFamily: F.display, fontSize: 15, letterSpacing: '0.1em', color: C.white }}>
-          番地一覧 <span style={{ color: C.hint, fontSize: 12 }}>({chart.fixtures.length})</span>
+          番地一覧 <span style={{ color: C.hint, fontSize: 12 }}>({activeFixtures.length})</span>
         </div>
         {overlaps.length > 0 && (
           <div style={{ color: '#e0726a', fontSize: 11, fontFamily: F.ui }}>
@@ -69,13 +82,14 @@ export function PatchTable(): React.JSX.Element {
       </div>
 
       <div ref={listRef} style={{ overflow: 'auto', flex: 1 }}>
-        {chart.fixtures.length === 0 && (
+        {activeFixtures.length === 0 && (
           <div style={{ color: C.faint, fontFamily: F.ui, fontSize: 12, padding: '8px 2px' }}>
             まだ番地がありません。電飾を選んで、右のパネルで番地をふってください。
           </div>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
-          {chart.fixtures.map((f, i) => {
+          {activeFixtures.map((f) => {
+            const i = chart.fixtures.findIndex((fixture) => fixture.id === f.id)
             const [s, e] = channelRange(f)
             const sh = chart.shapes.find((x) => x.id === f.shapeId)
             const cnt = sh ? repeatCount(sh) : 1
@@ -91,7 +105,11 @@ export function PatchTable(): React.JSX.Element {
               <button
                 key={f.id}
                 data-shape={f.shapeId}
-                onClick={() => select(f.shapeId)}
+                onClick={(e) => {
+                  // 札を普通に押すと1個、Shift/⌘を押しながらで追加・解除。
+                  if (e.shiftKey || e.metaKey || e.ctrlKey) toggleSelect(f.shapeId)
+                  else select(f.shapeId)
+                }}
                 title={`#${i + 1}  ${shapeName(f.shapeId)}${cnt > 1 ? ` ×${cnt}` : ''} · ${f.mode} · ch ${s}–${e}`}
                 style={{
                   display: 'flex',

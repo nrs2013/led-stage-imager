@@ -58,6 +58,8 @@ interface AppState {
   dmxRev: number
   manualMode: boolean
   manualByFixture: Record<string, [number, number, number]>
+  /** DMXチャート切替の一時的な手動上書き。nullなら卓に連動。保存しない。 */
+  pageSwitchManual: number | null
   /** 棚＆キャンバスの種別フィルタ（照明だけ/電飾だけ/両方）。UI状態でありchart(保存対象)には入れない。 */
   paletteFilter: PaletteFilter
   snapToPixel: boolean
@@ -142,6 +144,8 @@ interface AppState {
   pasteAt: (center: Point) => void
   /** 元から少し横にずらして即ペースト（マウス追従の連続スタンプはしない・LIGHT SKETCH と同じ）。 */
   pasteOffset: () => void
+  /** コピー元と全く同じ座標へ貼る。別CHARTへ配置を移す時の ⌘⇧V 用。 */
+  pasteSamePosition: () => void
   /** 選択中の図形を端/中央でそろえる（2個以上で有効・ロック分は対象外）。 */
   alignShapes: (edge: AlignEdge) => void
   /** 選択中の図形を等間隔に散らす（3個以上で有効・両端は固定して間を均す）。 */
@@ -189,12 +193,15 @@ interface AppState {
   /** Bulk-apply patch fields to every given shape's fixture (creating fixtures where
    *  missing) — ONE undo step; the multi-select Inspector's 一括変更. */
   bulkPatch: (shapeIds: string[], patch: Partial<Omit<Fixture, 'id' | 'shapeId'>>) => void
+  /** 複数の電飾本体へ同じ見た目・連続複製設定を一括反映する。 */
+  bulkUpdateShapes: (shapeIds: string[], patch: Partial<Shape>) => void
   setStepPatch: (on: boolean) => void
   /** Lock/unlock shapes (one undo step). Locking also drops them from the selection
    *  so they become untouchable immediately. */
   setLocked: (shapeIds: string[], on: boolean) => void
   removeFixture: (shapeId: string) => void
   setManualMode: (on: boolean) => void
+  setPageSwitchManual: (value: number | null) => void
   setManualColor: (fixtureId: string, rgb: [number, number, number]) => void
   setManualAll: (rgb: [number, number, number] | null) => void
   /** Quick Light: paint several fixtures one colour in a single update (and switch
@@ -235,8 +242,10 @@ interface AppState {
   setGlowAmount: (px: number) => void
   /** 電飾のにじみ(グロー)の全体既定 px（0=なし）。図形側 glowPx が優先。 */
   setLedGlowPx: (px: number) => void
-  /** 送出(Syphon/NDI)だけを整数分の1に縮める（1=原寸 / 2 / 3）。チャート本体は原寸のまま。 */
-  setOutDiv: (div: number) => void
+  /** 送出(Syphon/NDI)のピクセル数だけを変える。チャート本体は原寸のまま。 */
+  setOutputSize: (w: number, h: number) => void
+  setOutputAspectLocked: (locked: boolean) => void
+  setPageSwitch: (patch: Partial<{ enabled: boolean; universe: number; address: number }>) => void
   /** 部品の連続配置モード：パレットのカードをクリック→キャンバスをクリック連打で
    *  置き続ける（Escで終了）。null=通常。ドラッグ&ドロップは従来どおり並存。 */
   placingPart: string | null
@@ -320,6 +329,7 @@ export const useStore = create<AppState>()((set, get) => ({
   dmxRev: 0,
   manualMode: false,
   manualByFixture: {},
+  pageSwitchManual: null,
   paletteFilter: 'all',
   snapToPixel: true,
   stepPatch: false,
@@ -427,7 +437,15 @@ export const useStore = create<AppState>()((set, get) => ({
   // 履歴も切る＝新規/別ファイルを開いた直後の ⌘Z で「前の作品」が戻ってきて、
   // そのまま保存すると開いたファイルを別作品で上書きしてしまう事故を防ぐ。
   setChart: (chart) =>
-    set({ chart, selectedId: null, selectedIds: [], history: [], future: [], histTag: null }),
+    set({
+      chart,
+      selectedId: null,
+      selectedIds: [],
+      pageSwitchManual: null,
+      history: [],
+      future: [],
+      histTag: null
+    }),
   chartFileName: null,
   savedChart: null,
   markChartFile: (chartFileName, savedChart) => set({ chartFileName, savedChart }),
@@ -543,6 +561,15 @@ export const useStore = create<AppState>()((set, get) => ({
     const OFF = 14
     const d0 = pasteDelta(cb.shapes, { x: 0, y: 0 })
     get().pasteAt({ x: -d0.x + OFF, y: -d0.y + OFF })
+  },
+
+  pasteSamePosition: () => {
+    const cb = get().clipboard
+    if (!cb || cb.shapes.length === 0) return
+    // pasteAt は指定点へアンカーを合わせるため、原点に対する移動量を打ち消す点を渡せば
+    // コピー元と同じ座標になる。貼付先レイヤーだけは現在のCHARTへ置き換わる。
+    const d0 = pasteDelta(cb.shapes, { x: 0, y: 0 })
+    get().pasteAt({ x: -d0.x, y: -d0.y })
   },
 
   // 選択した図形を各 points ごと平行移動して動かす共通処理（整列・等間隔の land）。
@@ -789,22 +816,43 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({ chart: patchActiveUnderlay(s.chart, (u) => (u ? { ...u, visible } : null)) })),
 
   addLayer: (init) => {
+    if (get().chart.layers.length >= 256) return get().chart.activeLayerId
     const id = newId('layer')
     get().beginHistory()
     set((s) => ({
-      chart: {
-        ...s.chart,
-        layers: [
-          ...s.chart.layers,
-          {
-            id,
-            name: init?.name ?? `CHART ${s.chart.layers.length + 1}`,
-            underlay: init?.underlay ?? null,
-            visible: true
-          }
-        ],
-        activeLayerId: id
-      },
+      chart: (() => {
+        const currentIndex = s.chart.layers.findIndex((layer) => layer.id === s.chart.activeLayerId)
+        const current = s.chart.layers[currentIndex] ?? s.chart.layers[0]
+        // 通常の「＋空ページ」はチャート画像だけを引き継ぐ。電飾と番地はレイヤーに
+        // 追加しないので空のまま。旧版で作った空ページから追加する場合は、手前にある
+        // 一番近いチャート画像まで遡る。＋画像のように明示された時はそちらを使う。
+        const sourceUnderlay = current?.underlay ?? s.chart.layers
+          .slice(0, Math.max(0, currentIndex))
+          .reverse()
+          .find((layer) => layer.underlay)?.underlay ?? null
+        const inherited = sourceUnderlay
+          ? {
+              ...sourceUnderlay,
+              mask: sourceUnderlay.mask ? { ...sourceUnderlay.mask } : undefined
+            }
+          : null
+        const underlay = init && Object.prototype.hasOwnProperty.call(init, 'underlay')
+          ? (init.underlay ?? null)
+          : inherited
+        return {
+          ...s.chart,
+          layers: [
+            ...s.chart.layers,
+            {
+              id,
+              name: init?.name ?? `CHART ${s.chart.layers.length + 1}`,
+              underlay,
+              visible: true
+            }
+          ],
+          activeLayerId: id
+        }
+      })(),
       selectedId: null,
       selectedIds: []
     }))
@@ -935,6 +983,33 @@ export const useStore = create<AppState>()((set, get) => ({
     })
   },
 
+  bulkUpdateShapes: (shapeIds, patch) => {
+    if (!shapeIds.length) return
+    get().beginHistory('bulk-shape')
+    set((s) => {
+      const ids = new Set(shapeIds)
+      return {
+        chart: {
+          ...s.chart,
+          shapes: s.chart.shapes.map((sh) => {
+            if (!ids.has(sh.id)) return sh
+            if (!patch.repeat) return { ...sh, ...patch } as Shape
+            const repeatPatch = patch.repeat as Partial<NonNullable<Shape['repeat']>>
+            return {
+              ...sh,
+              ...patch,
+              repeat: {
+                count: repeatPatch.count ?? sh.repeat?.count ?? 1,
+                dx: repeatPatch.dx ?? sh.repeat?.dx ?? 10,
+                dy: repeatPatch.dy ?? sh.repeat?.dy ?? 0
+              }
+            } as Shape
+          })
+        }
+      }
+    })
+  },
+
   removeFixture: (shapeId) => {
     get().beginHistory()
     set((s) => ({
@@ -949,6 +1024,8 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   setManualMode: (on) => set({ manualMode: on }),
+  setPageSwitchManual: (value) =>
+    set({ pageSwitchManual: value == null ? null : Math.max(0, Math.min(255, Math.floor(value))) }),
   setManualColor: (fixtureId, rgb) =>
     set((s) => ({ manualByFixture: { ...s.manualByFixture, [fixtureId]: rgb } })),
   setManualMany: (fixtureIds, rgb) =>
@@ -997,8 +1074,41 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glowAmount: px } } })),
   setLedGlowPx: (px) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, ledGlowPx: px } } })),
-  setOutDiv: (div) =>
-    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, outDiv: div } } })),
+  setOutputSize: (w, h) =>
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        settings: {
+          ...s.chart.settings,
+          outputSize: { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) }
+        }
+      }
+    })),
+  setOutputAspectLocked: (locked) =>
+    set((s) => ({
+      chart: { ...s.chart, settings: { ...s.chart.settings, outputAspectLocked: locked } }
+    })),
+  setPageSwitch: (patch) =>
+    set((s) => ({
+      chart: {
+        ...s.chart,
+        settings: {
+          ...s.chart.settings,
+          pageSwitch: {
+            enabled: patch.enabled ?? s.chart.settings.pageSwitch?.enabled ?? false,
+            universe: Math.max(
+              0,
+              Math.min(32767, Math.floor(patch.universe ?? s.chart.settings.pageSwitch?.universe ?? 0))
+            ),
+            address: Math.max(
+              1,
+              Math.min(512, Math.floor(patch.address ?? s.chart.settings.pageSwitch?.address ?? 1))
+            )
+          }
+        }
+      },
+      ...(patch.enabled === false ? { pageSwitchManual: null } : {})
+    })),
   placingPart: null,
   setPlacingPart: (placingPart) => set({ placingPart }),
   setSyphonName: (name) => set((s) => ({ chart: { ...s.chart, syphon: { name } } })),
