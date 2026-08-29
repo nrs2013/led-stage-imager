@@ -5,7 +5,7 @@ import { channelRange, detectOverlaps } from '../dmx/patch'
 import { formatDmx, repeatCount } from '../dmx/address'
 import { resolveColor } from '../dmx/resolve'
 
-export function PatchTable(): React.JSX.Element {
+export function PatchTable({ onClose }: { onClose?: () => void } = {}): React.JSX.Element {
   const chart = useStore((s) => s.chart)
   const dmxByUniverse = useStore((s) => s.dmxByUniverse)
   const manualMode = useStore((s) => s.manualMode)
@@ -14,6 +14,7 @@ export function PatchTable(): React.JSX.Element {
   const selectedIds = useStore((s) => s.selectedIds)
   const select = useStore((s) => s.select)
   const toggleSelect = useStore((s) => s.toggleSelect)
+  const selectMany = useStore((s) => s.selectMany)
   const showIds = useStore((s) => s.showIds)
   const setShowIds = useStore((s) => s.setShowIds)
   const activeShapeIds = useMemo(
@@ -31,6 +32,7 @@ export function PatchTable(): React.JSX.Element {
 
   // when a shape is picked on the canvas, bring its chip into view
   const listRef = useRef<HTMLDivElement>(null)
+  const dragStart = useRef<number | null>(null)
   useEffect(() => {
     if (!selectedId) return
     const el = listRef.current?.querySelector(`[data-shape="${selectedId}"]`)
@@ -68,6 +70,7 @@ export function PatchTable(): React.JSX.Element {
           </div>
         )}
         <div style={{ flex: 1 }} />
+        {onClose && <button style={{ ...buttonStyle({}), padding: '5px 11px' }} onClick={onClose}>閉じる</button>}
         {/* 書き出し（MVR/CSV）は「ファイル」メニューへ移動。ここは番地の作業に要る物だけ。 */}
         <span style={{ fontSize: 11, color: C.label, fontFamily: F.mono }}>
           キャンバス {chart.canvas.w} × {chart.canvas.h}
@@ -88,7 +91,7 @@ export function PatchTable(): React.JSX.Element {
           </div>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignContent: 'flex-start' }}>
-          {activeFixtures.map((f) => {
+          {activeFixtures.map((f, activeIndex) => {
             const i = chart.fixtures.findIndex((fixture) => fixture.id === f.id)
             const [s, e] = channelRange(f)
             const sh = chart.shapes.find((x) => x.id === f.shapeId)
@@ -105,11 +108,17 @@ export function PatchTable(): React.JSX.Element {
               <button
                 key={f.id}
                 data-shape={f.shapeId}
-                onClick={(e) => {
-                  // 札を普通に押すと1個、Shift/⌘を押しながらで追加・解除。
+                onPointerDown={(e) => {
                   if (e.shiftKey || e.metaKey || e.ctrlKey) toggleSelect(f.shapeId)
-                  else select(f.shapeId)
+                  else { dragStart.current = activeIndex; select(f.shapeId) }
                 }}
+                onPointerEnter={(e) => {
+                  if (dragStart.current == null || e.buttons !== 1) return
+                  const a = Math.min(dragStart.current, activeIndex)
+                  const b = Math.max(dragStart.current, activeIndex)
+                  selectMany(activeFixtures.slice(a, b + 1).map((fixture) => fixture.shapeId))
+                }}
+                onPointerUp={() => { dragStart.current = null }}
                 title={`#${i + 1}  ${shapeName(f.shapeId)}${cnt > 1 ? ` ×${cnt}` : ''} · ${f.mode} · ch ${s}–${e}`}
                 style={{
                   display: 'flex',

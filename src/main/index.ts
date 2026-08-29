@@ -256,8 +256,10 @@ function openPreview(): void {
     previewWindow.loadFile(join(__dirname, '../renderer/index.html'), { search: 'output&live' })
   }
   previewWindow.webContents.on('did-finish-load', () => {
-    if (lastChart && previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed())
-      previewWindow.webContents.send('chart:update', lastChart)
+    if (previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed()) {
+      if (lastChart) previewWindow.webContents.send('chart:update', lastChart)
+      if (lastManual) previewWindow.webContents.send('manual:update', lastManual)
+    }
   })
   previewWindow.on('closed', () => {
     previewWindow = null
@@ -601,6 +603,8 @@ app.whenReady().then(() => {
   // TESTフェーダー状態（GPU出力窓が編集側と同じ絵を出すため）
   ipcMain.on('manual:sync', (_e, m) => {
     lastManual = m
+    if (previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed())
+      previewWindow.webContents.send('manual:update', m)
     sendToGpuOutput('manual:update', m)
   })
   // 画像照明モードの入退場＝GPU出力窓の描き手を切替（chart⇄imagelight）
