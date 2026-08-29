@@ -66,7 +66,9 @@ export interface DecorApi {
   /** 専用ファイルからArt-Net出力設定を読む（まだ実出力には適用しない）。 */
   importArtNetRelayConfig: () => Promise<unknown | null>
   /** Engine status (Syphon client connected, etc). */
-  getStatus: () => Promise<{ hasClients: boolean }>
+  getStatus: () => Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }>
+  /** 現在のファイル名をOSのウインドウタイトルへ表示する。 */
+  setWindowTitle: (title: string) => void
   /** Save chart JSON via a native dialog; resolves to the path or null. */
   saveChart: (json: string, name: string) => Promise<string | null>
   /** 画像照明の公演を、入口 .ledshow 入りのフォルダとして保存する。 */

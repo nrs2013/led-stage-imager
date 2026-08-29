@@ -112,6 +112,7 @@ const api = {
     ipcRenderer.invoke('artnet-relay:import-config'),
   getStatus: (): Promise<{ hasClients: boolean; syphonAvailable: boolean; platform: string }> =>
     ipcRenderer.invoke('engine:status'),
+  setWindowTitle: (title: string): void => ipcRenderer.send('window:set-title', title),
   // renderer が検出した MIDI 入力ポート名をメインへ通知（ステータスバー表示用・Web MIDI 用の名残）
   reportMidiInputs: (names: string[]): void => ipcRenderer.send('midi:inputs', names),
   /** MIDI をつなぎ直す。つながっている入力ポート名を返す。 */

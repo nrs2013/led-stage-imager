@@ -39,8 +39,6 @@ export function EditorMenus(): React.JSX.Element {
   const fileName = useStore((s) => s.chartFileName)
   const chartName = useStore((s) => s.chart.name)
   const markChartFile = useStore((s) => s.markChartFile)
-  // 真偽値だけを購読＝未保存の状態が変わった時しか作り直されない
-  const dirty = useStore((s) => s.savedChart !== s.chart)
   const shownFileName = fileName ? fileBaseName(fileName) : `${chartName || 'chart'}.ledimager`
   // 下絵は「差し替えた時」だけ参照が変わる＝図形を動かしても作り直されない
   const u = useStore((s) => activeLayerOf(s.chart).underlay)
@@ -246,26 +244,6 @@ export function EditorMenus(): React.JSX.Element {
         )}
       </MenuButton>
 
-      <span
-        style={{
-          fontSize: 11,
-          color: dirty ? C.amber : C.label,
-          fontFamily: F.mono,
-          whiteSpace: 'nowrap',
-          maxWidth: 220,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis'
-        }}
-        title={
-          fileName
-            ? dirty
-              ? `${fileName} — 保存していない変更があります（⌘S で保存）`
-              : `${fileName} — 保存済み`
-            : 'まだファイルにしていません（⌘S で保存先を聞きます）'
-        }
-      >
-        ファイル: {fileName ? `${dirty ? '● ' : ''}${shownFileName}` : `● ${shownFileName}（未保存）`}
-      </span>
       {savedFlash && (
         <span style={{ fontSize: 11, color: C.green, fontFamily: F.mono, whiteSpace: 'nowrap' }}>
           保存しました

@@ -415,6 +415,7 @@ async function confirmAndClose(kind: 'quit' | 'window'): Promise<void> {
 function createWindow(): void {
   closeConfirmed = false // ウィンドウを作り直したら確認もやり直し（Dockから再表示など）
   mainWindow = new BrowserWindow({
+    title: 'Untitled.ledimager（未保存）',
     width: 1280,
     height: 820,
     show: false,
@@ -678,6 +679,11 @@ app.whenReady().then(() => {
     }
     // 読み込むだけ。誤送出防止のため、この時点では保存も実出力への適用もしない。
     return normalizeRelayConfig(bundle.config)
+  })
+  ipcMain.on('window:set-title', (event, title: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return
+    const text = typeof title === 'string' ? title.trim().slice(0, 240) : ''
+    mainWindow.setTitle(text || 'Untitled.ledimager（未保存）')
   })
   ipcMain.handle('engine:status', () => {
     // Mac は Syphon→ブリッジ経路、Windows 等は直送(ndi-direct)から状態を取る。
