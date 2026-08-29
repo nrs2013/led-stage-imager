@@ -12,6 +12,7 @@ import type { Point, Shape } from '../model/types'
 import { fileToDataUrl } from '../io/image-pick'
 import { saveChartToFile, saveChartAsToFile } from '../io/file-ops'
 import { C, F } from '../ui/tokens'
+import { OutputRenderer } from '../output/OutputRenderer'
 import {
   cornerBounds,
   traceShape,
@@ -112,7 +113,6 @@ import { drawRoomLampSchematic, ROOMLAMP_DEFAULT_DIAMETER } from '../render/room
 import { drawStreetLampSchematic, STREETLAMP_DEFAULT_DIAMETER } from '../render/streetlamp'
 import { drawChandelierSchematic, CHANDELIER_DEFAULT_DIAMETER } from '../render/chandelier'
 import { mmToCanvasPx, mmPerPx } from '../model/scale'
-import { resolveColor } from '../dmx/resolve'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 
@@ -408,8 +408,14 @@ export function EditorCanvas(): React.JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const contentRef = useRef<HTMLCanvasElement | null>(null)
+  const liveRef = useRef<HTMLCanvasElement | null>(null)
+  const liveRendererRef = useRef<OutputRenderer | null>(null)
   if (!contentRef.current && typeof document !== 'undefined') {
     contentRef.current = document.createElement('canvas')
+  }
+  if (!liveRef.current && typeof document !== 'undefined') {
+    liveRef.current = document.createElement('canvas')
+    liveRendererRef.current = new OutputRenderer(liveRef.current)
   }
   const underlayImg = useRef<HTMLImageElement | null>(null)
   const holesImg = useRef<HTMLImageElement | null>(null)
@@ -635,25 +641,15 @@ export function EditorCanvas(): React.JSX.Element {
     // 番地一覧だけでなく、チャート上の実際の場所を Art-Net の受信色で光らせる。
     // 保存データと Syphon/NDI 出力には触れない、編集画面だけの確認表示。
     const st = useStore.getState()
-    const homeId = chart.layers[0]?.id
-    const fxByShape = new Map(chart.fixtures.map((fixture) => [fixture.shapeId, fixture]))
+    liveRendererRef.current?.render(
+      chart,
+      st.dmxByUniverse,
+      chart.settings.gamma,
+      st.manualMode ? st.manualByFixture : null,
+      st.pageSwitchManual
+    )
     ctx.globalCompositeOperation = 'lighter'
-    for (const shape of chart.shapes) {
-      if ((shape.layerId ?? homeId) !== chart.activeLayerId) continue
-      if (!visibleByFilter(shape, paletteFilter)) continue
-      const fixture = fxByShape.get(shape.id)
-      if (!fixture) continue
-      const [r, g, b] = resolveColor(
-        fixture,
-        st.dmxByUniverse,
-        chart.settings.gamma,
-        st.manualMode ? st.manualByFixture : null
-      )
-      if (r === 0 && g === 0 && b === 0) continue
-      const color = `rgb(${r},${g},${b})`
-      ctx.globalAlpha = shape.locked ? 0.4 : 1
-      drawShapeInto(ctx, shape, color, color, boostRef.current)
-    }
+    if (liveRef.current) ctx.drawImage(liveRef.current, 0, 0)
     ctx.globalAlpha = 1
     ctx.globalCompositeOperation = 'source-over'
 
