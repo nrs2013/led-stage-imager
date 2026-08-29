@@ -1,0 +1,19 @@
+extends: ./electron-builder.yml
+appId: com.decor.studio.test
+productName: LED STAGE IMAGER TEST
+fileAssociations: []
+extraMetadata:
+  name: decor-studio-test
+  productName: LED STAGE IMAGER TEST
+win:
+  executableName: led-stage-imager-test
+  files:
+    - '!**/node_modules/node-syphon/**'
+    - '!resources/ndi/libndi.dylib'
+    - '!resources/ndi/syphon2ndi'
+    - '!resources/midi/midiread'
+nsis:
+  artifactName: LED-STAGE-IMAGER-TEST-${version}-setup.${ext}
+  shortcutName: LED STAGE IMAGER TEST
+  uninstallDisplayName: LED STAGE IMAGER TEST
+  createDesktopShortcut: always

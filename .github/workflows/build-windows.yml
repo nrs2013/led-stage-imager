@@ -34,12 +34,12 @@ jobs:
       - name: Windowsインストーラーを作成
         # NDI DLLは公式SDKのフォーム取得になったため自動同梱しない。
         # Windows側にNDI Tools / Resolumeのランタイムがあれば、アプリは既存DLLを探索して使用する。
-        run: npm run build && npx electron-builder --win --x64
+        run: npm run build && npx electron-builder --config electron-builder.test.yml --win --x64
 
       - name: ダウンロード用に保存
         uses: actions/upload-artifact@v4
         with:
-          name: LED-STAGE-IMAGER-Windows-v1.3.4-NDI-Runtime-Required
-          path: dist/*setup.exe
+          name: LED-STAGE-IMAGER-TEST-Windows-v1.3.4-NDI-Runtime-Required
+          path: dist/LED-STAGE-IMAGER-TEST-*-setup.exe
           if-no-files-found: error
           retention-days: 30
