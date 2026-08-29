@@ -1,0 +1,57 @@
+name: Windows版を作成
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/windows-build-v1.3.4
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Windows x64・NDI入り
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: ソースコードを取得
+        uses: actions/checkout@v4
+
+      - name: Node.jsを準備
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 必要な部品を準備
+        run: npm ci
+
+      - name: 公式NDI SDKからWindows用DLLを準備
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'ndi-sdk.exe'
+          $sdkDir = Join-Path $env:RUNNER_TEMP 'ndi-sdk'
+          Invoke-WebRequest -Uri 'https://downloads.ndi.tv/SDK/NDI%206%20SDK.exe' -OutFile $installer
+          $process = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$sdkDir" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NDI SDK installer failed: $($process.ExitCode)" }
+          $dll = Get-ChildItem -Path $sdkDir -Filter 'Processing.NDI.Lib.x64.dll' -Recurse | Select-Object -First 1
+          if (-not $dll) { throw 'Processing.NDI.Lib.x64.dll was not found in the NDI SDK.' }
+          New-Item -ItemType Directory -Force -Path 'resources/ndi' | Out-Null
+          Copy-Item $dll.FullName 'resources/ndi/Processing.NDI.Lib.x64.dll'
+
+      - name: 型とテストを確認
+        run: npm run typecheck && npm test
+
+      - name: Windowsインストーラーを作成
+        run: npm run build:win
+
+      - name: ダウンロード用に保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: LED-STAGE-IMAGER-Windows-v1.3.4
+          path: dist/*setup.exe
+          if-no-files-found: error
+          retention-days: 30
