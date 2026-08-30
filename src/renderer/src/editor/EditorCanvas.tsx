@@ -124,7 +124,6 @@ const dist = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y)
 // 下の番地札と同じ解決処理でキャンバス上へ重ねて表示する。
 const SHAPE_IDLE_STROKE = '#000000'
 const SHAPE_IDLE_FILL = '#000000'
-const SELECT_STROKE = '#ffffff'
 
 type DrawType = Exclude<Shape['type'], never>
 interface View {
@@ -681,21 +680,32 @@ export function EditorCanvas(): React.JSX.Element {
         drawShapeInto(ctx, dShape, C.accent, 'rgba(123,197,232,0.3)', boostRef.current)
       }
     }
-    // every selected shape lights up white; handles only for a single selection
+    // Selection must not repaint the fixture itself: doing so hid its live/manual
+    // colour and made a lit fixture indistinguishable from an idle selection.
+    // Keep the real render untouched and mark each selection with an outer cyan
+    // dashed frame instead (editor-only; never reaches Syphon/NDI).
     for (const sid of selectedIds) {
       if (sid === selectedId) continue // drawn below with bounds + handles
       const ssh = chart.shapes.find((s) => s.id === sid)
-      if (ssh) drawShapeInto(ctx, ssh, SELECT_STROKE, 'rgba(255,255,255,0.25)', boostRef.current)
+      if (!ssh) continue
+      const b = shapeArrayBounds(ssh)
+      const lw = 1.5 / v.scale
+      const pad = 4 / v.scale
+      ctx.strokeStyle = C.accent
+      ctx.lineWidth = lw
+      ctx.setLineDash([5 / v.scale, 3 / v.scale])
+      ctx.strokeRect(b.x - pad, b.y - pad, Math.max(b.w, lw) + pad * 2, Math.max(b.h, lw) + pad * 2)
+      ctx.setLineDash([])
     }
     const sel = chart.shapes.find((s) => s.id === selectedId)
     if (sel) {
-      drawShapeInto(ctx, sel, SELECT_STROKE, 'rgba(255,255,255,0.25)', boostRef.current)
       const b = shapeArrayBounds(sel)
       const lw = 1 / v.scale
+      const pad = 4 / v.scale
       ctx.strokeStyle = C.accent
       ctx.lineWidth = lw
       ctx.setLineDash([4 / v.scale, 3 / v.scale])
-      ctx.strokeRect(b.x, b.y, b.w, b.h)
+      ctx.strokeRect(b.x - pad, b.y - pad, Math.max(b.w, lw) + pad * 2, Math.max(b.h, lw) + pad * 2)
       ctx.setLineDash([])
       // real grab handles: vertices (line/polyline) or box corners (rect etc.)
       const hs = 8 / v.scale
