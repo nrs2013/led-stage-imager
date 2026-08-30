@@ -29,6 +29,7 @@ export function LayersPanel(): React.JSX.Element {
   const dmxSwitchOn = pageSwitch?.enabled === true
   const switchUniverse = (pageSwitch?.universe ?? 0) + 1
   const switchAddress = pageSwitch?.address ?? 1
+  const switchValue = useStore.getState().dmxByUniverse[pageSwitch?.universe ?? 0]?.[switchAddress - 1]
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const cancelRename = useRef(false) // Esc=取り消し。blur(commit)を1回だけ握り潰す
@@ -120,7 +121,7 @@ export function LayersPanel(): React.JSX.Element {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
           <span style={{ color: pageSwitchOn ? C.accent : C.hint, fontSize: 10, fontFamily: F.mono, flex: 1 }}>
             {pageSwitchOn
-              ? `${pageSwitchManual == null ? 'DMX' : '手動'} ${pageIndex} → ${layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}`
+              ? `${pageSwitchManual == null ? `DMX値 ${switchValue ?? '未受信'}` : '手動'} → ${layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}`
               : 'DMX切替 OFF — 全CHART送出'}
           </span>
           <button

@@ -47,7 +47,14 @@ if (IS_TEST_BUILD) app.setPath('userData', join(app.getPath('appData'), 'LED STA
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
 const receiver = new ArtNetReceiver()
-const artnetRelay = new ArtNetRelay()
+// Use the receiver's bound UDP 6454 socket for relay output. A separate dgram socket
+// would choose an ephemeral source port, which real Art-Net nodes may ignore.
+const artnetRelay = new ArtNetRelay((data, ip) => {
+  const sent = receiver.send(data, ip, (error) => {
+    if (error) console.error(`[Art-Net relay] ${ip}: ${error.message}`)
+  })
+  if (!sent) console.error(`[Art-Net relay] ${ip}: Art-Net受信ソケットが未起動です`)
+})
 const publisher = new OutputPublisher()
 let mainWindow: BrowserWindow | null = null
 let previewWindow: BrowserWindow | null = null
