@@ -1107,7 +1107,9 @@ export const useStore = create<AppState>()((set, get) => ({
           }
         }
       },
-      ...(patch.enabled === false ? { pageSwitchManual: null } : {})
+      // DMX切替のON・Universe・CHを操作した時点で手動上書きを解除する。
+      // 「切替」で確認した後にDMXをONにしても手動のまま固まる事故を防ぐ。
+      pageSwitchManual: null
     })),
   placingPart: null,
   setPlacingPart: (placingPart) => set({ placingPart }),

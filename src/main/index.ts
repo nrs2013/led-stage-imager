@@ -38,10 +38,23 @@ import {
   sendToGpuOutput
 } from './output/gpu-output'
 
+// Windows確認版は正式版と同居させる。アプリ名だけでなく userData も明示的に分け、
+// 正式版の前回状態・自動保存・Local Storage を絶対に読み書きしない。
+const IS_TEST_BUILD = app.getName().toLowerCase().includes('test')
+const OUTPUT_NAME = IS_TEST_BUILD ? 'LED STAGE IMAGER TEST' : 'LED STAGE IMAGER'
+if (IS_TEST_BUILD) app.setPath('userData', join(app.getPath('appData'), 'LED STAGE IMAGER TEST'))
+
 // Engine: Art-Net in (UDP 6454) is forwarded to the renderer, which renders the chart and
 // sends frames back to be published on the "LED STAGE IMAGER" Syphon source.
 const receiver = new ArtNetReceiver()
-const artnetRelay = new ArtNetRelay()
+// Use the receiver's bound UDP 6454 socket for relay output. A separate dgram socket
+// would choose an ephemeral source port, which real Art-Net nodes may ignore.
+const artnetRelay = new ArtNetRelay((data, ip) => {
+  const sent = receiver.send(data, ip, (error) => {
+    if (error) console.error(`[Art-Net relay] ${ip}: ${error.message}`)
+  })
+  if (!sent) console.error(`[Art-Net relay] ${ip}: Art-Net受信ソケットが未起動です`)
+})
 const publisher = new OutputPublisher()
 let mainWindow: BrowserWindow | null = null
 let previewWindow: BrowserWindow | null = null
@@ -152,14 +165,14 @@ function startDebugBridge(): void {
 }
 
 function startEngine(): void {
-  publisher.start('LED STAGE IMAGER')
+  publisher.start(OUTPUT_NAME)
   if (process.platform === 'darwin') {
-    startNdiBridge('LED STAGE IMAGER') // Mac: 同梱 Syphon→NDI ブリッジを自動起動（実績経路）
+    startNdiBridge(OUTPUT_NAME) // Mac: 同梱 Syphon→NDI ブリッジを自動起動（実績経路）
   } else {
     // Windows 等: Syphon が無いので RGBA を直接 NDI 送信。NDIランタイムを探して使う。
     const ndiDir = join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'ndi')
     const lib = resolveNdiLibPath(ndiDir)
-    if (lib) startNdiDirect('LED STAGE IMAGER', lib)
+    if (lib) startNdiDirect(OUTPUT_NAME, lib)
     else console.warn('[ndi-direct] NDIランタイム未検出。NDI Tools か Resolume を入れると有効になります。')
   }
   receiver.on('dmx', (pkt: ArtDmxPacket) => {
@@ -185,7 +198,7 @@ function startEngine(): void {
     broadcast('artnet:status', lastArtnetStatus)
   })
   receiver.start()
-  console.log('[engine] Art-Net receiver (UDP 6454) + Syphon/NDI "LED STAGE IMAGER" started')
+  console.log(`[engine] Art-Net receiver (UDP 6454) + Syphon/NDI "${OUTPUT_NAME}" started`)
 }
 
 function stopEngine(): void {
@@ -250,8 +263,10 @@ function openPreview(): void {
     previewWindow.loadFile(join(__dirname, '../renderer/index.html'), { search: 'output&live' })
   }
   previewWindow.webContents.on('did-finish-load', () => {
-    if (lastChart && previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed())
-      previewWindow.webContents.send('chart:update', lastChart)
+    if (previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed()) {
+      if (lastChart) previewWindow.webContents.send('chart:update', lastChart)
+      if (lastManual) previewWindow.webContents.send('manual:update', lastManual)
+    }
   })
   previewWindow.on('closed', () => {
     previewWindow = null
@@ -595,6 +610,8 @@ app.whenReady().then(() => {
   // TESTフェーダー状態（GPU出力窓が編集側と同じ絵を出すため）
   ipcMain.on('manual:sync', (_e, m) => {
     lastManual = m
+    if (previewWindow && !previewWindow.isDestroyed() && !previewWindow.webContents.isDestroyed())
+      previewWindow.webContents.send('manual:update', m)
     sendToGpuOutput('manual:update', m)
   })
   // 画像照明モードの入退場＝GPU出力窓の描き手を切替（chart⇄imagelight）

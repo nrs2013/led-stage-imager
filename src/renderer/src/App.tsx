@@ -21,7 +21,7 @@ import { useAutosave } from './io/autosave'
 import type { Chart } from './model/types'
 import { parseChart } from './io/chart-file'
 import { saveChartToFile } from './io/file-ops'
-import { C, chrome } from './ui/tokens'
+import { C, chrome, buttonStyle } from './ui/tokens'
 
 // GPU直結出力の見えない窓（?syphon-output）。'output' を部分一致で含むので先に判定する。
 const isGpuOutput =
@@ -36,6 +36,7 @@ interface DecorApi {
   gpuOutputStatus?: () => Promise<boolean>
   onGpuOutputActive?: (cb: (active: boolean) => void) => (() => void) | void
   sendManual?: (m: unknown) => void
+  onManualUpdate?: (cb: (m: unknown) => void) => (() => void) | void
   onEditUndo?: (cb: () => void) => (() => void) | void
   onEditRedo?: (cb: () => void) => (() => void) | void
   onEditCopy?: (cb: () => void) => (() => void) | void
@@ -129,13 +130,27 @@ function usePreviewMirror(): void {
 /** Output window: receive chart updates from the editor, Esc to close. */
 function useOutputReceiver(): void {
   useEffect(() => {
-    const off = getApi()?.onChartUpdate?.((chart) => useStore.getState().setChart(chart as Chart))
+    const api = getApi()
+    const off = api?.onChartUpdate?.((chart) => useStore.getState().setChart(chart as Chart))
+    const offManual = api?.onManualUpdate?.((m) => {
+      const v = m as {
+        on?: boolean
+        byFixture?: Record<string, [number, number, number]>
+        pageSwitchManual?: number | null
+      } | null
+      useStore.setState({
+        manualMode: !!v?.on,
+        manualByFixture: v?.byFixture ?? {},
+        pageSwitchManual: v?.pageSwitchManual ?? null
+      })
+    })
     const onKey = (e: KeyboardEvent): void => {
       if (e.code === 'Escape') window.close()
     }
     window.addEventListener('keydown', onKey)
     return () => {
       off?.()
+      offManual?.()
       window.removeEventListener('keydown', onKey)
     }
   }, [])
@@ -307,6 +322,7 @@ function EditorApp(): React.JSX.Element {
   const setImageLight = useStore((s) => s.setImageLight)
   const helpOpen = useStore((s) => s.helpOpen)
   const [testOpen, setTestOpen] = useState(false)
+  const [patchOpen, setPatchOpen] = useState(false)
   useDmxBridge()
   useMask()
   usePreviewMirror()
@@ -392,7 +408,16 @@ function EditorApp(): React.JSX.Element {
               <Inspector />
             </div>
           </div>
-          <PatchTable />
+          {patchOpen ? (
+            <PatchTable onClose={() => setPatchOpen(false)} />
+          ) : (
+            <div style={{ height: 38, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 14px', borderTop: `0.5px solid ${C.border}`, background: chrome.bar }}>
+              <button style={{ ...buttonStyle({}), padding: '5px 12px' }} onClick={() => setPatchOpen(true)}>
+                番地一覧を表示
+              </button>
+              <span style={{ marginLeft: 10, color: C.faint, fontSize: 11 }}>通常は閉じています</span>
+            </div>
+          )}
         </>
       ) : (
         <main

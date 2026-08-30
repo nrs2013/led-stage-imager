@@ -4,6 +4,7 @@ import { C, F, chrome, buttonStyle } from '../ui/tokens'
 import { NumberField } from '../ui/NumberField'
 import { MenuButton, MenuItem } from '../ui/MenuButton'
 import { EditorMenus } from './EditorMenus'
+import { APP_VERSION } from '../app-version'
 
 /** Tool icons: the shape you click is the shape you draw next. */
 function ToolIcon({ id }: { id: Tool }): React.JSX.Element {
@@ -183,7 +184,7 @@ export function Toolbar({
           LED&nbsp;STAGE&nbsp;<span style={{ color: C.accent }}>IMAGER</span>
         </div>
         <div style={{ color: C.hint, fontFamily: F.mono, fontSize: 9, letterSpacing: '0.08em', marginTop: 4 }}>
-          Version 1.3.3&nbsp;·&nbsp;{platformLabel}
+          Version {APP_VERSION}&nbsp;·&nbsp;{platformLabel}
         </div>
       </div>
 

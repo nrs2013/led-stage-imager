@@ -1,0 +1,45 @@
+name: Windows版を作成
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: ソースコードを取得
+        uses: actions/checkout@v4
+
+      - name: Node.jsを準備
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 必要な部品を準備
+        run: npm ci
+
+      - name: 型とテストを確認
+        run: npm run typecheck && npm test
+
+      - name: Windowsインストーラーを作成
+        # NDI DLLは公式SDKのフォーム取得になったため自動同梱しない。
+        # Windows側にNDI Tools / Resolumeのランタイムがあれば、アプリは既存DLLを探索して使用する。
+        run: npm run build && npx electron-builder --config electron-builder.test.yml --win --x64
+
+      - name: ダウンロード用に保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: LED-STAGE-IMAGER-TEST-Windows-v1.3.10-NDI-Runtime-Required
+          path: dist/LED-STAGE-IMAGER-TEST-*-setup.exe
+          if-no-files-found: error
+          retention-days: 30

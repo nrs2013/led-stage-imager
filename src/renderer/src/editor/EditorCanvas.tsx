@@ -12,6 +12,7 @@ import type { Point, Shape } from '../model/types'
 import { fileToDataUrl } from '../io/image-pick'
 import { saveChartToFile, saveChartAsToFile } from '../io/file-ops'
 import { C, F } from '../ui/tokens'
+import { OutputRenderer } from '../output/OutputRenderer'
 import {
   cornerBounds,
   traceShape,
@@ -112,7 +113,6 @@ import { drawRoomLampSchematic, ROOMLAMP_DEFAULT_DIAMETER } from '../render/room
 import { drawStreetLampSchematic, STREETLAMP_DEFAULT_DIAMETER } from '../render/streetlamp'
 import { drawChandelierSchematic, CHANDELIER_DEFAULT_DIAMETER } from '../render/chandelier'
 import { mmToCanvasPx, mmPerPx } from '../model/scale'
-import { resolveColor } from '../dmx/resolve'
 
 const cellOfPt = (p: Point): Point => ({ x: Math.floor(p.x), y: Math.floor(p.y) })
 
@@ -124,7 +124,6 @@ const dist = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y)
 // 下の番地札と同じ解決処理でキャンバス上へ重ねて表示する。
 const SHAPE_IDLE_STROKE = '#000000'
 const SHAPE_IDLE_FILL = '#000000'
-const SELECT_STROKE = '#ffffff'
 
 type DrawType = Exclude<Shape['type'], never>
 interface View {
@@ -408,8 +407,14 @@ export function EditorCanvas(): React.JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const contentRef = useRef<HTMLCanvasElement | null>(null)
+  const liveRef = useRef<HTMLCanvasElement | null>(null)
+  const liveRendererRef = useRef<OutputRenderer | null>(null)
   if (!contentRef.current && typeof document !== 'undefined') {
     contentRef.current = document.createElement('canvas')
+  }
+  if (!liveRef.current && typeof document !== 'undefined') {
+    liveRef.current = document.createElement('canvas')
+    liveRendererRef.current = new OutputRenderer(liveRef.current)
   }
   const underlayImg = useRef<HTMLImageElement | null>(null)
   const holesImg = useRef<HTMLImageElement | null>(null)
@@ -635,25 +640,15 @@ export function EditorCanvas(): React.JSX.Element {
     // 番地一覧だけでなく、チャート上の実際の場所を Art-Net の受信色で光らせる。
     // 保存データと Syphon/NDI 出力には触れない、編集画面だけの確認表示。
     const st = useStore.getState()
-    const homeId = chart.layers[0]?.id
-    const fxByShape = new Map(chart.fixtures.map((fixture) => [fixture.shapeId, fixture]))
+    liveRendererRef.current?.render(
+      chart,
+      st.dmxByUniverse,
+      chart.settings.gamma,
+      st.manualMode ? st.manualByFixture : null,
+      st.pageSwitchManual
+    )
     ctx.globalCompositeOperation = 'lighter'
-    for (const shape of chart.shapes) {
-      if ((shape.layerId ?? homeId) !== chart.activeLayerId) continue
-      if (!visibleByFilter(shape, paletteFilter)) continue
-      const fixture = fxByShape.get(shape.id)
-      if (!fixture) continue
-      const [r, g, b] = resolveColor(
-        fixture,
-        st.dmxByUniverse,
-        chart.settings.gamma,
-        st.manualMode ? st.manualByFixture : null
-      )
-      if (r === 0 && g === 0 && b === 0) continue
-      const color = `rgb(${r},${g},${b})`
-      ctx.globalAlpha = shape.locked ? 0.4 : 1
-      drawShapeInto(ctx, shape, color, color, boostRef.current)
-    }
+    if (liveRef.current) ctx.drawImage(liveRef.current, 0, 0)
     ctx.globalAlpha = 1
     ctx.globalCompositeOperation = 'source-over'
 
@@ -685,21 +680,32 @@ export function EditorCanvas(): React.JSX.Element {
         drawShapeInto(ctx, dShape, C.accent, 'rgba(123,197,232,0.3)', boostRef.current)
       }
     }
-    // every selected shape lights up white; handles only for a single selection
+    // Selection must not repaint the fixture itself: doing so hid its live/manual
+    // colour and made a lit fixture indistinguishable from an idle selection.
+    // Keep the real render untouched and mark each selection with an outer cyan
+    // dashed frame instead (editor-only; never reaches Syphon/NDI).
     for (const sid of selectedIds) {
       if (sid === selectedId) continue // drawn below with bounds + handles
       const ssh = chart.shapes.find((s) => s.id === sid)
-      if (ssh) drawShapeInto(ctx, ssh, SELECT_STROKE, 'rgba(255,255,255,0.25)', boostRef.current)
+      if (!ssh) continue
+      const b = shapeArrayBounds(ssh)
+      const lw = 1.5 / v.scale
+      const pad = 4 / v.scale
+      ctx.strokeStyle = C.accent
+      ctx.lineWidth = lw
+      ctx.setLineDash([5 / v.scale, 3 / v.scale])
+      ctx.strokeRect(b.x - pad, b.y - pad, Math.max(b.w, lw) + pad * 2, Math.max(b.h, lw) + pad * 2)
+      ctx.setLineDash([])
     }
     const sel = chart.shapes.find((s) => s.id === selectedId)
     if (sel) {
-      drawShapeInto(ctx, sel, SELECT_STROKE, 'rgba(255,255,255,0.25)', boostRef.current)
       const b = shapeArrayBounds(sel)
       const lw = 1 / v.scale
+      const pad = 4 / v.scale
       ctx.strokeStyle = C.accent
       ctx.lineWidth = lw
       ctx.setLineDash([4 / v.scale, 3 / v.scale])
-      ctx.strokeRect(b.x, b.y, b.w, b.h)
+      ctx.strokeRect(b.x - pad, b.y - pad, Math.max(b.w, lw) + pad * 2, Math.max(b.h, lw) + pad * 2)
       ctx.setLineDash([])
       // real grab handles: vertices (line/polyline) or box corners (rect etc.)
       const hs = 8 / v.scale
