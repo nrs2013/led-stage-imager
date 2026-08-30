@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { pickImage } from '../io/image-pick'
 import { C, F, buttonStyle } from '../ui/tokens'
@@ -22,7 +22,7 @@ export function LayersPanel(): React.JSX.Element {
   const setPageSwitchManual = useStore((s) => s.setPageSwitchManual)
   const setPageSwitch = useStore((s) => s.setPageSwitch)
   const pageSwitch = useStore((s) => s.chart.settings.pageSwitch)
-  useStore((s) => s.dmxRev) // DMX値が変わった時だけ「送出中」表示を更新
+  const dmxRev = useStore((s) => s.dmxRev) // DMX値が変わった時だけ「送出中」表示を更新
   const chart = useStore.getState().chart
   const pageIndex = outputLayerIndex(chart, useStore.getState().dmxByUniverse, pageSwitchManual)
   const pageSwitchOn = pageIndex != null
@@ -33,6 +33,13 @@ export function LayersPanel(): React.JSX.Element {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const cancelRename = useRef(false) // Esc=取り消し。blur(commit)を1回だけ握り潰す
+
+  useEffect(() => {
+    // 手動確認中はそのページを守る。DMX連動中だけ中央画面も実際の送出ページへ追従する。
+    if (!dmxSwitchOn || pageSwitchManual != null || pageIndex == null) return
+    const onAirLayer = layers[pageIndex]
+    if (onAirLayer && onAirLayer.id !== activeLayerId) setActiveLayer(onAirLayer.id)
+  }, [activeLayerId, dmxRev, dmxSwitchOn, layers, pageIndex, pageSwitchManual, setActiveLayer])
 
   const addWithImage = async (): Promise<void> => {
     const dataUrl = await pickImage()

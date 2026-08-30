@@ -39,7 +39,7 @@ jobs:
       - name: ダウンロード用に保存
         uses: actions/upload-artifact@v4
         with:
-          name: LED-STAGE-IMAGER-TEST-Windows-v1.3.9-NDI-Runtime-Required
+          name: LED-STAGE-IMAGER-TEST-Windows-v1.3.10-NDI-Runtime-Required
           path: dist/LED-STAGE-IMAGER-TEST-*-setup.exe
           if-no-files-found: error
           retention-days: 30
