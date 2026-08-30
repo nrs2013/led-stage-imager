@@ -26,6 +26,8 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
   const [speed, setSpeed] = useState(500)
   const [startUniverse, setStartUniverse] = useState(1)
   const [startChannel, setStartChannel] = useState(1)
+  const [startNumber, setStartNumber] = useState(1)
+  const [previewTarget, setPreviewTarget] = useState<'selection' | 'step'>('selection')
   const previousSelection = useRef<string[]>([])
   const litColor = (): [number, number, number] => {
     const k = dimmer / 100
@@ -52,7 +54,7 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
           universe: fixture.universe,
           start: fixture.start
         }))
-        .filter((item) => item.universe * 512 + item.start - 1 >= start)
+        .filter((item) => order !== 'number' || chart.fixtures.findIndex((f) => f.id === item.fixture.id) + 1 >= startNumber)
     }
     const items = fixtures.flatMap((fixture) => {
       const shape = shapeById.get(fixture.shapeId)
@@ -65,7 +67,7 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
     items.sort((a, b) => a.universe - b.universe || a.start - b.start || (a.rep ?? 0) - (b.rep ?? 0))
     return items
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chart.fixtures, shapeById, selectedFixtureIds.join('|'), startUniverse, startChannel, order, tapOrder])
+  }, [chart.fixtures, shapeById, selectedFixtureIds.join('|'), startUniverse, startChannel, startNumber, order, tapOrder])
   const lightOnly = (index: number): void => {
     if (!sequence.length) return
     const next = ((index % sequence.length) + sequence.length) % sequence.length
@@ -73,6 +75,7 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
     setManualAll([0, 0, 0])
     const item = sequence[next]
     setManualMany([item.rep == null ? item.fixture.id : `${item.fixture.id}:${item.rep}`], litColor())
+    setPreviewTarget('step')
     setStep(next)
   }
 
@@ -84,8 +87,20 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
     if (!ids.length) return
     setTapOrder((old) => [...old.filter((id) => !ids.includes(id)), ...ids])
     setManualMany(ids, litColor())
+    setPreviewTarget('selection')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIds.join('|')])
+  useEffect(() => {
+    if (!manualMode || running) return
+    if (previewTarget === 'selection') {
+      if (selectedFixtureIds.length) setManualMany(selectedFixtureIds, litColor())
+      return
+    }
+    const item = step >= 0 ? sequence[step] : undefined
+    if (item) setManualMany([item.rep == null ? item.fixture.id : `${item.fixture.id}:${item.rep}`], litColor())
+    // Colour and Dimmer changes must immediately affect what is already selected.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [color, dimmer])
   useEffect(() => {
     if (!running || !sequence.length) return
     const iv = setInterval(() => setStep((current) => {
@@ -94,6 +109,7 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
       setManualAll([0, 0, 0])
       const item = sequence[next]
       setManualMany([item.rep == null ? item.fixture.id : `${item.fixture.id}:${item.rep}`], litColor())
+      setPreviewTarget('step')
       return next
     }), Math.max(80, speed))
     return () => clearInterval(iv)
@@ -131,12 +147,13 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
         <button style={{ ...buttonStyle({ active: !manualMode }), flex: 1 }} onClick={() => { setManualMode(false); setRunning(false) }}>Art-Net</button>
         <button style={{ ...buttonStyle({}), flex: 1 }} onClick={() => { setRunning(false); setManualAll([0, 0, 0]); setManualMode(true) }}>暗転</button>
       </div>
-      <button style={{ ...buttonStyle({ active: selectedFixtureIds.length > 0 }), width: '100%', marginTop: 8 }} onClick={() => { setRunning(false); setManualAll([0, 0, 0]); setManualMany(selectedFixtureIds, litColor()) }}>選択した全てを点灯</button>
+      <button style={{ ...buttonStyle({ active: selectedFixtureIds.length > 0 }), width: '100%', marginTop: 8 }} onClick={() => { setRunning(false); setManualAll([0, 0, 0]); setManualMany(selectedFixtureIds, litColor()); setPreviewTarget('selection') }}>選択した全てを点灯</button>
     </div>
     <div style={box}>
       <div style={label}>順番</div>
       <div style={{ display: 'flex', gap: 5 }}>{([['tap', 'タップ順'], ['number', '#番号順'], ['address', 'DMX順']] as [Order, string][]).map(([v, text]) => <button key={v} style={{ ...buttonStyle({ active: order === v }), flex: 1, padding: '6px 3px' }} onClick={() => { setOrder(v); setStep(-1) }}>{text}</button>)}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 8 }}>
+        <label style={smallLabel}>開始 #No.<input type="number" min={1} max={Math.max(1, chart.fixtures.length)} value={startNumber} onChange={(e) => setStartNumber(clamp(Number(e.target.value), 1, Math.max(1, chart.fixtures.length)))} style={numberInput} /></label>
         <label style={smallLabel}>開始 Universe<input type="number" min={1} value={startUniverse} onChange={(e) => setStartUniverse(Math.max(1, Number(e.target.value)))} style={numberInput} /></label>
         <label style={smallLabel}>開始 Channel<input type="number" min={1} max={512} value={startChannel} onChange={(e) => setStartChannel(clamp(Number(e.target.value), 1, 512))} style={numberInput} /></label>
       </div>

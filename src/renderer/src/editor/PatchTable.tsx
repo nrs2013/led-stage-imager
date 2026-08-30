@@ -116,7 +116,10 @@ export function PatchTable({ onClose }: { onClose?: () => void } = {}): React.JS
                   if (dragStart.current == null || e.buttons !== 1) return
                   const a = Math.min(dragStart.current, activeIndex)
                   const b = Math.max(dragStart.current, activeIndex)
-                  selectMany(activeFixtures.slice(a, b + 1).map((fixture) => fixture.shapeId))
+                  const ids = activeFixtures.slice(a, b + 1).map((fixture) => fixture.shapeId)
+                  // Preserve the actual drag direction so 「選択順」 can run either
+                  // left-to-right or right-to-left as the operator traced the list.
+                  selectMany(activeIndex >= dragStart.current ? ids : ids.reverse())
                 }}
                 onPointerUp={() => { dragStart.current = null }}
                 title={`#${i + 1}  ${shapeName(f.shapeId)}${cnt > 1 ? ` ×${cnt}` : ''} · ${f.mode} · ch ${s}–${e}`}
