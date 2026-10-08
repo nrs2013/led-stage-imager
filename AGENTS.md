@@ -114,7 +114,7 @@ npm run build:mac        # → dist/mac-arm64/"LED STAGE IMAGER.app"
 5. **renderer で `window.confirm` を使わない。** JS が止まって終了確認が素通りします。
    未保存の三択確認は `window.__ilDirty` / `__ilSaveForClose` / `imagelight:ask-save`。**無応答 1.5 秒は「未保存扱い」が正**。
 6. **暗転中のセンチネル `outW <= 16`。** 現場で入れたカクつき対策をそのまま移すと、**暗転中に電飾が LED に出続ける事故**になります。
-7. **保存形式**：LIGHT SKETCH の公演は **1ファイル `.ledshow`**（ZIP：`show.json` ＋ `media/`）。旧フォルダ保存も「開く」で読める（後方互換・壊さない）。
+7. **保存形式**：LIGHT SKETCH の公演は **公演フォルダ＋その中の入口ファイル `LED STAGE IMAGERで開く.ledshow`**（中身は ZIP：`show.json` ＋ `media/`。入口を開くと全部が開く。2026-08-08 に のむさんの指示で変更。`src/main/index.ts` の `SHOW_ENTRY_FILE`）。単体の `.ledshow` と旧フォルダ保存も「開く」で読める（後方互換・壊さない）。
    media のキーは `media/001.png` 形式で serialize / zip / restore すべて一致必須（`showbundle.ts` に往復テストあり）。SHOW MODE のチャートは別で `.ledimager`（単一 JSON）。
 8. **ユーザーデータの置き場所** = `~/Library/Application Support/decor-studio/`（`il-autosave/show.json` ＋ media、Local Storage）。
    アプリを差し替えても消えません。**差し替え・大改修の前に `il-autosave` をコピーしてバックアップ。**
