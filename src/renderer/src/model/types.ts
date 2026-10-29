@@ -1,3 +1,4 @@
+import type { LedLayout } from './led-layout'
 export type ShapeType =
   | 'line'
   | 'polyline'
@@ -117,6 +118,8 @@ export interface Fixture {
 }
 
 export interface Underlay {
+  sourceDataUrl?: string
+  ledLayout?: LedLayout
   dataUrl: string
   opacity: number
   visible: boolean
@@ -146,6 +149,7 @@ export interface Chart {
   fixtures: Fixture[]
   syphon: { name: string }
   settings: {
+    ledGrid?: { enabled: boolean; spacing: number }
     holdOnTimeout: boolean
     gamma: boolean
     glow: boolean

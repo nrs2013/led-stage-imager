@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { pickImage } from '../io/image-pick'
+import { importChartImage } from '../io/import-chart-image'
 import { C, F, buttonStyle } from '../ui/tokens'
 import { NumberField } from '../ui/NumberField'
 import { outputLayerIndex } from '../output/page-switch'
@@ -11,6 +12,7 @@ const smallBtn = { ...buttonStyle({}), padding: '6px 8px', fontSize: 10, minHeig
  *  carries every layer; when DMX chart switching is enabled, its control value chooses
  *  the single layer sent to Syphon/NDI. Clicking here still chooses the editor page. */
 export function LayersPanel(): React.JSX.Element {
+  const importStatus = useStore((s) => s.chartImportStatus)
   const layers = useStore((s) => s.chart.layers)
   const activeLayerId = useStore((s) => s.chart.activeLayerId)
   const shapes = useStore((s) => s.chart.shapes)
@@ -44,9 +46,7 @@ export function LayersPanel(): React.JSX.Element {
   const addWithImage = async (): Promise<void> => {
     const dataUrl = await pickImage()
     if (!dataUrl) return
-    addLayer({
-      underlay: { dataUrl, opacity: 0.5, visible: true, mask: { enabled: true, invert: false } }
-    })
+    await importChartImage(dataUrl, 'add')
   }
 
   const commitRename = (id: string): void => {
@@ -62,6 +62,7 @@ export function LayersPanel(): React.JSX.Element {
 
   return (
     <div style={panel}>
+      {importStatus && <div role="status" style={{ fontSize: 11, color: C.hint, marginBottom: 6 }}>{importStatus}</div>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <span style={title}>レイヤー</span>
         <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1曲 = 1枚</span>

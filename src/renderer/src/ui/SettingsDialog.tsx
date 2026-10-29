@@ -16,6 +16,7 @@ const syphonApi = (): SyphonApi | undefined => (window as unknown as { api?: Syp
 
 export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   const chart = useStore((s) => s.chart)
+  const setLedGrid = useStore((s) => s.setLedGrid)
   const setCanvasSize = useStore((s) => s.setCanvasSize)
   const setGamma = useStore((s) => s.setGamma)
   const setHoldOnTimeout = useStore((s) => s.setHoldOnTimeout)
@@ -188,6 +189,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
           </div>
         )}
 
+        <Toggle label="LED面のグリッド" on={chart.settings.ledGrid?.enabled !== false}
+          onChange={(enabled) => setLedGrid({ enabled })} onText="表示" offText="非表示" />
+        <Field label="LEDグリッド間隔（px）">
+          <NumberField value={chart.settings.ledGrid?.spacing ?? 10} min={1} max={500}
+            onChange={(spacing) => setLedGrid({ spacing })} />
+        </Field>
+        <div style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginBottom: 10 }}>
+          自動認識した各LED面の左上を基準にします。吸着ONで方眼に揃います。グレーと方眼は編集画面用です。
+        </div>
         <Field label="送出の解像度">
           <div style={{ display: 'flex', gap: 6 }}>
             {OUTPUT_PRESETS.map((percent) => {

@@ -10,6 +10,8 @@ import { useStore, activeLayerOf } from '../state/store'
 import { visibleByFilter } from '../model/part-family'
 import type { Point, Shape } from '../model/types'
 import { fileToDataUrl } from '../io/image-pick'
+import { importChartImage } from '../io/import-chart-image'
+import { scaledLedRegions, snapLedGrid, safeGridSpacing } from '../model/led-layout'
 import { saveChartToFile, saveChartAsToFile } from '../io/file-ops'
 import { C, F } from '../ui/tokens'
 import { OutputRenderer } from '../output/OutputRenderer'
@@ -383,6 +385,9 @@ export function EditorCanvas(): React.JSX.Element {
    *  cell — a plain ⌘click stays a click (no stray 1–2 dot strokes, no flash). */
   const pendingCmdPaint = useRef<{ cell: Point; center: Point } | null>(null)
   const addShape = useStore((s) => s.addShape)
+  const ledRegions = useMemo(() => scaledLedRegions(activeLayerOf(chart).underlay?.ledLayout, chart.canvas.w, chart.canvas.h), [chart.layers, chart.activeLayerId, chart.canvas])
+  const ledGridOn = ledRegions.length > 0 && chart.settings.ledGrid?.enabled !== false
+  const gridSpacing = safeGridSpacing(chart.settings.ledGrid?.spacing)
   const snapToPixel = useStore((s) => s.snapToPixel)
   const setSnap = useStore((s) => s.setSnap)
   const mask = useStore((s) => s.mask)
@@ -392,8 +397,8 @@ export function EditorCanvas(): React.JSX.Element {
   const paletteFilter = useStore((s) => s.paletteFilter)
   /** Punch-out islands of the chart (for the blueprint dimension labels). */
   const regions = useMemo<Region[]>(
-    () => (mask ? findDrawableRegions(mask.bitmap, mask.w, mask.h) : []),
-    [mask]
+    () => ledRegions.length ? ledRegions : (mask ? findDrawableRegions(mask.bitmap, mask.w, mask.h) : []),
+    [mask, ledRegions]
   )
   /** Island centres + the canvas centre + the chart frame edges: extra alignment-snap
    *  targets so parts land dead-centre in their LED panel (のむさん要望 2026-06-11) and
@@ -567,6 +572,25 @@ export function EditorCanvas(): React.JSX.Element {
   }
 
   const drawGrid = (ctx: CanvasRenderingContext2D, cw: number, ch: number, v: View): void => {
+    if (ledRegions.length && !ledGridOn) return
+    if (ledGridOn) {
+      if (gridSpacing * v.scale < 4) return
+      ctx.save()
+      ctx.strokeStyle = 'rgba(0,0,0,0.28)'; ctx.lineWidth = 1
+      ctx.beginPath()
+      for (const r of ledRegions) {
+        const left = Math.max(r.x, -v.tx / v.scale), right = Math.min(r.x + r.w, (cw - v.tx) / v.scale)
+        const top = Math.max(r.y, -v.ty / v.scale), bottom = Math.min(r.y + r.h, (ch - v.ty) / v.scale)
+        if (right <= left || bottom <= top) continue
+        for (let x = r.x + 0.5 + Math.max(0, Math.ceil((left-r.x-0.5)/gridSpacing))*gridSpacing; x < right; x += gridSpacing) {
+          ctx.moveTo(v.tx+x*v.scale, v.ty+top*v.scale); ctx.lineTo(v.tx+x*v.scale, v.ty+bottom*v.scale)
+        }
+        for (let y = r.y + 0.5 + Math.max(0, Math.ceil((top-r.y-0.5)/gridSpacing))*gridSpacing; y < bottom; y += gridSpacing) {
+          ctx.moveTo(v.tx+left*v.scale, v.ty+y*v.scale); ctx.lineTo(v.tx+right*v.scale, v.ty+y*v.scale)
+        }
+      }
+      ctx.stroke(); ctx.restore(); return
+    }
     const x0 = Math.max(0, Math.floor((0 - v.tx) / v.scale))
     const x1 = Math.min(w, Math.ceil((cw - v.tx) / v.scale))
     const y0 = Math.max(0, Math.floor((0 - v.ty) / v.scale))
@@ -658,7 +682,7 @@ export function EditorCanvas(): React.JSX.Element {
     ctx.lineWidth = 1
     ctx.strokeRect(v.tx, v.ty, w * v.scale, h * v.scale)
 
-    if (v.scale >= 1.5) drawGrid(ctx, cw, ch, v)
+    if (ledGridOn || v.scale >= 1.5) drawGrid(ctx, cw, ch, v)
 
     // draft preview + selection (content transform)
     ctx.setTransform(v.scale, 0, 0, v.scale, v.tx, v.ty)
@@ -1238,15 +1262,20 @@ export function EditorCanvas(): React.JSX.Element {
   }
   const toCanvas = (clientX: number, clientY: number): Point => {
     const p = toCanvasRaw(clientX, clientY)
+    if (snapToPixel && ledGridOn) return snapLedGrid(p, gridSpacing, ledRegions)
     return snapToPixel ? { x: Math.round(p.x), y: Math.round(p.y) } : p
   }
   /** The 1px cell under the pointer (clamped to the canvas). */
   const toCell = (clientX: number, clientY: number): Point => {
-    const p = toCanvasRaw(clientX, clientY)
+    const raw = toCanvasRaw(clientX, clientY)
+    const p = snapToPixel && ledGridOn && tool !== 'eraser' ? snapLedGrid(raw, gridSpacing, ledRegions) : raw
     return { x: clamp(Math.floor(p.x), 0, w - 1), y: clamp(Math.floor(p.y), 0, h - 1) }
   }
 
   const isDrawable = (p: Point): boolean => {
+    if (ledRegions.length && activeLayerOf(chart).underlay?.mask?.enabled && activeLayerOf(chart).underlay?.mask?.invert) {
+      return ledRegions.some(r => p.x >= r.x && p.x < r.x+r.w && p.y >= r.y && p.y < r.y+r.h)
+    }
     if (!mask) return true
     const xi = Math.floor(p.x)
     const yi = Math.floor(p.y)
@@ -1413,7 +1442,7 @@ export function EditorCanvas(): React.JSX.Element {
     if (tool === 'select') {
       const raw = toCanvasRaw(e.clientX, e.clientY)
       if (pasteArmed) {
-        useStore.getState().pasteAt(raw) // stamp! stays armed for the next click
+        useStore.getState().pasteAt(snapToPixel && ledGridOn ? snapLedGrid(raw, gridSpacing, ledRegions) : raw) // stamp! stays armed for the next click
         return
       }
       // ⌘+press in the arrow = paint dots, but only once a real drag starts
@@ -1622,7 +1651,11 @@ export function EditorCanvas(): React.JSX.Element {
         }
         let gx: number | null = null
         let gy: number | null = null
-        if (!free && snapToPixel && it.cand && it.sal) {
+        if (!free && snapToPixel && ledGridOn) {
+          const anchor = it.origs[0][0]
+          const snapped = snapLedGrid({ x: anchor.x + dx, y: anchor.y + dy }, gridSpacing, ledRegions)
+          dx = snapped.x - anchor.x; dy = snapped.y - anchor.y
+        } else if (!free && snapToPixel && it.cand && it.sal) {
           const r2 = snapMoveDelta(dx, dy, it.sal, it.cand, tolA)
           dx = r2.dx
           dy = r2.dy
@@ -1649,7 +1682,7 @@ export function EditorCanvas(): React.JSX.Element {
         if (e.shiftKey) {
           const sn = axisSnap(nb, cell)
           cell = { x: clamp(sn.x, 0, w - 1), y: clamp(sn.y, 0, h - 1) }
-        } else if (snapToPixel && !(e.metaKey || e.altKey)) {
+        } else if (snapToPixel && !ledGridOn && !(e.metaKey || e.altKey)) {
           let gx: number | null = null
           let gy: number | null = null
           if (it.cand) {
@@ -1680,7 +1713,7 @@ export function EditorCanvas(): React.JSX.Element {
         if (e.shiftKey) {
           const sn = axisSnap(it.anchor, cell)
           cell = { x: clamp(sn.x, 0, w - 1), y: clamp(sn.y, 0, h - 1) }
-        } else if (snapToPixel && !(e.metaKey || e.altKey)) {
+        } else if (snapToPixel && !ledGridOn && !(e.metaKey || e.altKey)) {
           // soft snaps: align to other shapes first, then gently towards H/V/45°
           if (it.cand) {
             const sx2 = snap1D(cell.x + 0.5, flatX(it.cand), tolA, 0, 0, false)
@@ -1714,10 +1747,10 @@ export function EditorCanvas(): React.JSX.Element {
       const sh = st.chart.shapes.find((s) => s.id === it.id)
       if (!sh) return
       if (it.kind === 'vertex') {
-        let np = free ? raw : { x: Math.round(raw.x), y: Math.round(raw.y) }
+        let np = free ? raw : ledGridOn && snapToPixel ? snapLedGrid(raw, gridSpacing, ledRegions) : { x: Math.round(raw.x), y: Math.round(raw.y) }
         let gx: number | null = null
         let gy: number | null = null
-        if (!free && snapToPixel && it.cand) {
+        if (!free && snapToPixel && !ledGridOn && it.cand) {
           const sx2 = snap1D(raw.x, flatX(it.cand), tolA, 10, 2, true)
           const sy2 = snap1D(raw.y, flatY(it.cand), tolA, 10, 2, true)
           np = { x: sx2.v, y: sy2.v }
@@ -1727,7 +1760,7 @@ export function EditorCanvas(): React.JSX.Element {
         if (sh.type === 'line' && sh.points.length >= 2) {
           const other = sh.points[it.idx === 0 ? sh.points.length - 1 : 0]
           if (e.shiftKey) np = axisSnap(other, np)
-          else if (!free && snapToPixel) np = softAxis(other, np, Math.max(1, tolA))
+          else if (!free && snapToPixel && !ledGridOn) np = softAxis(other, np, Math.max(1, tolA))
         }
         guidesRef.current = { x: gx, y: gy }
         st.setShapePoints(it.id, sh.points.map((pt, i) => (i === it.idx ? np : pt)))
@@ -1746,8 +1779,8 @@ export function EditorCanvas(): React.JSX.Element {
         let gx: number | null = null
         let gy: number | null = null
         if (it.dir === 'e' || it.dir === 'w') {
-          let nx = free ? raw.x : Math.round(raw.x)
-          if (!free && snapToPixel && it.cand) {
+          let nx = free ? raw.x : ledGridOn && snapToPixel ? snapLedGrid(raw, gridSpacing, ledRegions).x : Math.round(raw.x)
+          if (!free && snapToPixel && !ledGridOn && it.cand) {
             const s2 = snap1D(raw.x, flatX(it.cand), tolA, 10, 2, true)
             nx = s2.v
             gx = s2.guide
@@ -1755,8 +1788,8 @@ export function EditorCanvas(): React.JSX.Element {
           if (it.dir === 'e') p2.x = nx
           else p1.x = nx
         } else {
-          let ny = free ? raw.y : Math.round(raw.y)
-          if (!free && snapToPixel && it.cand) {
+          let ny = free ? raw.y : ledGridOn && snapToPixel ? snapLedGrid(raw, gridSpacing, ledRegions).y : Math.round(raw.y)
+          if (!free && snapToPixel && !ledGridOn && it.cand) {
             const s2 = snap1D(raw.y, flatY(it.cand), tolA, 10, 2, true)
             ny = s2.v
             gy = s2.guide
@@ -1771,10 +1804,10 @@ export function EditorCanvas(): React.JSX.Element {
       }
       // corner: opposite corner anchored; Shift keeps the original aspect ratio
       {
-        let np = free ? raw : { x: Math.round(raw.x), y: Math.round(raw.y) }
+        let np = free ? raw : ledGridOn && snapToPixel ? snapLedGrid(raw, gridSpacing, ledRegions) : { x: Math.round(raw.x), y: Math.round(raw.y) }
         let gx: number | null = null
         let gy: number | null = null
-        if (!free && snapToPixel && it.cand) {
+        if (!free && snapToPixel && !ledGridOn && it.cand) {
           const sx2 = snap1D(raw.x, flatX(it.cand), tolA, 10, 2, true)
           const sy2 = snap1D(raw.y, flatY(it.cand), tolA, 10, 2, true)
           np = { x: sx2.v, y: sy2.v }
@@ -2075,10 +2108,7 @@ export function EditorCanvas(): React.JSX.Element {
       e.preventDefault()
       void fileToDataUrl(file).then((dataUrl) => {
         if (!dataUrl) return
-        useStore.getState().addLayer({
-          name: file.name.replace(/\.[^.]+$/, ''),
-          underlay: { dataUrl, opacity: 0.5, visible: true, mask: { enabled: true, invert: false } }
-        })
+        void importChartImage(dataUrl, 'add', file.name.replace(/\.[^.]+$/, ''))
       })
       return
     }
@@ -2115,6 +2145,7 @@ export function EditorCanvas(): React.JSX.Element {
   /** 部品の置き先スナップ: 近くの島/中心へピタッ（Snap ON のとき）。D&Dとクリック配置で共用。 */
   const snapPartCenter = (center: Point): Point => {
     if (!useStore.getState().snapToPixel) return center
+    if (ledGridOn) return snapLedGrid(center, gridSpacing, ledRegions)
     const tol = Math.max(3, 8 / viewRef.current.scale)
     const nearest = (v: number, cands: number[]): number => {
       let best = v
@@ -2258,7 +2289,7 @@ export function EditorCanvas(): React.JSX.Element {
   // 校正済みチャートは px ではなく実寸 mm で表示（縮尺が効いてるか目視できる）。§7-4。
   const cellPx = view.scale >= 6 ? 1 : view.scale >= 1.5 ? 10 : 0
   const mmpp = mmPerPx(chart)
-  const unit =
+  const unit = ledRegions.length && !ledGridOn ? '方眼OFF' : ledGridOn ? `方眼 ${gridSpacing}px${gridSpacing * view.scale < 4 ? '（拡大で表示）' : ''}` :
     cellPx === 0
       ? '方眼なし'
       : mmpp
@@ -2342,7 +2373,7 @@ export function EditorCanvas(): React.JSX.Element {
             background: snapToPixel ? C.accent : 'rgba(123,197,232,0.15)',
             color: snapToPixel ? '#0a0a0a' : C.white
           }}
-          title="1ピクセルの方眼に吸着させる（きっちり揃う）"
+          title={ledGridOn ? `${gridSpacing}pxの方眼に吸着（間隔はファイル→設定）` : '1ピクセルの方眼に吸着させる'}
         >
           {snapToPixel ? '吸着 ON' : '吸着 OFF'}
         </button>
