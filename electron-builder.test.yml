@@ -5,6 +5,10 @@ fileAssociations: []
 extraMetadata:
   name: decor-studio-test
   productName: LED STAGE IMAGER TEST
+# CIにDeveloper ID証明書がないテスト版は署名を省略し、破損したadhoc署名を付けない。
+mac:
+  identity: null
+  hardenedRuntime: false
 win:
   executableName: led-stage-imager-test
   files:
