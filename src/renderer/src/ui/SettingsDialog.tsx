@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useStore } from '../state/store'
+import { activeLayerOf, useStore } from '../state/store'
+import { imageSize } from '../io/image-pick'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
 import { NumberField } from './NumberField'
 import { mmPerPx, stageWidthMeters, countFittableFixtures } from '../model/scale'
 import { OUTPUT_PRESETS, outputSizeOf, percentSize } from '../output/out-scale'
 
-const MAX_W = 4096
+const MAX_W = 8192
 const MAX_H = 2160
 
 interface SyphonApi {
@@ -38,6 +39,25 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const fitCount = countFittableFixtures(chart.shapes) // 実寸に直せる灯体の数
   const [fitArmed, setFitArmed] = useState(false) // 2回押しで実行（誤爆防止）
   const [widthDraft, setWidthDraft] = useState<string | null>(null) // 入力中だけ生文字を保持（打ちやすく）
+  const imageData = activeLayerOf(chart).underlay?.dataUrl
+  const [original, setOriginal] = useState<{ dataUrl: string; w: number; h: number } | null>(null)
+  const defaultSize = imageData
+    ? original?.dataUrl === imageData ? original : null
+    : { w: 1920, h: 1080 }
+
+  // 保存済みの旧チャートでも、画像そのものから原寸を取得する。
+  useEffect(() => {
+    let cancelled = false
+    setOriginal(null)
+    if (imageData) {
+      void imageSize(imageData).then((size) => {
+        if (!cancelled && size && size.w > 0 && size.h > 0) {
+          setOriginal({ dataUrl: imageData, ...size })
+        }
+      })
+    }
+    return () => { cancelled = true }
+  }, [imageData])
 
   // Esc closes the dialog (matches HelpPanel / StartScreen).
   useEffect(() => {
@@ -133,7 +153,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             <NumberField
               value={chart.canvas.w}
               min={16}
-              max={MAX_W}
+              max={Math.max(MAX_W, chart.canvas.w, defaultSize?.w ?? 0)}
               onChange={(v) => setCanvasSize(Math.max(16, v), chart.canvas.h)}
             />
           </Field>
@@ -141,10 +161,26 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             <NumberField
               value={chart.canvas.h}
               min={16}
-              max={MAX_H}
+              max={Math.max(MAX_H, chart.canvas.h, defaultSize?.h ?? 0)}
               onChange={(v) => setCanvasSize(chart.canvas.w, Math.max(16, v))}
             />
           </Field>
+        </div>
+        <button
+          type="button"
+          style={{ ...buttonStyle({}), width: '100%', marginBottom: 10 }}
+          disabled={!defaultSize}
+          title="キャンバスだけを戻します。Fixtureの位置・大きさ・Patchは変わりません。⌘Zで取り消せます。"
+          onClick={() => {
+            if (!defaultSize) return
+            setCanvasSize(defaultSize.w, defaultSize.h)
+            window.dispatchEvent(new CustomEvent('decor:fit'))
+          }}
+        >
+          デフォルトに戻す{defaultSize ? `（${defaultSize.w} × ${defaultSize.h} px）` : ''}
+        </button>
+        <div style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginBottom: 10 }}>
+          {imageData ? 'デフォルト＝選択中のチャート画像の原寸。' : '画像がない場合のデフォルト＝1920 × 1080 px。'}
         </div>
         {tooBig && (
           <div style={{ color: C.amber, fontSize: 11, fontFamily: F.ui, marginBottom: 10 }}>
@@ -342,7 +378,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
 
 function Field({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
-    <div style={{ marginBottom: 12, flex: 1 }}>
+    <div style={{ marginBottom: 12, flex: 1, minWidth: 0 }}>
       <label style={fieldLabel}>{label}</label>
       {children}
     </div>
