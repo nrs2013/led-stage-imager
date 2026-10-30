@@ -391,7 +391,7 @@ function EditorApp(): React.JSX.Element {
       {mode === 'edit' ? (
         <>
           <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-            <EditorCanvas />
+            <EditorCanvas checkView={testOpen} />
             <div
               style={{
                 width: 340,

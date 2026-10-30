@@ -370,7 +370,7 @@ function drawShapeInto(
   }
 }
 
-export function EditorCanvas(): React.JSX.Element {
+export function EditorCanvas({ checkView = false }: { checkView?: boolean }): React.JSX.Element {
   const chart = useStore((s) => s.chart)
   const tool = useStore((s) => s.tool)
   const selectedId = useStore((s) => s.selectedId)
@@ -555,6 +555,11 @@ export function EditorCanvas(): React.JSX.Element {
       ctx.drawImage(underlayImg.current, 0, 0, w, h)
       ctx.globalAlpha = 1
     }
+    // Recognized LED faces use the current editor shade, including older saved charts.
+    if (u?.visible && ledRegions.length) {
+      ctx.fillStyle = '#303030'
+      for (const r of ledRegions) ctx.fillRect(r.x, r.y, r.w, r.h)
+    }
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
     // CHARTを切り替えた時は、そのCHARTの電飾だけを表示する。別CHARTを薄く重ねると
@@ -682,7 +687,7 @@ export function EditorCanvas(): React.JSX.Element {
     ctx.lineWidth = 1
     ctx.strokeRect(v.tx, v.ty, w * v.scale, h * v.scale)
 
-    if (ledGridOn || v.scale >= 1.5) drawGrid(ctx, cw, ch, v)
+    if (!checkView && (ledGridOn || v.scale >= 1.5)) drawGrid(ctx, cw, ch, v)
 
     // draft preview + selection (content transform)
     ctx.setTransform(v.scale, 0, 0, v.scale, v.tx, v.ty)
@@ -708,7 +713,7 @@ export function EditorCanvas(): React.JSX.Element {
     // colour and made a lit fixture indistinguishable from an idle selection.
     // Keep the real render untouched and mark each selection with an outer cyan
     // dashed frame instead (editor-only; never reaches Syphon/NDI).
-    for (const sid of selectedIds) {
+    for (const sid of checkView ? [] : selectedIds) {
       if (sid === selectedId) continue // drawn below with bounds + handles
       const ssh = chart.shapes.find((s) => s.id === sid)
       if (!ssh) continue
@@ -722,7 +727,7 @@ export function EditorCanvas(): React.JSX.Element {
       ctx.setLineDash([])
     }
     const sel = chart.shapes.find((s) => s.id === selectedId)
-    if (sel) {
+    if (sel && !checkView) {
       const b = shapeArrayBounds(sel)
       const lw = 1 / v.scale
       const pad = 4 / v.scale
@@ -744,7 +749,7 @@ export function EditorCanvas(): React.JSX.Element {
     }
     // alignment guides (lit while something snaps onto another shape's line)
     const g = guidesRef.current
-    if (g.x != null || g.y != null) {
+    if (!checkView && (g.x != null || g.y != null)) {
       ctx.strokeStyle = C.green
       ctx.lineWidth = 1 / v.scale
       ctx.setLineDash([6 / v.scale, 4 / v.scale])
@@ -775,7 +780,7 @@ export function EditorCanvas(): React.JSX.Element {
       ctx.restore()
     }
     // paste-mark crosshair (click an empty spot, then ⌘V pastes centred here)
-    if (pasteMark && tool === 'select' && !pasteArmed) {
+    if (!checkView && pasteMark && tool === 'select' && !pasteArmed) {
       const r2 = 7 / v.scale
       ctx.strokeStyle = C.green
       ctx.lineWidth = 1.2 / v.scale
@@ -806,7 +811,7 @@ export function EditorCanvas(): React.JSX.Element {
 
     // #N fixture labels — same numbers as the patch chips below (screen-space).
     // Dense autoFill scenes only label the selection to avoid wallpapering the canvas.
-    if (showIds && chart.fixtures.length) {
+    if (!checkView && showIds && chart.fixtures.length) {
       const dense = chart.fixtures.length > 400
       ctx.font = "9px 'JetBrains Mono', monospace"
       ctx.textBaseline = 'middle'
@@ -832,7 +837,7 @@ export function EditorCanvas(): React.JSX.Element {
 
     // blueprint dimension lines on the chart's punch-out islands (screen-space text,
     // editor-only — never part of the Syphon output)
-    if (showDims && regions.length) {
+    if (!checkView && showDims && regions.length) {
       ctx.font = "10px 'JetBrains Mono', monospace"
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
