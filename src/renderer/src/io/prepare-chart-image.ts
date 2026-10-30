@@ -30,7 +30,7 @@ export async function prepareChartImage(
   const regions = detectLedPanels(ctx.getImageData(0, 0, w, h).data, w, h)
   if (!regions.length) return { underlay, w, h }
   ctx.clearRect(0, 0, w, h)
-  ctx.fillStyle = '#303030'
+  ctx.fillStyle = '#202020'
   for (const r of regions) ctx.fillRect(r.x, r.y, r.w, r.h)
   return {
     w,

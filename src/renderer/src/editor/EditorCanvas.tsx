@@ -557,7 +557,7 @@ export function EditorCanvas({ checkView = false }: { checkView?: boolean }): Re
     }
     // Recognized LED faces use the current editor shade, including older saved charts.
     if (u?.visible && ledRegions.length) {
-      ctx.fillStyle = '#303030'
+      ctx.fillStyle = '#202020'
       for (const r of ledRegions) ctx.fillRect(r.x, r.y, r.w, r.h)
     }
     ctx.lineJoin = 'round'
