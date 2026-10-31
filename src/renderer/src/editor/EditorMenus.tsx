@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useStore, activeLayerOf } from '../state/store'
 import { createChart, newId } from '../model/chart-model'
 import { saveChartToFile, saveChartAsToFile, openChartFromFile, markNewChart, currentChartFileName } from '../io/file-ops'
-import { pickImage, imageSize } from '../io/image-pick'
+import { pickImage } from '../io/image-pick'
+import { importChartImage } from '../io/import-chart-image'
 import { exportPatchCsv, exportPatchMvr } from '../io/patch-export'
+import { VectorImportDialog } from '../ui/VectorImportDialog'
 import { SettingsDialog } from '../ui/SettingsDialog'
 import { FillDialog } from '../ui/FillDialog'
 import { ArtNetRelayDialog } from '../ui/ArtNetRelayDialog'
@@ -25,10 +27,10 @@ export function EditorMenus(): React.JSX.Element {
   const setUnderlayOpacity = useStore((s) => s.setUnderlayOpacity)
   const setUnderlayVisible = useStore((s) => s.setUnderlayVisible)
   const setUnderlayMask = useStore((s) => s.setUnderlayMask)
-  const applyChartImage = useStore((s) => s.applyChartImage)
   const maskEmpty = useStore((s) => s.maskEmpty)
   const showDims = useStore((s) => s.showDims)
   const setShowDims = useStore((s) => s.setShowDims)
+  const [vectorOpen, setVectorOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fillOpen, setFillOpen] = useState(false)
   const [relayOpen, setRelayOpen] = useState(false)
@@ -71,13 +73,7 @@ export function EditorMenus(): React.JSX.Element {
   const loadUnderlay = async (): Promise<void> => {
     const dataUrl = await pickImage()
     if (!dataUrl) return
-    const size = await imageSize(dataUrl)
-    if (!size) {
-      // eslint-disable-next-line no-alert
-      alert('画像を読み込めませんでした（壊れているか、対応していない形式です）')
-      return
-    }
-    applyChartImage(dataUrl, size.w, size.h)
+    await importChartImage(dataUrl, 'replace')
   }
   const newChart = (): void => {
     if (
@@ -172,6 +168,7 @@ export function EditorMenus(): React.JSX.Element {
               title="GrandMA3から受けたArt-Netを、Universeごとに遅らせてDMXノードへ送ります"
               onClick={() => { close(); setRelayOpen(true) }}
             />
+            <MenuItem label="Vectorworks図形を取り込む…" onClick={() => { close(); setVectorOpen(true) }} />
             <MenuItem label="設定" title="キャンバスの大きさ・出力名・にじみなど" onClick={() => { close(); setSettingsOpen(true) }} />
           </>
         )}
@@ -188,6 +185,12 @@ export function EditorMenus(): React.JSX.Element {
             {u && (
               <>
                 <MenuSep />
+                <MenuItem label="LED面を自動認識し直す" onClick={() => {
+                  close(); void importChartImage(u.sourceDataUrl ?? u.dataUrl, 'replace')
+                }} />
+                {u.sourceDataUrl && <MenuItem label="元のチャート画像に戻す" onClick={() => {
+                  setUnderlay({ dataUrl: u.sourceDataUrl!, opacity: 0.5, visible: true, mask: { enabled: true, invert: false } })
+                }} />}
                 <MenuLabel>濃さ</MenuLabel>
                 <div style={{ padding: '2px 10px 8px' }}>
                   <input
@@ -208,7 +211,7 @@ export function EditorMenus(): React.JSX.Element {
                 <MenuItem
                   label="はみ出し禁止"
                   active={u.mask?.enabled ?? false}
-                  title="チャートの透明にくり抜かれた所だけ描けるようにする"
+                  title="LEDとして判定した範囲だけ描けるようにする"
                   onClick={() => setUnderlayMask({ enabled: !(u.mask?.enabled ?? false) })}
                 />
                 {u.mask?.enabled && (
@@ -260,6 +263,7 @@ export function EditorMenus(): React.JSX.Element {
         </span>
       )}
 
+      {vectorOpen && <VectorImportDialog onClose={() => setVectorOpen(false)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {fillOpen && <FillDialog onClose={() => setFillOpen(false)} />}
       {relayOpen && <ArtNetRelayDialog onClose={() => setRelayOpen(false)} />}

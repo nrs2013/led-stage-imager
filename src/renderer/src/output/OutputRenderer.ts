@@ -193,8 +193,11 @@ export class OutputRenderer {
       const reps = repeatCount(shape)
       const dx = shape.repeat?.dx ?? 0
       const dy = shape.repeat?.dy ?? 0
-      const man = manual?.[fx.id] // a manual override lights the whole array uniformly
       const resolve = (i: number): RGB => {
+        // `fixtureId:i` is used by the desk-less checker when one painted line expands
+        // to several separately addressed fixtures.  The plain fixture id remains the
+        // whole-line override for backwards compatibility and "light all selected".
+        const man = manual?.[`${fx.id}:${i}`] ?? manual?.[fx.id]
         if (man) return man
         const a =
           reps > 1

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from '../state/store'
-import { OutputRenderer } from './OutputRenderer'
+import { OutputFrameRenderer } from './OutputFrameRenderer'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
 import { outputSizeOf } from './out-scale'
 
@@ -21,7 +21,7 @@ const INTERVAL = 1000 / FPS
 export function useChartOutput(): void {
   useEffect(() => {
     const canvas = document.createElement('canvas') // 表示しない出力専用キャンバス
-    const renderer = new OutputRenderer(canvas)
+    const renderer = new OutputFrameRenderer(canvas)
     const api = (window as unknown as { api?: DecorApi }).api
     if (!api?.publishFrame) return // ブラウザ(UI確認用)では何もしない
     // GPU直結出力（見えない出力専用窓）が生きている間はこちらのCPU読み出し経路を止める。
@@ -52,11 +52,8 @@ export function useChartOutput(): void {
           Date.now()
         )
         renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null, st.pageSwitchManual)
-        // 描くのは常に原寸。送出だけ設定「送出の解像度」のピクセル数に縮める（原寸=素通り）。
-        // 読み出し(getImageData)と NDI 送信の量がそのぶん減る＝ここが Windows の重さの本体。
         const size = outputSizeOf(chart)
-        const out = renderer.readRGBAAtSize(size.w, size.h)
-        api.publishFrame!(out.w, out.h, out.data)
+        api.publishFrame!(size.w, size.h, renderer.readRGBA())
       } catch (err) {
         const now = Date.now()
         if (now - lastErrLog > 2000) {

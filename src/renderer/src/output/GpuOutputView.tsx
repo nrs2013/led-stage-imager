@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../state/store'
-import { OutputRenderer } from './OutputRenderer'
+import { OutputFrameRenderer } from './OutputFrameRenderer'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
 import { outputSizeOf } from './out-scale'
 import type { Chart } from '../model/types'
@@ -50,10 +50,7 @@ export function GpuOutputView(): React.JSX.Element {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const renderer = new OutputRenderer(canvas)
-    // 送出を縮める時だけ使う「原寸の下描き」。原寸(既定)では作らない＝従来と同じ道を通る。
-    let fullCv: HTMLCanvasElement | null = null
-    let fullRenderer: OutputRenderer | null = null
+    const renderer = new OutputFrameRenderer(canvas)
     let lastErrLog = 0
     let lastTickAt = 0
     let lastW = 0
@@ -78,23 +75,7 @@ export function GpuOutputView(): React.JSX.Element {
           chart.settings.holdOnTimeout,
           Date.now()
         )
-        if (out.w === chart.canvas.w && out.h === chart.canvas.h) {
-          renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null, st.pageSwitchManual)
-          return
-        }
-        // 縮める時: 原寸で描いてから、出来上がった絵を指定ピクセル数で焼き込む
-        // （にじみ(グロー)も一緒に縮む＝原寸の時と見た目の比率が変わらない）。
-        if (!fullCv) fullCv = document.createElement('canvas')
-        if (!fullRenderer) fullRenderer = new OutputRenderer(fullCv)
-        fullRenderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null, st.pageSwitchManual)
-        const g = canvas.getContext('2d')
-        if (!g) return
-        if (canvas.width !== out.w) canvas.width = out.w
-        if (canvas.height !== out.h) canvas.height = out.h
-        g.globalCompositeOperation = 'copy' // 前のコマを残さず、透過をそのまま置き換える
-        g.imageSmoothingEnabled = true
-        g.imageSmoothingQuality = 'high'
-        g.drawImage(fullCv, 0, 0, out.w, out.h)
+        renderer.render(chart, dmx, chart.settings.gamma, st.manualMode ? st.manualByFixture : null, st.pageSwitchManual)
       } catch (err) {
         const now = Date.now()
         if (now - lastErrLog > 2000) {

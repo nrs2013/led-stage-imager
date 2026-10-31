@@ -4,6 +4,7 @@ import { createChart } from '../model/chart-model'
 import { openChartFromFile, markNewChart, currentChartFileName } from '../io/file-ops'
 import { readBackup } from '../io/autosave'
 import type { Chart } from '../model/types'
+import { APP_VERSION } from '../app-version'
 
 /**
  * The doorway: first choose a MODE, not a file (cinematic-beam design・のむさん 2026-06-20).
@@ -119,7 +120,7 @@ export function StartScreen(): React.JSX.Element {
 
         <h1 className="ss-title">LED STAGE IMAGER</h1>
         <p className="ss-tag">DMX Visualizer&nbsp;·&nbsp;Syphon / NDI Output</p>
-        <p className="ss-version">Version 1.3.3&nbsp;—&nbsp;ファイル名タイトル表示版 2026-08-29</p>
+        <p className="ss-version">Version {APP_VERSION}</p>
 
         <div className="ss-modes">
           <button

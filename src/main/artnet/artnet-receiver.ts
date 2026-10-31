@@ -43,9 +43,22 @@ export class ArtNetReceiver extends EventEmitter {
       if (pkt) this.emit('dmx', { ...pkt, sourceIp: rinfo.address })
     })
     sock.on('error', (err) => this.emit('error', err))
-    sock.on('listening', () => this.emit('listening'))
+    sock.on('listening', () => {
+      // Relay packets must leave from the Art-Net socket (UDP 6454), not an
+      // ephemeral source port. Some DMX nodes reject otherwise-valid ArtDMX whose
+      // source port is not 6454. This also enables broadcast on the same socket.
+      sock.setBroadcast(true)
+      this.emit('listening')
+    })
     sock.bind(this.port, '0.0.0.0')
     this.socket = sock
+  }
+
+  /** Send Art-Net through the already-bound receiver socket, preserving source port 6454. */
+  send(data: Buffer, targetIp: string, done?: (error: Error | null) => void): boolean {
+    if (!this.socket) return false
+    this.socket.send(data, this.port, targetIp, (error) => done?.(error ?? null))
+    return true
   }
 
   /** 「Interface(回線)」選択：ip が NIC のアドレスなら、その回線のサブネットの送り主だけ受ける。

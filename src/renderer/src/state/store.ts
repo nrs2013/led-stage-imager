@@ -7,6 +7,7 @@ import { mergeRunCells, applyMerge } from '../model/merge-runs'
 import { regenChain } from '../editor/stroke-fit'
 import { pasteDelta, shapeArrayBounds } from '../editor/geometry'
 import { mmPerPx, rescaleFixturesToScale } from '../model/scale'
+import { safeGridSpacing } from '../model/led-layout'
 import type { MaskData } from '../ui/mask'
 import { addressAt, nextAddressAfter, repeatCount } from '../dmx/address'
 
@@ -113,7 +114,10 @@ interface AppState {
   /** Loads a chart image: canvas snaps to the image's pixel size, the image becomes the
    *  underlay, and the mask defaults to "transparent hole = where decorations go" —
    *  the chart is show artwork with the decoration areas punched out (invert OFF). */
-  applyChartImage: (dataUrl: string, w: number, h: number) => void
+  applyChartImage: (dataUrl: string, w: number, h: number, prepared?: Underlay) => void
+  chartImportStatus: string
+  setChartImportStatus: (message: string) => void
+  setLedGrid: (patch: { enabled?: boolean; spacing?: number }) => void
   setChart: (c: Chart) => void
   /** 今どのファイルを触っているか（上のバーの表示用・null=まだファイルにしていない）。
    *  EditorMenus のローカル state だと StartScreen 経由/ダブルクリック/モード往復で
@@ -182,7 +186,7 @@ interface AppState {
 
   /** Layers = one page per song. Adds a layer (optionally born with a chart image)
    *  and makes it active; returns its id. */
-  addLayer: (init?: { name?: string; underlay?: Underlay | null }) => string
+  addLayer: (init?: { name?: string; underlay?: Underlay | null; canvas?: { w: number; h: number } }) => string
   /** Deletes the layer AND its shapes/fixtures (one undo step). The last layer stays. */
   removeLayer: (id: string) => void
   setActiveLayer: (id: string) => void
@@ -228,6 +232,7 @@ interface AppState {
     mode: ChannelMode
     step: number
   }) => number
+  importVectorShapes: (shapes: Omit<Shape, 'id' | 'layerId'>[]) => void
   setCanvasSize: (w: number, h: number) => void
   /** Declare the chart's real stage width in metres → calibrates scale so new parts
    *  drop at true physical size. 0 / empty clears calibration. */
@@ -243,6 +248,7 @@ interface AppState {
   /** 電飾のにじみ(グロー)の全体既定 px（0=なし）。図形側 glowPx が優先。 */
   setLedGlowPx: (px: number) => void
   /** 送出(Syphon/NDI)のピクセル数だけを変える。チャート本体は原寸のまま。 */
+  setOutputPixelLines: (on: boolean) => void
   setOutputSize: (w: number, h: number) => void
   setOutputAspectLocked: (locked: boolean) => void
   setPageSwitch: (patch: Partial<{ enabled: boolean; universe: number; address: number }>) => void
@@ -412,7 +418,16 @@ export const useStore = create<AppState>()((set, get) => ({
             imageLightPaste: null
           }
     ),
-  applyChartImage: (dataUrl, w, h) => {
+  chartImportStatus: '',
+  setChartImportStatus: (chartImportStatus) => set({ chartImportStatus }),
+  setLedGrid: (patch) => {
+    get().beginHistory('led-grid')
+    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, ledGrid: {
+      enabled: patch.enabled ?? s.chart.settings.ledGrid?.enabled ?? true,
+      spacing: safeGridSpacing(patch.spacing ?? s.chart.settings.ledGrid?.spacing)
+    } } } }))
+  },
+  applyChartImage: (dataUrl, w, h, prepared) => {
     get().beginHistory()
     set((s) => ({
       chart: {
@@ -422,7 +437,7 @@ export const useStore = create<AppState>()((set, get) => ({
           l.id === s.chart.activeLayerId
             ? {
                 ...l,
-                underlay: {
+                underlay: prepared ?? {
                   dataUrl,
                   opacity: 0.5,
                   visible: true,
@@ -841,6 +856,7 @@ export const useStore = create<AppState>()((set, get) => ({
           : inherited
         return {
           ...s.chart,
+          canvas: init?.canvas ?? s.chart.canvas,
           layers: [
             ...s.chart.layers,
             {
@@ -1042,6 +1058,19 @@ export const useStore = create<AppState>()((set, get) => ({
       return { manualByFixture: m }
     }),
 
+  importVectorShapes: (shapes) => {
+    if (!shapes.length) return
+    get().beginHistory()
+    set((s) => {
+      let chart = s.chart
+      const ids: string[] = []
+      for (const shape of shapes) {
+        const id = newId('shape'); ids.push(id)
+        chart = addShapeToChart(chart, { ...shape, id, layerId: s.chart.activeLayerId })
+      }
+      return { chart, selectedIds: ids, selectedId: ids.length === 1 ? ids[0] : null }
+    })
+  },
   setCanvasSize: (w, h) => {
     get().beginHistory('canvas-size') // ⌘Zでサイズを戻せるように（連続変更は600msでまとめる）
     set((s) => ({ chart: { ...s.chart, canvas: { w, h } } }))
@@ -1074,6 +1103,8 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glowAmount: px } } })),
   setLedGlowPx: (px) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, ledGlowPx: px } } })),
+  setOutputPixelLines: (on) =>
+    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, outputPixelLines: on } } })),
   setOutputSize: (w, h) =>
     set((s) => ({
       chart: {
@@ -1107,7 +1138,9 @@ export const useStore = create<AppState>()((set, get) => ({
           }
         }
       },
-      ...(patch.enabled === false ? { pageSwitchManual: null } : {})
+      // DMX切替のON・Universe・CHを操作した時点で手動上書きを解除する。
+      // 「切替」で確認した後にDMXをONにしても手動のまま固まる事故を防ぐ。
+      pageSwitchManual: null
     })),
   placingPart: null,
   setPlacingPart: (placingPart) => set({ placingPart }),

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useStore } from '../state/store'
+import { activeLayerOf, useStore } from '../state/store'
+import { imageSize } from '../io/image-pick'
 import { C, F, buttonStyle, inputStyle, fieldLabel } from '../ui/tokens'
 import { NumberField } from './NumberField'
 import { mmPerPx, stageWidthMeters, countFittableFixtures } from '../model/scale'
 import { OUTPUT_PRESETS, outputSizeOf, percentSize } from '../output/out-scale'
 
-const MAX_W = 4096
+const MAX_W = 8192
 const MAX_H = 2160
 
 interface SyphonApi {
@@ -15,6 +16,7 @@ const syphonApi = (): SyphonApi | undefined => (window as unknown as { api?: Syp
 
 export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   const chart = useStore((s) => s.chart)
+  const setLedGrid = useStore((s) => s.setLedGrid)
   const setCanvasSize = useStore((s) => s.setCanvasSize)
   const setGamma = useStore((s) => s.setGamma)
   const setHoldOnTimeout = useStore((s) => s.setHoldOnTimeout)
@@ -23,6 +25,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const setGlow = useStore((s) => s.setGlow)
   const setGlowAmount = useStore((s) => s.setGlowAmount)
   const setLedGlowPx = useStore((s) => s.setLedGlowPx)
+  const setOutputPixelLines = useStore((s) => s.setOutputPixelLines)
   const setOutputSize = useStore((s) => s.setOutputSize)
   const setOutputAspectLocked = useStore((s) => s.setOutputAspectLocked)
   const setPageSwitch = useStore((s) => s.setPageSwitch)
@@ -38,6 +41,25 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const fitCount = countFittableFixtures(chart.shapes) // 実寸に直せる灯体の数
   const [fitArmed, setFitArmed] = useState(false) // 2回押しで実行（誤爆防止）
   const [widthDraft, setWidthDraft] = useState<string | null>(null) // 入力中だけ生文字を保持（打ちやすく）
+  const imageData = activeLayerOf(chart).underlay?.dataUrl
+  const [original, setOriginal] = useState<{ dataUrl: string; w: number; h: number } | null>(null)
+  const defaultSize = imageData
+    ? original?.dataUrl === imageData ? original : null
+    : { w: 1920, h: 1080 }
+
+  // 保存済みの旧チャートでも、画像そのものから原寸を取得する。
+  useEffect(() => {
+    let cancelled = false
+    setOriginal(null)
+    if (imageData) {
+      void imageSize(imageData).then((size) => {
+        if (!cancelled && size && size.w > 0 && size.h > 0) {
+          setOriginal({ dataUrl: imageData, ...size })
+        }
+      })
+    }
+    return () => { cancelled = true }
+  }, [imageData])
 
   // Esc closes the dialog (matches HelpPanel / StartScreen).
   useEffect(() => {
@@ -133,7 +155,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             <NumberField
               value={chart.canvas.w}
               min={16}
-              max={MAX_W}
+              max={Math.max(MAX_W, chart.canvas.w, defaultSize?.w ?? 0)}
               onChange={(v) => setCanvasSize(Math.max(16, v), chart.canvas.h)}
             />
           </Field>
@@ -141,10 +163,26 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
             <NumberField
               value={chart.canvas.h}
               min={16}
-              max={MAX_H}
+              max={Math.max(MAX_H, chart.canvas.h, defaultSize?.h ?? 0)}
               onChange={(v) => setCanvasSize(chart.canvas.w, Math.max(16, v))}
             />
           </Field>
+        </div>
+        <button
+          type="button"
+          style={{ ...buttonStyle({}), width: '100%', marginBottom: 10 }}
+          disabled={!defaultSize}
+          title="キャンバスだけを戻します。Fixtureの位置・大きさ・Patchは変わりません。⌘Zで取り消せます。"
+          onClick={() => {
+            if (!defaultSize) return
+            setCanvasSize(defaultSize.w, defaultSize.h)
+            window.dispatchEvent(new CustomEvent('decor:fit'))
+          }}
+        >
+          デフォルトに戻す{defaultSize ? `（${defaultSize.w} × ${defaultSize.h} px）` : ''}
+        </button>
+        <div style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginBottom: 10 }}>
+          {imageData ? 'デフォルト＝選択中のチャート画像の原寸。' : '画像がない場合のデフォルト＝1920 × 1080 px。'}
         </div>
         {tooBig && (
           <div style={{ color: C.amber, fontSize: 11, fontFamily: F.ui, marginBottom: 10 }}>
@@ -152,6 +190,20 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
           </div>
         )}
 
+        <Toggle label="LED面のグリッド" on={chart.settings.ledGrid?.enabled !== false}
+          onChange={(enabled) => setLedGrid({ enabled })} onText="表示" offText="非表示" />
+        <Field label="LEDグリッド間隔（px）">
+          <NumberField value={chart.settings.ledGrid?.spacing ?? 10} min={1} max={500}
+            onChange={(spacing) => setLedGrid({ spacing })} />
+        </Field>
+        <div style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginBottom: 10 }}>
+          自動認識した各LED面の左上を基準にします。吸着ONで方眼に揃います。グレーと方眼は編集画面用です。
+        </div>
+        <Toggle label="線を送信上の1pxで描く" on={chart.settings.outputPixelLines === true}
+          onChange={setOutputPixelLines} onText="ON" offText="OFF" />
+        <div style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginBottom: 10 }}>
+          線・折れ線を送信ピクセルに揃えます。丸や斜線は階段状になります。グロー付き・繰り返し図形は従来どおりです。
+        </div>
         <Field label="送出の解像度">
           <div style={{ display: 'flex', gap: 6 }}>
             {OUTPUT_PRESETS.map((percent) => {
@@ -342,7 +394,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
 
 function Field({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
-    <div style={{ marginBottom: 12, flex: 1 }}>
+    <div style={{ marginBottom: 12, flex: 1, minWidth: 0 }}>
       <label style={fieldLabel}>{label}</label>
       {children}
     </div>

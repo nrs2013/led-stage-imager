@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { pickImage } from '../io/image-pick'
+import { importChartImage } from '../io/import-chart-image'
 import { C, F, buttonStyle } from '../ui/tokens'
 import { NumberField } from '../ui/NumberField'
 import { outputLayerIndex } from '../output/page-switch'
@@ -11,6 +12,7 @@ const smallBtn = { ...buttonStyle({}), padding: '6px 8px', fontSize: 10, minHeig
  *  carries every layer; when DMX chart switching is enabled, its control value chooses
  *  the single layer sent to Syphon/NDI. Clicking here still chooses the editor page. */
 export function LayersPanel(): React.JSX.Element {
+  const importStatus = useStore((s) => s.chartImportStatus)
   const layers = useStore((s) => s.chart.layers)
   const activeLayerId = useStore((s) => s.chart.activeLayerId)
   const shapes = useStore((s) => s.chart.shapes)
@@ -22,23 +24,29 @@ export function LayersPanel(): React.JSX.Element {
   const setPageSwitchManual = useStore((s) => s.setPageSwitchManual)
   const setPageSwitch = useStore((s) => s.setPageSwitch)
   const pageSwitch = useStore((s) => s.chart.settings.pageSwitch)
-  useStore((s) => s.dmxRev) // DMX値が変わった時だけ「送出中」表示を更新
+  const dmxRev = useStore((s) => s.dmxRev) // DMX値が変わった時だけ「送出中」表示を更新
   const chart = useStore.getState().chart
   const pageIndex = outputLayerIndex(chart, useStore.getState().dmxByUniverse, pageSwitchManual)
   const pageSwitchOn = pageIndex != null
   const dmxSwitchOn = pageSwitch?.enabled === true
   const switchUniverse = (pageSwitch?.universe ?? 0) + 1
   const switchAddress = pageSwitch?.address ?? 1
+  const switchValue = useStore.getState().dmxByUniverse[pageSwitch?.universe ?? 0]?.[switchAddress - 1]
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const cancelRename = useRef(false) // Esc=取り消し。blur(commit)を1回だけ握り潰す
 
+  useEffect(() => {
+    // 手動確認中はそのページを守る。DMX連動中だけ中央画面も実際の送出ページへ追従する。
+    if (!dmxSwitchOn || pageSwitchManual != null || pageIndex == null) return
+    const onAirLayer = layers[pageIndex]
+    if (onAirLayer && onAirLayer.id !== activeLayerId) setActiveLayer(onAirLayer.id)
+  }, [activeLayerId, dmxRev, dmxSwitchOn, layers, pageIndex, pageSwitchManual, setActiveLayer])
+
   const addWithImage = async (): Promise<void> => {
     const dataUrl = await pickImage()
     if (!dataUrl) return
-    addLayer({
-      underlay: { dataUrl, opacity: 0.5, visible: true, mask: { enabled: true, invert: false } }
-    })
+    await importChartImage(dataUrl, 'add')
   }
 
   const commitRename = (id: string): void => {
@@ -54,6 +62,7 @@ export function LayersPanel(): React.JSX.Element {
 
   return (
     <div style={panel}>
+      {importStatus && <div role="status" style={{ fontSize: 11, color: C.hint, marginBottom: 6 }}>{importStatus}</div>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <span style={title}>レイヤー</span>
         <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1曲 = 1枚</span>
@@ -120,7 +129,7 @@ export function LayersPanel(): React.JSX.Element {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
           <span style={{ color: pageSwitchOn ? C.accent : C.hint, fontSize: 10, fontFamily: F.mono, flex: 1 }}>
             {pageSwitchOn
-              ? `${pageSwitchManual == null ? 'DMX' : '手動'} ${pageIndex} → ${layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}`
+              ? `${pageSwitchManual == null ? `DMX値 ${switchValue ?? '未受信'}` : '手動'} → ${layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}`
               : 'DMX切替 OFF — 全CHART送出'}
           </span>
           <button

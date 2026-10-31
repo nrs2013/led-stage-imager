@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../state/store'
-import { OutputRenderer } from './OutputRenderer'
+import { OutputFrameRenderer } from './OutputFrameRenderer'
 import { effectiveDmxByUniverse } from '../dmx/resolve'
 import { C, F } from '../ui/tokens'
 
@@ -20,7 +20,7 @@ export function LiveView({
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const renderer = new OutputRenderer(canvas)
+    const renderer = new OutputFrameRenderer(canvas)
     let lastErrLog = 0
     const tick = (): void => {
       // 1フレームの例外で表示が固まり続けないよう、毎フレーム握って次へ進む。
