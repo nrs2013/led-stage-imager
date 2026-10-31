@@ -248,6 +248,7 @@ interface AppState {
   /** 電飾のにじみ(グロー)の全体既定 px（0=なし）。図形側 glowPx が優先。 */
   setLedGlowPx: (px: number) => void
   /** 送出(Syphon/NDI)のピクセル数だけを変える。チャート本体は原寸のまま。 */
+  setOutputPixelLines: (on: boolean) => void
   setOutputSize: (w: number, h: number) => void
   setOutputAspectLocked: (locked: boolean) => void
   setPageSwitch: (patch: Partial<{ enabled: boolean; universe: number; address: number }>) => void
@@ -1102,6 +1103,8 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, glowAmount: px } } })),
   setLedGlowPx: (px) =>
     set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, ledGlowPx: px } } })),
+  setOutputPixelLines: (on) =>
+    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, outputPixelLines: on } } })),
   setOutputSize: (w, h) =>
     set((s) => ({
       chart: {

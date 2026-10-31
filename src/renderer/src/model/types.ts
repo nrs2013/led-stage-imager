@@ -165,6 +165,8 @@ export interface Chart {
     outDiv?: number
     /** Syphon/NDI の送出ピクセル数。チャート本体の寸法は変えない。 */
     outputSize?: { w: number; h: number }
+    /** 線・折れ線を送信上の1pxで直接描く。未設定は従来の縮小。 */
+    outputPixelLines?: boolean
     /** 設定画面で幅・高さを連動させるか。未設定は true。 */
     outputAspectLocked?: boolean
     /** 1本のDMX値 0..255 で、レイヤー（CHART 1..256）の送出を切り替える。 */

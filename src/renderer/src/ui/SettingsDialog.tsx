@@ -25,6 +25,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
   const setGlow = useStore((s) => s.setGlow)
   const setGlowAmount = useStore((s) => s.setGlowAmount)
   const setLedGlowPx = useStore((s) => s.setLedGlowPx)
+  const setOutputPixelLines = useStore((s) => s.setOutputPixelLines)
   const setOutputSize = useStore((s) => s.setOutputSize)
   const setOutputAspectLocked = useStore((s) => s.setOutputAspectLocked)
   const setPageSwitch = useStore((s) => s.setPageSwitch)
@@ -197,6 +198,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
         </Field>
         <div style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginBottom: 10 }}>
           自動認識した各LED面の左上を基準にします。吸着ONで方眼に揃います。グレーと方眼は編集画面用です。
+        </div>
+        <Toggle label="線を送信上の1pxで描く" on={chart.settings.outputPixelLines === true}
+          onChange={setOutputPixelLines} onText="ON" offText="OFF" />
+        <div style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginBottom: 10 }}>
+          線・折れ線を送信ピクセルに揃えます。丸や斜線は階段状になります。グロー付き・繰り返し図形は従来どおりです。
         </div>
         <Field label="送出の解像度">
           <div style={{ display: 'flex', gap: 6 }}>
