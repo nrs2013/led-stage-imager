@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { normalizeDelayControl, type DelayControl } from '../../../shared/delay-control'
 import { NumberField } from './NumberField'
 import { C, F, buttonStyle, inputStyle } from './tokens'
 
@@ -16,6 +17,7 @@ interface RelayRoute {
 interface RelayConfig {
   enabled: boolean
   routes: RelayRoute[]
+  delayControl: DelayControl
 }
 
 interface RelayApi {
@@ -27,6 +29,7 @@ interface RelayApi {
 
 const defaultConfig = (): RelayConfig => ({
   enabled: false,
+  delayControl: normalizeDelayControl(undefined),
   routes: Array.from({ length: 1 }, (_, i) => ({
     enabled: false,
     inputUniverse: i,
@@ -53,6 +56,7 @@ const normalize = (value: unknown): RelayConfig => {
   const rows = sourceRows.slice(0, Math.max(1, lastUsed + 1))
   return {
     enabled: raw.enabled === true,
+    delayControl: normalizeDelayControl(raw.delayControl),
     routes: Array.from({ length: Math.max(1, rows.length) }, (_, i) => {
       const row = (rows[i] && typeof rows[i] === 'object' ? rows[i] : {}) as Partial<RelayRoute>
       return {
@@ -249,6 +253,35 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
           </span>
         </div>
 
+        <div style={{ border: `0.5px solid ${C.border}`, padding: 10, marginBottom: 12, color: C.label, fontFamily: F.ui, fontSize: 11 }}>
+          <label>
+            <input type="checkbox" checked={config.delayControl.enabled} disabled={loading}
+              onChange={(e) => setConfig((c) => ({ ...c, delayControl: { ...c.delayControl, enabled: e.target.checked } }))} />
+            DMXで遅延ON/OFF（全行共通・送信は継続）
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+            <span>制御 U</span>
+            <NumberField compact style={{ width: 86, flex: '0 0 86px' }} value={config.delayControl.universe + 1} min={1} max={32768}
+              onChange={(v) => setConfig((c) => ({ ...c, delayControl: { ...c.delayControl, universe: v - 1 } }))} />
+            <span>Channel</span>
+            <NumberField compact style={{ width: 86, flex: '0 0 86px' }} value={config.delayControl.channel} min={1} max={512}
+              onChange={(v) => setConfig((c) => ({ ...c, delayControl: { ...c.delayControl, channel: v } }))} />
+            <span>ON以上</span>
+            <NumberField compact style={{ width: 86, flex: '0 0 86px' }} value={config.delayControl.onThreshold} min={1} max={255}
+              onChange={(v) => setConfig((c) => ({ ...c, delayControl: { ...c.delayControl, onThreshold: v } }))} />
+            <span>信号断 ms</span>
+            <NumberField compact style={{ width: 86, flex: '0 0 86px' }} value={config.delayControl.timeoutMs} min={100} max={60000}
+              onChange={(v) => setConfig((c) => ({ ...c, delayControl: { ...c.delayControl, timeoutMs: v } }))} />
+            <select aria-label="制御信号断時の遅延" style={selectStyle} value={config.delayControl.signalLoss}
+              onChange={(e) => setConfig((c) => ({ ...c, delayControl: { ...c.delayControl, signalLoss: e.target.value as DelayControl['signalLoss'] } }))}>
+              <option value="hold">直前を保持</option><option value="bypass">遅延OFF</option><option value="delay">遅延ON</option>
+            </select>
+          </div>
+          <div style={{ color: C.hint, marginTop: 6 }}>
+            初期案：128以上ON・2.5秒で信号断・直前保持。初回制御受信前は従来の遅延を使用。切替時は待機フレームを破棄し、次の受信から反映します。
+          </div>
+        </div>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
           <button style={smallButton} onClick={addRoute}>＋ 行を追加</button>
           <button style={smallButton} onClick={() => void exportConfig()}>設定を書き出す…</button>
@@ -338,7 +371,7 @@ const backdrop: React.CSSProperties = {
 const modal: React.CSSProperties = {
   width: 'calc(100vw - 28px)', maxWidth: 1000, maxHeight: 'calc(100vh - 28px)',
   background: C.surface, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: 18,
-  boxSizing: 'border-box'
+  boxSizing: 'border-box', overflowY: 'auto'
 }
 const warning: React.CSSProperties = {
   color: C.amber, background: 'rgba(245,200,120,0.06)', border: '0.5px solid rgba(245,200,120,0.32)',
