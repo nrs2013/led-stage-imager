@@ -22,7 +22,7 @@ export function normalizeDelayControl(value: unknown): DelayControl {
     universe: integer(raw.universe, 0, 32767, 0),
     channel: integer(raw.channel, 1, 512, 1),
     onThreshold: integer(raw.onThreshold, 1, 255, 128),
-    timeoutMs: integer(raw.timeoutMs, 100, 60000, 2500),
+    timeoutMs: integer(raw.timeoutMs, 100, 60000, 5500),
     signalLoss: raw.signalLoss === 'bypass' || raw.signalLoss === 'delay' ? raw.signalLoss : 'hold'
   }
 }

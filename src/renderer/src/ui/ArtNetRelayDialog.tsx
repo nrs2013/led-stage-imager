@@ -278,7 +278,7 @@ export function ArtNetRelayDialog({ onClose }: { onClose: () => void }): React.J
             </select>
           </div>
           <div style={{ color: C.hint, marginTop: 6 }}>
-            初期案：128以上ON・2.5秒で信号断・直前保持。初回制御受信前は従来の遅延を使用。切替時は待機フレームを破棄し、次の受信から反映します。
+            初期案：128以上ON・5.5秒で信号断・直前保持。初回制御受信前は従来の遅延を使用。切替時は待機フレームを破棄し、次の受信から反映します。
           </div>
         </div>
 

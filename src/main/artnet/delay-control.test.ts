@@ -21,6 +21,8 @@ function setup(signalLoss = 'hold', timeoutMs = 2500) {
 describe('DMX delay bypass', () => {
   it('keeps old settings disabled and rejects an invalid control address', () => {
     expect(normalizeRelayConfig({ enabled: true }).delayControl.enabled).toBe(false)
+    expect(normalizeDelayControl(undefined).timeoutMs).toBe(5500)
+    expect(normalizeDelayControl({ timeoutMs: 2500 }).timeoutMs).toBe(2500)
     expect(normalizeDelayControl({ enabled: true, universe: -1, channel: 1 }).enabled).toBe(false)
     expect(normalizeDelayControl({ enabled: true, universe: 32767, channel: 512 }).enabled).toBe(true)
   })
