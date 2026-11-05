@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { Toolbar } from './editor/Toolbar'
 import { EditorCanvas } from './editor/EditorCanvas'
 import { Inspector } from './editor/Inspector'
-import { PartsPalette } from './editor/PartsPalette'
 import { LayersPanel } from './editor/LayersPanel'
 import { PatchTable } from './editor/PatchTable'
 import { LiveView } from './output/LiveView'
@@ -405,7 +404,6 @@ function EditorApp(): React.JSX.Element {
               }}
             >
               <LayersPanel />
-              <PartsPalette />
               <Inspector />
             </div>
           </div>

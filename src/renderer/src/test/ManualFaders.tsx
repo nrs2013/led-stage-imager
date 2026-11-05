@@ -1,11 +1,11 @@
+import { groupAddressSteps, type ManualStep } from './manual-sequence'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
-import type { Fixture } from '../model/types'
 import { addressAt, formatDmx, repeatCount } from '../dmx/address'
 import { C, F, buttonStyle } from '../ui/tokens'
 
 type Order = 'tap' | 'number' | 'address'
-type SequenceItem = { fixture: Fixture; rep: number | null; universe: number; start: number }
+type SequenceItem = ManualStep
 const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, n))
 const hexToRgb = (hex: string): [number, number, number] => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]
 const rgbToHex = ([r, g, b]: [number, number, number]): string => `#${[r, g, b].map((v) => clamp(v, 0, 255).toString(16).padStart(2, '0')).join('')}`
@@ -38,21 +38,23 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
   const shapeById = useMemo(() => new Map(chart.shapes.map((shape) => [shape.id, shape])), [chart.shapes])
   const sequence = useMemo((): SequenceItem[] => {
     const selected = new Set(selectedFixtureIds)
-    let fixtures = selected.size ? chart.fixtures.filter((f) => selected.has(f.id)) : chart.fixtures.slice()
+    let fixtures = chart.fixtures.filter((f) => selected.size ? selected.has(f.id) :
+      (shapeById.get(f.shapeId)?.layerId ?? chart.layers[0]?.id) === chart.activeLayerId)
     const start = (Math.max(1, startUniverse) - 1) * 512 + Math.max(1, startChannel) - 1
     if (order === 'tap') {
       const rank = new Map(tapOrder.map((id, index) => [id, index]))
       fixtures = fixtures.sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER))
     }
     // #番号順とタップ順は「線（番地一覧の1項目）」が1ステップ。
-    // DMX順だけは、1本の線に含まれる各Fixtureを個別のステップへ展開する。
+    // DMX順は繰り返しを展開し、同一Universe・番地・モードを一組のステップへまとめる。
     if (order !== 'address') {
       return fixtures
         .map((fixture) => ({
           fixture,
           rep: null,
           universe: fixture.universe,
-          start: fixture.start
+          start: fixture.start,
+          targets: [fixture.id]
         }))
         .filter((item) => order !== 'number' || chart.fixtures.findIndex((f) => f.id === item.fixture.id) + 1 >= startNumber)
     }
@@ -61,20 +63,20 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
       const count = shape ? repeatCount(shape) : 1
       return Array.from({ length: count }, (_, rep) => {
         const address = addressAt(fixture.universe, fixture.start, fixture.mode, fixture.addressStep, rep)
-        return { fixture, rep, universe: address.universe, start: address.start }
+        return { fixture, rep, universe: address.universe, start: address.start, targets: [`${fixture.id}:${rep}`] }
       })
     }).filter((item) => item.universe * 512 + item.start - 1 >= start)
     items.sort((a, b) => a.universe - b.universe || a.start - b.start || (a.rep ?? 0) - (b.rep ?? 0))
-    return items
+    return groupAddressSteps(items)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chart.fixtures, shapeById, selectedFixtureIds.join('|'), startUniverse, startChannel, startNumber, order, tapOrder])
+  }, [chart.fixtures, chart.activeLayerId, chart.layers, shapeById, selectedFixtureIds.join('|'), startUniverse, startChannel, startNumber, order, tapOrder])
   const lightOnly = (index: number): void => {
     if (!sequence.length) return
     const next = ((index % sequence.length) + sequence.length) % sequence.length
     setManualMode(true)
     setManualAll([0, 0, 0])
     const item = sequence[next]
-    setManualMany([item.rep == null ? item.fixture.id : `${item.fixture.id}:${item.rep}`], litColor())
+    setManualMany(item.targets, litColor())
     setPreviewTarget('step')
     setStep(next)
   }
@@ -97,7 +99,7 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
       return
     }
     const item = step >= 0 ? sequence[step] : undefined
-    if (item) setManualMany([item.rep == null ? item.fixture.id : `${item.fixture.id}:${item.rep}`], litColor())
+    if (item) setManualMany(item.targets, litColor())
     // Colour and Dimmer changes must immediately affect what is already selected.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [color, dimmer])
@@ -108,7 +110,7 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
       setManualMode(true)
       setManualAll([0, 0, 0])
       const item = sequence[next]
-      setManualMany([item.rep == null ? item.fixture.id : `${item.fixture.id}:${item.rep}`], litColor())
+      setManualMany(item.targets, litColor())
       setPreviewTarget('step')
       return next
     }), Math.max(80, speed))
@@ -158,7 +160,7 @@ export function ManualFaders({ onClose }: { onClose: () => void }): React.JSX.El
         <label style={smallLabel}>開始 Channel<input type="number" min={1} max={512} value={startChannel} onChange={(e) => setStartChannel(clamp(Number(e.target.value), 1, 512))} style={numberInput} /></label>
       </div>
       <div style={{ display: 'flex', gap: 6, marginTop: 8 }}><button style={{ ...buttonStyle({}), flex: 1 }} onClick={() => lightOnly(step - 1)}>前へ</button><button style={{ ...buttonStyle({ active: true, accent: C.amber, accentRGB: '245,200,120' }), flex: 1 }} onClick={() => lightOnly(step + 1)}>次へ</button></div>
-      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, marginTop: 7, minHeight: 16 }}>{step >= 0 && sequence[step] ? `${step + 1}/${sequence.length}  ${formatDmx(sequence[step].universe, sequence[step].start)}${sequence[step].rep == null ? `  #${chart.fixtures.findIndex((f) => f.id === sequence[step].fixture.id) + 1}` : `  Fixture ${sequence[step].rep + 1}`}` : `対象 ${sequence.length}${order === 'address' ? ' Fixture' : ' 本'}`}</div>
+      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, marginTop: 7, minHeight: 16 }}>{step >= 0 && sequence[step] ? `${step + 1}/${sequence.length}  ${formatDmx(sequence[step].universe, sequence[step].start)}${sequence[step].rep == null ? `  #${chart.fixtures.findIndex((f) => f.id === sequence[step].fixture.id) + 1}` : `  Fixture ${sequence[step].rep + 1}`}${order === 'address' && sequence[step].targets.length > 1 ? `  ${sequence[step].targets.length}本同時` : ''}` : `対象 ${sequence.length}${order === 'address' ? ' 番地' : ' 本'}`}</div>
     </div>
     <div style={box}>
       <div style={label}>CHASE</div><input type="range" min={80} max={2000} step={20} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} style={{ width: '100%', accentColor: C.green }} /><div style={{ fontFamily: F.mono, fontSize: 11, color: C.hint, textAlign: 'right' }}>{speed} ms</div>

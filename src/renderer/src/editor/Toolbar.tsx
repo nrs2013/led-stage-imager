@@ -1,3 +1,4 @@
+import { PartsPalette } from './PartsPalette'
 import { useEffect, useState } from 'react'
 import { useStore, type Tool } from '../state/store'
 import { C, F, chrome, buttonStyle } from '../ui/tokens'
@@ -265,6 +266,8 @@ export function Toolbar({
       </div>
 
       <div style={{ flex: 1 }} />
+      {editing && <PartsPalette toolbar />}
+
 
       <button
         style={buttonStyle({ active: stepPatch, accent: C.green, accentRGB: '168,232,120' })}
