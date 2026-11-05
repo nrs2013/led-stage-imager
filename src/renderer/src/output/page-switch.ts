@@ -8,7 +8,8 @@ export function outputLayerIndex(
 ): number | null {
   if (manualValue != null) return Math.max(0, Math.min(255, Math.floor(manualValue)))
   const sw = chart.settings.pageSwitch
-  if (!sw?.enabled) return null
+  if (!sw?.enabled) return chart.settings.chartOutput === 'selected'
+    ? Math.max(0, chart.layers.findIndex((layer) => layer.id === chart.activeLayerId)) : null
   const universe = Math.max(0, Math.floor(sw.universe || 0))
   const address = Math.max(1, Math.min(512, Math.floor(sw.address || 1)))
   return dmxByUniverse[universe]?.[address - 1] ?? 0

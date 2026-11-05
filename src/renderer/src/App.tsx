@@ -394,7 +394,8 @@ function EditorApp(): React.JSX.Element {
             <EditorCanvas checkView={testOpen} />
             <div
               style={{
-                width: 340,
+                width: 'min(380px, 42vw)',
+                overflowY: 'auto',
                 flexShrink: 0,
                 display: 'flex',
                 flexDirection: 'column',

@@ -162,8 +162,9 @@ export function Toolbar({
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        height: 52,
-        padding: '0 14px',
+        minHeight: 52,
+        flexWrap: 'wrap',
+        padding: '6px 14px',
         background: chrome.bar,
         borderBottom: `0.5px solid ${C.border}`,
         boxShadow: chrome.topHi,
@@ -195,6 +196,8 @@ export function Toolbar({
           display: 'flex',
           alignItems: 'center',
           gap: 6,
+          flexWrap: 'wrap',
+          minWidth: 0,
           opacity: editing ? 1 : 0.3,
           pointerEvents: editing ? 'auto' : 'none'
         }}

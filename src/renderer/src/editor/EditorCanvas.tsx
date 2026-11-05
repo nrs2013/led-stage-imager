@@ -691,7 +691,7 @@ export function EditorCanvas({ checkView = false }: { checkView?: boolean }): Re
 
     // draft preview + selection (content transform)
     ctx.setTransform(v.scale, 0, 0, v.scale, v.tx, v.ty)
-    if (draft) {
+    if (draft && !checkView) {
       if (tool === 'pixelpen' || paintFromSelect.current) {
         // paint feel: every visited cell fills in as you drag — drawn at the same
         // display width as the committed stroke, so nothing "changes" on release
@@ -720,8 +720,14 @@ export function EditorCanvas({ checkView = false }: { checkView?: boolean }): Re
       const b = shapeArrayBounds(ssh)
       const lw = 1.5 / v.scale
       const pad = 4 / v.scale
+      // A dark halo keeps the selected item identifiable when zoomed far out
+      // without letting the outline cover its DMX colour.
+      ctx.strokeStyle = 'rgba(0,0,0,0.95)'
+      ctx.lineWidth = 4 / v.scale
+      ctx.setLineDash([])
+      ctx.strokeRect(b.x - pad, b.y - pad, Math.max(b.w, lw) + pad * 2, Math.max(b.h, lw) + pad * 2)
       ctx.strokeStyle = C.accent
-      ctx.lineWidth = lw
+      ctx.lineWidth = 2 / v.scale
       ctx.setLineDash([5 / v.scale, 3 / v.scale])
       ctx.strokeRect(b.x - pad, b.y - pad, Math.max(b.w, lw) + pad * 2, Math.max(b.h, lw) + pad * 2)
       ctx.setLineDash([])
@@ -731,8 +737,12 @@ export function EditorCanvas({ checkView = false }: { checkView?: boolean }): Re
       const b = shapeArrayBounds(sel)
       const lw = 1 / v.scale
       const pad = 4 / v.scale
+      ctx.strokeStyle = 'rgba(0,0,0,0.95)'
+      ctx.lineWidth = 4 / v.scale
+      ctx.setLineDash([])
+      ctx.strokeRect(b.x - pad, b.y - pad, Math.max(b.w, lw) + pad * 2, Math.max(b.h, lw) + pad * 2)
       ctx.strokeStyle = C.accent
-      ctx.lineWidth = lw
+      ctx.lineWidth = 2 / v.scale
       ctx.setLineDash([4 / v.scale, 3 / v.scale])
       ctx.strokeRect(b.x - pad, b.y - pad, Math.max(b.w, lw) + pad * 2, Math.max(b.h, lw) + pad * 2)
       ctx.setLineDash([])
@@ -794,7 +804,7 @@ export function EditorCanvas({ checkView = false }: { checkView?: boolean }): Re
     }
     // rubber-band rectangle
     const mq = marquee.current
-    if (mq) {
+    if (mq && !checkView) {
       const mx = Math.min(mq.x0, mq.x1)
       const my = Math.min(mq.y0, mq.y1)
       const mw = Math.abs(mq.x1 - mq.x0)
@@ -1252,8 +1262,9 @@ export function EditorCanvas({ checkView = false }: { checkView?: boolean }): Re
     const el = wrapRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
-      if (!userAdjusted.current) fit()
-      else drawRef.current()
+      // Keep the complete chart in view as the app window or side panels change size.
+      // The user can zoom/pan again immediately after the layout settles.
+      fit()
     })
     ro.observe(el)
     return () => ro.disconnect()

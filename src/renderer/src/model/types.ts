@@ -149,6 +149,8 @@ export interface Chart {
   fixtures: Fixture[]
   syphon: { name: string }
   settings: {
+    /** Optional saved selection mode; absent keeps legacy all-page output. */
+    chartOutput?: 'selected' | 'all'
     ledGrid?: { enabled: boolean; spacing: number }
     holdOnTimeout: boolean
     gamma: boolean
