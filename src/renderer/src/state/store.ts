@@ -196,7 +196,7 @@ interface AppState {
   /** Layers = one page per song. Adds a layer (optionally born with a chart image)
    *  and makes it active; returns its id. */
   addLayer: (init?: { name?: string; underlay?: Underlay | null; canvas?: { w: number; h: number } }) => string
-  appendImportedChart: (source: Chart) => void
+  appendImportedChart: (source: Chart) => { pageCount: number; shapeCount: number; fixtureCount: number }
   /** Deletes the layer AND its shapes/fixtures (one undo step). The last layer stays. */
   removeLayer: (id: string) => void
   setChartOutput: (mode: 'selected' | 'all') => void
@@ -894,6 +894,11 @@ export const useStore = create<AppState>()((set, get) => ({
     const imported = prepareChartImport(current, source)
     get().beginHistory()
     set({ chart: imported, selectedId: null, selectedIds: [] })
+    return {
+      pageCount: imported.layers.length - current.layers.length,
+      shapeCount: imported.shapes.length - current.shapes.length,
+      fixtureCount: imported.fixtures.length - current.fixtures.length
+    }
   },
   removeLayer: (id) => {
     if (get().chart.layers.length <= 1 || !get().chart.layers.some((layer) => layer.id === id)) return

@@ -1,6 +1,6 @@
 import type { Chart, Shape } from '../model/types'
 
-/** DMX値0=CHART 1、255=CHART 256。未作成ページを選んだ時は黒を送出する。 */
+/** DMX値0=フィックスチャーチャート1、255=フィックスチャーチャート256。未作成ページを選んだ時は黒を送出する。 */
 export function outputLayerIndex(
   chart: Chart,
   dmxByUniverse: Record<number, Uint8Array>,

@@ -41,6 +41,32 @@
 - ONでは原寸画像の縮小を経ず送信ピクセルに量子化する。位置の丸めと丸・斜線の階段状の輪郭が生じる。グロー付き・繰り返し図形・その他の灯体は従来描画を維持する。
 - MacのGPU出力とCPU/Windows出力で同じ処理を使う。NDI送信前のRGB検証と、受信後の画質・遅延の実測を区別する。
 
+## 2026-10-31 MVRのUniverseとFixture ID
+
+- チャート1・2の両方を下手Universe 21、上手Universe 22へ移す。各FixtureのDMX開始アドレス・順序・配置・形状は維持する。
+- MVRのFixture IDは「チャート番号 × 100000 ＋ Universe番号 × 1000 ＋ Universe内の連番（1始まり）」とする。チャート1は121001／122001、チャート2は221001／222001から開始（たたみさん確認済み）。
+- 発光形状付きGDTF、RGB 3ch＋Virtual Dimmerを維持する。旧データ・旧MVRは配布フォルダのOldへ保管する。
+- チャート1・2の旧MVRはたたみさんより問題なさそうとの報告あり。今回のUniverse・ID変更版の卓上確認とは区別する。
+
+## 2026-10-31 MVRの奥行き
+
+- MVRは舞台前をY=0、舞台奥方向を+Yとし、LED面ごとに指定された奥行きを設定する。1間は1800mmとして換算する。
+- 奥行き変更ではX・Z、発光形状、Fixture ID、Universe・DMXアドレスを変更しない。Stage Imagerの2Dチャートの上下座標とMVRの奥行きYを混同しない。
+- 公演固有のLED面別奥行き値と確認結果はローカルの検証記録へ保存し、公開リポジトリへ含めない。
+
+## 2026-10-31 次回のGDTF共通化と表示線幅
+
+- 次回のMVR書き出し改修では、同じ長さ・同じ発光線幅・同じDMX仕様の直線を共通GDTF／FixtureTypeにまとめる。位置・向きはMVRの変換行列で表現し、向きの違いだけでFixtureTypeを増やさない。
+- GDTF上の発光線幅は視認用に50mmとする。Stage Imagerの描画線幅、NDI出力の線幅、チャートの実寸・配置・Patchは変更しない。
+- 同じ形状・寸法の丸も共通化対象とする。長さ・形状が異なるものを種類数削減のために勝手に変形しない。
+- 次回対応として承認済み。現時点の配布MVRには未反映。共通化後は正面形状・位置、奥行き、Fixture ID、Patch、RGBとVirtual Dimmerの維持を検証する。
+
+## 2026-10-31 ローカル決定事項の正本
+
+- 公演固有の寸法・配置・Patch・ファイル所在・確認状況を含む会話全体の決定事項は、Gitリポジトリ外の `~/Documents/LED-STAGE-IMAGER-ローカル記録/決定事項.txt` に保存する。
+- 次の担当はこの一般仕様ノートに加え、上記ローカルノートを必ず読む。そこには次回のFixtureType共通化・GDTF表示線幅50mm化の依頼と、未実装・未確認の区別も記録している。
+- ローカルノートをGitHubへコピー・コミット・送信しない。このファイル自体はGit追跡対象なので、今後のpush前に公演固有情報が混在していないか確認する。
+
 
 ## 2026-11-05 DMXによるArt-Net遅延切替（実装・初期案）
 
@@ -62,3 +88,23 @@
 - 入力元・資料・元のチャートを上書きしない。公演資料・具体的な形状・配置・Patch・生成チャート・画像・確認記録はリポジトリ外で管理し、GitHubへ含めない。
 - 寸法注記と実際の図形寸法に食い違いがある場合、実寸校正済みと扱わない。配置案・アプリ読込・画面の目視・実機出力を区別する。
 - DMX遅延制御の信号断判定の初期案は既存受信処理と同じ5500ms。既に保存されたユーザー指定値は維持し、本番設定は未確定のままとする。
+
+
+## 2026-11-05 成果物の集約先
+
+- 今後作成するアプリ・チャートデータ・確認画像・Patch表・説明書は、ユーザー指定のローカル成果物フォルダへまとめて保存する。具体的なパスはリポジトリ外のローカル決定事項に記録する。
+- 今回の保存先指定だけを理由に、既存データ・実行中アプリを移動したり上書きしたりしない。
+
+## 2026-11-05 LED chart visual revision (local only)
+
+- Keep File, Chart, Select, Paint, no-console preview, fullscreen preview, output status, and Key List on the same primary toolbar row. Compact the title, spacing, and button padding to fit.
+- Preserve the downstage box geometry and mirror the upstage geometry so both sides face outward. Preserve fixture identity and patch order.
+- Add 300mm-segmented lower edges to the six narrow hanging LED faces and the three main faces. Split the center face symmetrically and patch from each outer edge toward center.
+- Add a lower ribbon-band design path on the existing concept page, passing through narrow LED faces and platform LED faces. The 300mm band width remains provisional; compare against the front view before treating its route as approved. Keep each side below 170 Fixtures.
+- Keep project-specific chart files, exact patch data, drawings, and screenshots in the local deliverables folder. Do not send these decisions or artifacts to GitHub without separate authorization.
+
+## 2026-11-05 フィックスチャーチャートの名称と取込対象（訂正）
+
+- ページ管理・送出設定では、Fixture（Patchされた電飾図形）のページを「フィックスチャーチャート」と呼び、背景用チャート画像と区別する。
+- `.ledimager`から取り込むときは、下書き以外のFixture Chartページに描かれたすべての図形と対応するFixture／Patchを移す。図形種別やPatchの有無で絞り込まない。
+- 元ファイルの背景画像（underlay）と下書き・デザイン案ページは移さない。移行先の背景は維持する。空のページは追加しない。

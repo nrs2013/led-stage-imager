@@ -64,7 +64,7 @@ describe('chart-file', () => {
       })
     )
     expect(c.layers[0].underlay).toBeNull()
-    expect(c.layers[0].name).toBe('CHART 1')
+    expect(c.layers[0].name).toBe('フィックスチャーチャート 1')
   })
   it('fills missing family on load: old parts→decor, stage fixtures→light', () => {
     const v2 = {
@@ -72,7 +72,7 @@ describe('chart-file', () => {
       id: 'c',
       name: 'n',
       canvas: { w: 10, h: 10 },
-      layers: [{ id: 'l1', name: 'CHART 1', underlay: null, visible: true }],
+      layers: [{ id: 'l1', name: 'フィックスチャーチャート 1', underlay: null, visible: true }],
       activeLayerId: 'l1',
       shapes: [
         { id: 'a', type: 'bulb', layerId: 'l1', points: [{ x: 0, y: 0 }], display: 'fill', strokeWidth: 1 },

@@ -17,7 +17,7 @@ function migrateV1(c: Record<string, unknown>): Chart {
   const lid = 'layer_1'
   const layer: Layer = {
     id: lid,
-    name: 'CHART 1',
+    name: 'フィックスチャーチャート 1',
     underlay: (c.underlay as Underlay | null) ?? null,
     visible: true
   }
@@ -45,7 +45,7 @@ export function parseChart(json: string): Chart {
   const layers: Layer[] =
     Array.isArray(chart.layers) && chart.layers.length
       ? chart.layers
-      : [{ id: 'layer_1', name: 'CHART 1', underlay: null, visible: true }]
+      : [{ id: 'layer_1', name: 'フィックスチャーチャート 1', underlay: null, visible: true }]
   const activeLayerId = layers.some((l) => l.id === chart.activeLayerId)
     ? chart.activeLayerId
     : layers[0].id

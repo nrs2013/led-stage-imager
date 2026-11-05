@@ -2,21 +2,43 @@ import type { Chart, Shape } from './types'
 import { newId } from './chart-model'
 import { channelCount } from '../dmx/channel-math'
 
-/** Keep source pages separate and fit their whole canvas without distorting geometry. */
+const DRAFT_LAYER_NAME = /下書き|ドラフト|デザイン案|試案|draft|proposal/i
+
+/** Keep all drawn content from fixture-chart pages, excluding drafts and source backgrounds. */
 export function prepareChartImport(current: Chart, source: Chart): Chart {
-  if (!source.layers.length || current.layers.length + source.layers.length > 256)
-    throw new Error('取り込み後のチャートは256枚以内にしてください')
+  if (!source.layers.length) throw new Error('取り込み元にフィックスチャーチャートがありません')
   if (![source.canvas.w, source.canvas.h].every((n) => Number.isFinite(n) && n > 0))
     throw new Error('取り込み元のキャンバス寸法が不正です')
   const uniqueIds = (items: { id: string }[]): boolean =>
     items.every((item) => typeof item.id === 'string' && !!item.id) &&
     new Set(items.map((item) => item.id)).size === items.length
-  if (!uniqueIds(source.layers) || !uniqueIds(source.shapes) || !uniqueIds(source.fixtures))
-    throw new Error('取り込み元のIDが重複または欠落しています')
-  const validLayers = new Set(source.layers.map((l) => l.id))
-  const validShapes = new Set(source.shapes.map((s) => s.id))
+
+  const sourceLayerIds = new Set(source.layers.map((layer) => layer.id))
+  const layersToImport = source.layers.filter((layer) =>
+    !DRAFT_LAYER_NAME.test(layer.name) && source.shapes.some((shape) =>
+      (shape.layerId ?? source.layers[0]?.id) === layer.id
+    )
+  )
+  const importLayerIds = new Set(layersToImport.map((layer) => layer.id))
+  const shapesToImport = source.shapes.filter((shape) =>
+    importLayerIds.has(shape.layerId ?? source.layers[0]?.id)
+  )
+  const importedShapeIds = new Set(shapesToImport.map((shape) => shape.id))
+  const fixturesToImport = source.fixtures.filter((fixture) => importedShapeIds.has(fixture.shapeId))
+
+  if (!layersToImport.length || !shapesToImport.length)
+    throw new Error('取り込み対象のフィックスチャーチャートがありません（下書き以外の図形が必要です）')
+  if (current.layers.length + layersToImport.length > 256)
+    throw new Error('取り込み後のフィックスチャーチャートは256枚以内にしてください')
   if (
-    source.shapes.some(
+    !uniqueIds(layersToImport) || !uniqueIds(shapesToImport) || !uniqueIds(fixturesToImport) ||
+    layersToImport.some((layer) => !sourceLayerIds.has(layer.id))
+  ) throw new Error('取り込み元のIDが重複または欠落しています')
+
+  const validLayers = new Set(layersToImport.map((l) => l.id))
+  const validShapes = new Set(shapesToImport.map((s) => s.id))
+  if (
+    shapesToImport.some(
       (s) =>
         !s.points.length ||
         !s.points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) ||
@@ -27,7 +49,7 @@ export function prepareChartImport(current: Chart, source: Chart): Chart {
   )
     throw new Error('取り込み元の図形・ページ指定が不正です')
   if (
-    source.fixtures.some(
+    fixturesToImport.some(
       (f) =>
         !validShapes.has(f.shapeId) ||
         !Number.isInteger(f.universe) ||
@@ -44,15 +66,15 @@ export function prepareChartImport(current: Chart, source: Chart): Chart {
   const dx = (current.canvas.w - source.canvas.w * scale) / 2
   const dy = (current.canvas.h - source.canvas.h * scale) / 2
   const base = current.layers.find((l) => l.id === current.activeLayerId)?.underlay ?? null
-  const layers = source.layers.map((l) => ({
+  const layers = layersToImport.map((l) => ({
     ...l,
     id: newId('layer'),
     name: `${l.name}（取込）`,
     underlay: base
   }))
-  const layerIds = new Map(source.layers.map((l, i) => [l.id, layers[i].id]))
-  const shapeIds = new Map(source.shapes.map((s) => [s.id, newId('shape')]))
-  const fixtureIds = new Map(source.fixtures.map((f) => [f.id, newId('fx')]))
+  const layerIds = new Map(layersToImport.map((l, i) => [l.id, layers[i].id]))
+  const shapeIds = new Map(shapesToImport.map((s) => [s.id, newId('shape')]))
+  const fixtureIds = new Map(fixturesToImport.map((f) => [f.id, newId('fx')]))
   const sizes = [
     'diameter',
     'fontSize',
@@ -63,7 +85,7 @@ export function prepareChartImport(current: Chart, source: Chart): Chart {
     'beamW1',
     'beamLen'
   ] as const
-  const shapes = source.shapes.map((shape): Shape => {
+  const shapes = shapesToImport.map((shape): Shape => {
     const out = {
       ...shape,
       id: shapeIds.get(shape.id)!,
@@ -77,7 +99,7 @@ export function prepareChartImport(current: Chart, source: Chart): Chart {
       out.repeat = { ...shape.repeat, dx: shape.repeat.dx * scale, dy: shape.repeat.dy * scale }
     return out
   })
-  const fixtures = source.fixtures.flatMap((f) => {
+  const fixtures = fixturesToImport.flatMap((f) => {
     const shapeId = shapeIds.get(f.shapeId)
     return shapeId ? [{ ...f, id: fixtureIds.get(f.id)!, shapeId }] : []
   })

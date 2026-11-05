@@ -87,8 +87,8 @@ export function LayersPanel(): React.JSX.Element {
     }
     const state = useStore.getState()
     try {
-      state.appendImportedChart(source)
-      useStore.setState({ chartImportStatus: `${source.layers.length}ページ・図形${source.shapes.length}本を取り込みました（縦横比を維持）` })
+      const imported = state.appendImportedChart(source)
+      useStore.setState({ chartImportStatus: `${imported.pageCount}フィックスチャーチャート・図形${imported.shapeCount}個／Fixture ${imported.fixtureCount}個を取り込みました（元の背景と下書きは対象外）` })
     } catch (error) {
       useStore.setState({ chartImportStatus: `読込失敗: ${(error as Error).message}` })
       return
@@ -112,29 +112,29 @@ export function LayersPanel(): React.JSX.Element {
       {importStatus && <div role="status" style={{ fontSize: 11, color: C.hint, marginBottom: 6 }}>{importStatus}</div>}
       <details style={{ minHeight: 0, maxHeight: '35vh', overflowY: 'auto' }}>
       <summary style={{ ...title, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, listStylePosition: 'inside' }}>
-        チャート作成・送出設定 <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>{layers.length}枚</span>
+        フィックスチャーチャート <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>{layers.length}枚</span>
       </summary>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6, marginBottom: 8 }}>
-        <button style={{ ...smallBtn, minHeight: 34 }} disabled={layers.length >= 256}
-          onClick={() => addLayer({ name: '新しいチャート' })}
-          title="背景画像を引き継ぎ、電飾とPatchが空のチャートを追加">
-          ＋ チャート追加
+        <button style={{ ...smallBtn, minHeight: 34, gridColumn: '1 / -1' }} disabled={layers.length >= 256}
+          onClick={() => addLayer({ name: '新しいフィックスチャーチャート' })}
+          title="背景画像を引き継ぎ、電飾とPatchが空のフィックスチャーチャートを追加">
+          ＋ フィックスチャーチャート追加
         </button>
         <button style={{ ...smallBtn, minHeight: 34 }} disabled={layers.length >= 256}
-          onClick={addWithImage} title="画像を選んで新しいチャートを追加">
+          onClick={addWithImage} title="画像を背景にして新しいフィックスチャーチャートを追加">
           画像から追加…
         </button>
         <button style={{ ...smallBtn, minHeight: 34, gridColumn: '1 / -1' }} disabled={layers.length >= 256}
-          onClick={() => void importPageFromFile()} title="別の .ledimager から図形とPatchを新しいページへ追加">
-          データからチャートを取り込む…
+          onClick={() => void importPageFromFile()} title="別の .ledimager から下書き以外の図形とPatchを取り込みます。元の背景画像は取り込みません">
+          フィックスチャーチャートを取り込む…
         </button>
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, color: C.label, fontFamily: F.ui, fontSize: 10 }}>
         通常の送出
-        <select aria-label="通常のチャート送出" value={chartOutput ?? 'all'}
+        <select aria-label="通常のフィックスチャーチャート送出" value={chartOutput ?? 'all'}
           onChange={(e) => setChartOutput(e.target.value as 'selected' | 'all')}
           style={{ background: C.inputBg, color: C.white, border: `0.5px solid ${C.border}`, borderRadius: 3, minHeight: 30, minWidth: 0, flex: 1 }}>
-          <option value="selected">選択チャート1枚</option><option value="all">全チャート</option>
+          <option value="selected">選択フィックスチャーチャート1枚</option><option value="all">全フィックスチャーチャート</option>
         </select>
       </label>
       <div
@@ -155,7 +155,7 @@ export function LayersPanel(): React.JSX.Element {
         <button
           style={{ ...smallBtn, minWidth: 38, color: dmxSwitchOn ? C.white : C.hint }}
           onClick={() => setPageSwitch({ enabled: !dmxSwitchOn })}
-          title="DMXの値でCHARTを切り替える機能をON／OFFします"
+          title="DMXの値でフィックスチャーチャートを切り替える機能をON／OFFします"
         >
           {dmxSwitchOn ? 'ON' : 'OFF'}
         </button>
@@ -179,13 +179,13 @@ export function LayersPanel(): React.JSX.Element {
         />
       </div>
       </details>
-      <div style={{ ...title, margin: '7px 0' }}>チャート一覧</div>
+      <div style={{ ...title, margin: '7px 0' }}>フィックスチャーチャート一覧</div>
       <div style={{ maxHeight: 226, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
           <span style={{ color: pageSwitchOn ? C.accent : C.hint, fontSize: 10, fontFamily: F.mono, flex: 1 }}>
             {pageSwitchOn
-              ? `${pageSwitchManual != null ? '手動' : dmxSwitchOn ? `DMX値 ${switchValue ?? '未受信'}` : '選択'} → ${layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}`
-              : '全チャートを送出中'}
+              ? `${pageSwitchManual != null ? '手動' : dmxSwitchOn ? `DMX値 ${switchValue ?? '未受信'}` : '選択'} → ${layers[pageIndex]?.name ?? `フィックスチャーチャート ${pageIndex + 1}（未作成）`}`
+              : '全フィックスチャーチャートを送出中'}
           </span>
           <button
             style={{ ...smallBtn, minWidth: dmxSwitchOn ? 74 : 92 }}
@@ -193,7 +193,7 @@ export function LayersPanel(): React.JSX.Element {
             onClick={() => setPageSwitchManual(null)}
             title={dmxSwitchOn
               ? '手動選択を解除して、設定したDMXチャンネルの値に連動します'
-              : chartOutput === 'selected' ? '手動固定を解除して、選択したチャートに追従します' : '手動固定を解除して全チャートを送出します'}
+              : chartOutput === 'selected' ? '手動固定を解除して、選択したフィックスチャーチャートに追従します' : '手動固定を解除して全フィックスチャーチャートを送出します'}
           >
             {dmxSwitchOn ? 'DMXに戻す' : chartOutput === 'selected' ? '選択に戻す' : '全体送出に戻す'}
           </button>
@@ -330,7 +330,7 @@ export function LayersPanel(): React.JSX.Element {
         })}
       </div>
       {deleteLayer && layers.length > 1 && <ChartDeleteDialog
-        name={`CHART ${layers.findIndex((layer) => layer.id === deleteLayer.id) + 1} ${deleteLayer.name}`}
+        name={`フィックスチャーチャート ${layers.findIndex((layer) => layer.id === deleteLayer.id) + 1} ${deleteLayer.name}`}
         count={counts.get(deleteLayer.id) ?? 0}
         onCancel={() => setDeleteId(null)}
         onDelete={() => { removeLayer(deleteLayer.id); setDeleteId(null) }}
