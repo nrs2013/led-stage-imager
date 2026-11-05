@@ -84,7 +84,7 @@ export function NumberField({
 
   return (
     <div
-      style={{ display: 'flex', width: '100%', alignItems: 'stretch', ...style }}
+      style={{ display: 'flex', width: '100%', minWidth: 0, alignItems: 'stretch', ...style }}
       title="▲▼は1回で1目盛り、押し続けると連続増減／数字をクリックすると全選択"
     >
       <input

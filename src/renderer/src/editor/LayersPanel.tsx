@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { pickImage } from '../io/image-pick'
 import { importChartImage } from '../io/import-chart-image'
 import { C, F, buttonStyle } from '../ui/tokens'
+import { ChartDeleteDialog } from '../ui/ChartDeleteDialog'
 import { NumberField } from '../ui/NumberField'
 import { outputLayerIndex } from '../output/page-switch'
+import { parseChart } from '../io/chart-file'
+import type { Chart } from '../model/types'
 
 const smallBtn = { ...buttonStyle({}), padding: '6px 8px', fontSize: 10, minHeight: 24 }
 
@@ -18,6 +21,8 @@ export function LayersPanel(): React.JSX.Element {
   const shapes = useStore((s) => s.chart.shapes)
   const addLayer = useStore((s) => s.addLayer)
   const removeLayer = useStore((s) => s.removeLayer)
+  const chartOutput = useStore((s) => s.chart.settings.chartOutput)
+  const setChartOutput = useStore((s) => s.setChartOutput)
   const setActiveLayer = useStore((s) => s.setActiveLayer)
   const renameLayer = useStore((s) => s.renameLayer)
   const pageSwitchManual = useStore((s) => s.pageSwitchManual)
@@ -32,6 +37,16 @@ export function LayersPanel(): React.JSX.Element {
   const switchUniverse = (pageSwitch?.universe ?? 0) + 1
   const switchAddress = pageSwitch?.address ?? 1
   const switchValue = useStore.getState().dmxByUniverse[pageSwitch?.universe ?? 0]?.[switchAddress - 1]
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const deleteLayer = layers.find((layer) => layer.id === deleteId)
+  const counts = useMemo(() => {
+    const result = new Map<string, number>()
+    for (const shape of shapes) {
+      const id = shape.layerId ?? layers[0]?.id
+      result.set(id, (result.get(id) ?? 0) + 1)
+    }
+    return result
+  }, [shapes, layers])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const cancelRename = useRef(false) // Esc=取り消し。blur(commit)を1回だけ握り潰す
@@ -49,6 +64,38 @@ export function LayersPanel(): React.JSX.Element {
     await importChartImage(dataUrl, 'add')
   }
 
+  const importPageFromFile = async (): Promise<void> => {
+    const text = await new Promise<string | null>((resolve) => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.ledimager,.json,application/json'
+      input.onchange = () => {
+        const file = input.files?.[0]
+        if (!file) return resolve(null)
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result ?? ''))
+        reader.onerror = () => resolve(null)
+        reader.readAsText(file)
+      }
+      input.click()
+    })
+    if (!text) return
+    let source: Chart
+    try { source = parseChart(text) } catch (error) {
+      useStore.setState({ chartImportStatus: `読込失敗: ${(error as Error).message}` })
+      return
+    }
+    const state = useStore.getState()
+    try {
+      const imported = state.appendImportedChart(source)
+      useStore.setState({ chartImportStatus: `${imported.pageCount}フィックスチャーチャート・図形${imported.shapeCount}個／Fixture ${imported.fixtureCount}個を取り込みました（元の背景と下書きは対象外）` })
+    } catch (error) {
+      useStore.setState({ chartImportStatus: `読込失敗: ${(error as Error).message}` })
+      return
+    }
+    window.dispatchEvent(new CustomEvent('decor:fit'))
+  }
+
   const commitRename = (id: string): void => {
     if (cancelRename.current) {
       cancelRename.current = false // Escで取り消し＝確定しない
@@ -63,27 +110,33 @@ export function LayersPanel(): React.JSX.Element {
   return (
     <div style={panel}>
       {importStatus && <div role="status" style={{ fontSize: 11, color: C.hint, marginBottom: 6 }}>{importStatus}</div>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <span style={title}>レイヤー</span>
-        <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>1曲 = 1枚</span>
-        <div style={{ flex: 1 }} />
-        <button
-          style={smallBtn}
-          disabled={layers.length >= 256}
-          onClick={addWithImage}
-          title={layers.length >= 256 ? 'チャートは最大256枚です' : 'チャート画像を選んで新しい曲ページを追加'}
-        >
-          ＋画像
+      <details style={{ minHeight: 0, maxHeight: '35vh', overflowY: 'auto' }}>
+      <summary style={{ ...title, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, listStylePosition: 'inside' }}>
+        フィックスチャーチャート <span style={{ fontSize: 10, color: C.faint, fontFamily: F.ui }}>{layers.length}枚</span>
+      </summary>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6, marginBottom: 8 }}>
+        <button style={{ ...smallBtn, minHeight: 34, gridColumn: '1 / -1' }} disabled={layers.length >= 256}
+          onClick={() => addLayer({ name: '新しいフィックスチャーチャート' })}
+          title="背景画像を引き継ぎ、電飾とPatchが空のフィックスチャーチャートを追加">
+          ＋ フィックスチャーチャート追加
         </button>
-        <button
-          style={smallBtn}
-          disabled={layers.length >= 256}
-          onClick={() => addLayer()}
-          title={layers.length >= 256 ? 'チャートは最大256枚です' : '現在のチャート画像を引き継ぎ、電飾・番地は空のページを追加'}
-        >
-          ＋空ページ
+        <button style={{ ...smallBtn, minHeight: 34 }} disabled={layers.length >= 256}
+          onClick={addWithImage} title="画像を背景にして新しいフィックスチャーチャートを追加">
+          画像から追加…
+        </button>
+        <button style={{ ...smallBtn, minHeight: 34, gridColumn: '1 / -1' }} disabled={layers.length >= 256}
+          onClick={() => void importPageFromFile()} title="別の .ledimager から下書き以外の図形とPatchを取り込みます。元の背景画像は取り込みません">
+          フィックスチャーチャートを取り込む…
         </button>
       </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, color: C.label, fontFamily: F.ui, fontSize: 10 }}>
+        通常の送出
+        <select aria-label="通常のフィックスチャーチャート送出" value={chartOutput ?? 'all'}
+          onChange={(e) => setChartOutput(e.target.value as 'selected' | 'all')}
+          style={{ background: C.inputBg, color: C.white, border: `0.5px solid ${C.border}`, borderRadius: 3, minHeight: 30, minWidth: 0, flex: 1 }}>
+          <option value="selected">選択フィックスチャーチャート1枚</option><option value="all">全フィックスチャーチャート</option>
+        </select>
+      </label>
       <div
         style={{
           display: 'flex',
@@ -102,7 +155,7 @@ export function LayersPanel(): React.JSX.Element {
         <button
           style={{ ...smallBtn, minWidth: 38, color: dmxSwitchOn ? C.white : C.hint }}
           onClick={() => setPageSwitch({ enabled: !dmxSwitchOn })}
-          title="DMXの値でCHARTを切り替える機能をON／OFFします"
+          title="DMXの値でフィックスチャーチャートを切り替える機能をON／OFFします"
         >
           {dmxSwitchOn ? 'ON' : 'OFF'}
         </button>
@@ -125,12 +178,14 @@ export function LayersPanel(): React.JSX.Element {
           onChange={(address) => setPageSwitch({ address })}
         />
       </div>
-      <div style={{ maxHeight: 168, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+      </details>
+      <div style={{ ...title, margin: '7px 0' }}>フィックスチャーチャート一覧</div>
+      <div style={{ maxHeight: 226, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
           <span style={{ color: pageSwitchOn ? C.accent : C.hint, fontSize: 10, fontFamily: F.mono, flex: 1 }}>
             {pageSwitchOn
-              ? `${pageSwitchManual == null ? `DMX値 ${switchValue ?? '未受信'}` : '手動'} → ${layers[pageIndex]?.name ?? `CHART ${pageIndex + 1}（未作成）`}`
-              : 'DMX切替 OFF — 全CHART送出'}
+              ? `${pageSwitchManual != null ? '手動' : dmxSwitchOn ? `DMX値 ${switchValue ?? '未受信'}` : '選択'} → ${layers[pageIndex]?.name ?? `フィックスチャーチャート ${pageIndex + 1}（未作成）`}`
+              : '全フィックスチャーチャートを送出中'}
           </span>
           <button
             style={{ ...smallBtn, minWidth: dmxSwitchOn ? 74 : 92 }}
@@ -138,23 +193,26 @@ export function LayersPanel(): React.JSX.Element {
             onClick={() => setPageSwitchManual(null)}
             title={dmxSwitchOn
               ? '手動選択を解除して、設定したDMXチャンネルの値に連動します'
-              : '手動選択を解除して、従来どおり全CHARTを送出します'}
+              : chartOutput === 'selected' ? '手動固定を解除して、選択したフィックスチャーチャートに追従します' : '手動固定を解除して全フィックスチャーチャートを送出します'}
           >
-            {dmxSwitchOn ? 'DMXに戻す' : '全体送出に戻す'}
+            {dmxSwitchOn ? 'DMXに戻す' : chartOutput === 'selected' ? '選択に戻す' : '全体送出に戻す'}
           </button>
         </div>
         {layers.map((l, layerIndex) => {
           const active = l.id === activeLayerId
           const onAir = pageSwitchOn && layerIndex === pageIndex
-          const count = shapes.filter((sh) => (sh.layerId ?? layers[0]?.id) === l.id).length
+          const count = counts.get(l.id) ?? 0
           return (
             <div
               key={l.id}
               style={{
                 display: 'flex',
                 alignItems: 'center',
+                flexWrap: 'nowrap',
+                flexShrink: 0,
+                minHeight: 36,
                 gap: 6,
-                padding: '4px 6px',
+                padding: '2px 4px',
                 borderRadius: 3,
                 border: `0.5px solid ${active ? C.accent : C.border}`,
                 background: active ? `rgba(${C.accentRGB},0.10)` : 'transparent',
@@ -162,6 +220,7 @@ export function LayersPanel(): React.JSX.Element {
               }}
               onClick={() => setActiveLayer(l.id)}
             >
+              <span style={{ fontSize: 10, fontFamily: F.mono, color: C.label }}>{layerIndex + 1}</span>
               {editingId === l.id ? (
                 <input
                   autoFocus
@@ -216,16 +275,19 @@ export function LayersPanel(): React.JSX.Element {
                 style={{ fontSize: 10, color: C.faint, fontFamily: F.mono }}
                 title="このページの電飾の数"
               >
-                {count}
+                {count}本
               </span>
               {onAir && (
                 <span style={{ fontSize: 9, color: C.accent, fontFamily: F.ui, whiteSpace: 'nowrap' }}>
                   送出中
                 </span>
               )}
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
               <button
                 style={{
                   ...smallBtn,
+                  flex: 1,
+                  minHeight: 30,
                   minWidth: 48,
                   ...(pageSwitchManual === layerIndex
                     ? { border: `0.5px solid ${C.accent}`, color: C.white }
@@ -238,15 +300,15 @@ export function LayersPanel(): React.JSX.Element {
                 }}
                 title={`${l.name}へ完全に切り替え、Syphon / NDIへ手動送出します`}
               >
-                切替
+                送出
               </button>
               <button
                 style={{
                   ...smallBtn,
-                  padding: '6px 8px',
+                  padding: '4px',
                   fontSize: 10,
-                  minWidth: 24,
-                  minHeight: 24,
+                  minWidth: 38,
+                  minHeight: 30,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -257,17 +319,22 @@ export function LayersPanel(): React.JSX.Element {
                 title="このページを削除（電飾ごと消えます）"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (window.confirm(`「${l.name}」とそのページの電飾 ${count} 個を削除しますか？`)) {
-                    removeLayer(l.id)
-                  }
+                  setDeleteId(l.id)
                 }}
               >
-                ×
+                削除…
               </button>
+              </div>
             </div>
           )
         })}
       </div>
+      {deleteLayer && layers.length > 1 && <ChartDeleteDialog
+        name={`フィックスチャーチャート ${layers.findIndex((layer) => layer.id === deleteLayer.id) + 1} ${deleteLayer.name}`}
+        count={counts.get(deleteLayer.id) ?? 0}
+        onCancel={() => setDeleteId(null)}
+        onDelete={() => { removeLayer(deleteLayer.id); setDeleteId(null) }}
+      />}
     </div>
   )
 }

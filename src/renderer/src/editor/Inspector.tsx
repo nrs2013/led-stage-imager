@@ -1268,7 +1268,7 @@ function Field({
   flex?: number
 }): React.JSX.Element {
   return (
-    <div style={{ marginBottom: rowGap, flex }}>
+    <div style={{ marginBottom: rowGap, flex, minWidth: 0 }}>
       <label style={fieldLabel}>{label}</label>
       {children}
     </div>

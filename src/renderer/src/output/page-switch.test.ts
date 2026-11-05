@@ -26,6 +26,17 @@ function chartWithPages() {
 }
 
 describe('DMXチャート切り替え', () => {
+  it('保存した選択チャートモードでは読み込み直後から1枚だけを出す', () => {
+    const chart = chartWithPages()
+    chart.settings.chartOutput = 'selected'
+    expect(outputLayerIndex(chart, {})).toBe(0)
+    expect(outputShapes(chart, {})).toHaveLength(1)
+    chart.activeLayerId = chart.layers[1].id
+    expect(outputShapes(chart, {})[0].layerId).toBe(chart.layers[1].id)
+    chart.settings.pageSwitch = { enabled: true, universe: 0, address: 1 }
+    expect(outputLayerIndex(chart, { 0: Uint8Array.of(0) })).toBe(0)
+    expect(outputLayerIndex(chart, { 0: Uint8Array.of(0) }, 1)).toBe(1)
+  })
   it('切替OFFなら従来どおり全ページを出す', () => {
     const chart = chartWithPages()
     expect(outputLayerIndex(chart, {})).toBeNull()

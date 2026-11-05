@@ -447,7 +447,7 @@ const PART_LABEL: Record<string, string> = Object.fromEntries(CARDS.map((c) => [
 /** Parts＝別窓。右の列には PARTS ボタンだけを置き、棚は窓として開く（のむさん 2026-07-25
  *  「棚が場所を取って番地を見るスペースが小さい」）。窓は背景を塞がない＝開いたまま
  *  キャンバスへドラッグして置ける。 */
-export function PartsPalette(): React.JSX.Element {
+export function PartsPalette({ toolbar = false }: { toolbar?: boolean } = {}): React.JSX.Element {
   // 電飾モード＝電飾(decor)パーツのみ。照明灯体(Spot/Moving/PAR等)は照明モードへ。照明/電飾フィルタは廃止。
   const placingPart = useStore((s) => s.placingPart)
   const setPlacingPart = useStore((s) => s.setPlacingPart)
@@ -524,21 +524,18 @@ export function PartsPalette(): React.JSX.Element {
   const cards = CARDS.filter((c) => familyOfType(c.part as ShapeType) === 'decor')
 
   return (
-    <div style={wrapStyle}>
+    <div style={toolbar ? { display: 'contents' } : wrapStyle}>
       <button
-        style={
-          placingPart
-            ? { ...openBtnStyle, border: `0.5px solid ${C.amber}`, color: C.amber }
-            : open
-              ? { ...openBtnStyle, border: `0.5px solid ${C.accent}`, color: C.white }
-              : openBtnStyle
-        }
+        style={{
+          ...openBtnStyle,
+          ...(placingPart ? { border: `0.5px solid ${C.amber}`, color: C.amber }
+            : open ? { border: `0.5px solid ${C.accent}`, color: C.white } : {}),
+          ...(toolbar ? { width: 'auto', padding: '6px 12px' } : {})
+        }}
         onClick={() => (placingPart ? setPlacingPart(null) : setOpen((v) => !v))}
-        title={
-          placingPart
-            ? '置き続けモード中。押すとやめます（Esc でも同じ）'
-            : '電飾の部品棚を開く（Esc で閉じる）。開いたままキャンバスへドラッグして置けます'
-        }
+        title={placingPart
+          ? '置き続けモード中。押すとやめます（Esc でも同じ）'
+          : '電飾の部品棚を開く（Esc で閉じる）。開いたままキャンバスへドラッグして置けます'}
       >
         {placingPart ? `置き続け中: ${PART_LABEL[placingPart] ?? placingPart} — やめる` : '部品棚'}
       </button>

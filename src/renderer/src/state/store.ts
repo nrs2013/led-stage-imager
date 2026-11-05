@@ -1,3 +1,4 @@
+import { prepareChartImport } from '../model/import-chart'
 import { create } from 'zustand'
 import type { Chart, Shape, Fixture, ChannelMode, Point, Layer, Underlay } from '../model/types'
 import { createChart, addShape as addShapeToChart, newId } from '../model/chart-model'
@@ -43,6 +44,14 @@ export type Tool =
   | 'polygon'
   | 'pixelpen'
   | 'eraser'
+
+function remapManualPage(from: Chart, to: Chart, index: number | null): number | null {
+  if (index == null) return null
+  const id = from.layers[index]?.id
+  if (!id) return index // Preserve an intentionally empty manual page.
+  const next = to.layers.findIndex((layer) => layer.id === id)
+  return next >= 0 ? next : Math.max(0, to.layers.findIndex((layer) => layer.id === to.activeLayerId))
+}
 
 interface AppState {
   chart: Chart
@@ -187,8 +196,10 @@ interface AppState {
   /** Layers = one page per song. Adds a layer (optionally born with a chart image)
    *  and makes it active; returns its id. */
   addLayer: (init?: { name?: string; underlay?: Underlay | null; canvas?: { w: number; h: number } }) => string
+  appendImportedChart: (source: Chart) => { pageCount: number; shapeCount: number; fixtureCount: number }
   /** Deletes the layer AND its shapes/fixtures (one undo step). The last layer stays. */
   removeLayer: (id: string) => void
+  setChartOutput: (mode: 'selected' | 'all') => void
   setActiveLayer: (id: string) => void
   setLayerVisible: (id: string, visible: boolean) => void
   renameLayer: (id: string, name: string) => void
@@ -378,6 +389,8 @@ export const useStore = create<AppState>()((set, get) => ({
       if (!prev) return {}
       return {
         chart: prev,
+        chartImportStatus: '',
+        pageSwitchManual: remapManualPage(s.chart, prev, s.pageSwitchManual),
         history: s.history.slice(0, -1),
         future: [s.chart, ...s.future].slice(0, 50),
         selectedId: null,
@@ -391,6 +404,8 @@ export const useStore = create<AppState>()((set, get) => ({
       if (!next) return {}
       return {
         chart: next,
+        chartImportStatus: '',
+        pageSwitchManual: remapManualPage(s.chart, next, s.pageSwitchManual),
         future: s.future.slice(1),
         history: [...s.history.slice(-49), s.chart],
         selectedId: null,
@@ -874,7 +889,19 @@ export const useStore = create<AppState>()((set, get) => ({
     }))
     return id
   },
+  appendImportedChart: (source) => {
+    const current = get().chart
+    const imported = prepareChartImport(current, source)
+    get().beginHistory()
+    set({ chart: imported, selectedId: null, selectedIds: [] })
+    return {
+      pageCount: imported.layers.length - current.layers.length,
+      shapeCount: imported.shapes.length - current.shapes.length,
+      fixtureCount: imported.fixtures.length - current.fixtures.length
+    }
+  },
   removeLayer: (id) => {
+    if (get().chart.layers.length <= 1 || !get().chart.layers.some((layer) => layer.id === id)) return
     get().beginHistory()
     set((s) => {
       if (s.chart.layers.length <= 1) return {}
@@ -885,6 +912,7 @@ export const useStore = create<AppState>()((set, get) => ({
       const homeId = s.chart.layers[0]?.id
       const belongs = (sh: (typeof s.chart.shapes)[number]): boolean => (sh.layerId ?? homeId) === id
       const dead = new Set(s.chart.shapes.filter(belongs).map((sh) => sh.id))
+      const manualId = s.pageSwitchManual == null ? null : s.chart.layers[s.pageSwitchManual]?.id
       return {
         chart: {
           ...s.chart,
@@ -893,10 +921,15 @@ export const useStore = create<AppState>()((set, get) => ({
           shapes: s.chart.shapes.filter((sh) => !belongs(sh)),
           fixtures: s.chart.fixtures.filter((f) => !dead.has(f.shapeId))
         },
+        pageSwitchManual: s.pageSwitchManual == null ? null : manualId == null ? s.pageSwitchManual : Math.max(0, layers.findIndex((layer) => layer.id === manualId)),
         selectedId: null,
         selectedIds: []
       }
     })
+  },
+  setChartOutput: (chartOutput) => {
+    get().beginHistory()
+    set((s) => ({ chart: { ...s.chart, settings: { ...s.chart.settings, chartOutput } }, pageSwitchManual: null }))
   },
   setActiveLayer: (id) =>
     set((s) =>

@@ -1,6 +1,6 @@
 import type { Chart, Shape } from '../model/types'
 
-/** DMX値0=CHART 1、255=CHART 256。未作成ページを選んだ時は黒を送出する。 */
+/** DMX値0=フィックスチャーチャート1、255=フィックスチャーチャート256。未作成ページを選んだ時は黒を送出する。 */
 export function outputLayerIndex(
   chart: Chart,
   dmxByUniverse: Record<number, Uint8Array>,
@@ -8,7 +8,8 @@ export function outputLayerIndex(
 ): number | null {
   if (manualValue != null) return Math.max(0, Math.min(255, Math.floor(manualValue)))
   const sw = chart.settings.pageSwitch
-  if (!sw?.enabled) return null
+  if (!sw?.enabled) return chart.settings.chartOutput === 'selected'
+    ? Math.max(0, chart.layers.findIndex((layer) => layer.id === chart.activeLayerId)) : null
   const universe = Math.max(0, Math.floor(sw.universe || 0))
   const address = Math.max(1, Math.min(512, Math.floor(sw.address || 1)))
   return dmxByUniverse[universe]?.[address - 1] ?? 0

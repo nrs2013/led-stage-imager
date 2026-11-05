@@ -1,5 +1,7 @@
 import { createSocket, type Socket } from 'node:dgram'
 import type { ArtDmxPacket } from './artdmx-parser'
+import { normalizeDelayControl, type DelayControl } from '../../shared/delay-control'
+export { normalizeDelayControl } from '../../shared/delay-control'
 
 export interface ArtNetRelayRoute {
   enabled: boolean
@@ -15,6 +17,7 @@ export interface ArtNetRelayRoute {
 export interface ArtNetRelayConfig {
   enabled: boolean
   routes: ArtNetRelayRoute[]
+  delayControl: DelayControl
 }
 
 const PORT = 6454
@@ -22,6 +25,7 @@ const FRAME_MS = 1000 / 30
 
 export const defaultRelayConfig = (): ArtNetRelayConfig => ({
   enabled: false,
+  delayControl: normalizeDelayControl(undefined),
   routes: Array.from({ length: 1 }, (_, universe) => ({
     enabled: false,
     inputUniverse: universe,
@@ -66,7 +70,7 @@ export function normalizeRelayConfig(value: unknown): ArtNetRelayConfig {
       ), 1)
     }
   })
-  return { enabled: raw.enabled === true, routes }
+  return { enabled: raw.enabled === true, routes, delayControl: normalizeDelayControl(raw.delayControl) }
 }
 
 const clampInt = (v: unknown, min: number, max: number, fallback: number): number => {
@@ -112,6 +116,8 @@ export class ArtNetRelay {
   private socket: Socket | null = null
   private config: ArtNetRelayConfig = defaultRelayConfig()
   private timers = new Set<ReturnType<typeof setTimeout>>()
+  private controlTimer: ReturnType<typeof setTimeout> | null = null
+  private delayEnabled = true
   private localIps = new Set<string>()
   private sources = new Map<number, Map<string, SourceFrame>>()
 
@@ -120,6 +126,8 @@ export class ArtNetRelay {
   setConfig(config: unknown, localIps: string[] = []): ArtNetRelayConfig {
     // 設定変更前の宛先へ、待機中の古いフレームが後から飛ばないよう全て破棄する。
     this.cancelPending()
+    this.cancelControlTimeout()
+    this.delayEnabled = true
     this.config = normalizeRelayConfig(config)
     this.localIps = new Set(localIps)
     this.sources.clear()
@@ -130,6 +138,7 @@ export class ArtNetRelay {
     if (!this.config.enabled) return
     // ブロードキャスト送出した自分自身のArtDMXを再受信して無限に送り直す事故を防ぐ。
     if (packet.sourceIp && this.localIps.has(packet.sourceIp)) return
+    this.updateDelayControl(packet)
     this.rememberSource(packet)
     for (const route of this.config.routes) {
       const universeOffset = packet.universe - route.inputUniverse
@@ -146,7 +155,7 @@ export class ArtNetRelay {
           if (error) console.error(`[Art-Net relay] ${route.targetIp}: ${error.message}`)
         })
       }
-      const delay = route.delayFrames * FRAME_MS
+      const delay = this.delayEnabled ? route.delayFrames * FRAME_MS : 0
       if (delay <= 0) send()
       else {
         const timer = setTimeout(() => {
@@ -160,9 +169,35 @@ export class ArtNetRelay {
 
   stop(): void {
     this.cancelPending()
+    this.cancelControlTimeout()
+    this.delayEnabled = true
     this.socket?.close()
     this.socket = null
     this.sources.clear()
+  }
+
+  private setDelayEnabled(enabled: boolean): void {
+    if (this.delayEnabled === enabled) return
+    // Drop the old timeline on BOTH edges. Never replay pre-switch frames.
+    this.cancelPending()
+    this.delayEnabled = enabled
+  }
+
+  private cancelControlTimeout(): void {
+    if (this.controlTimer !== null) clearTimeout(this.controlTimer)
+    this.controlTimer = null
+  }
+
+  private updateDelayControl(packet: ArtDmxPacket): void {
+    const control = this.config.delayControl
+    if (!control.enabled || packet.universe !== control.universe || packet.data.length < control.channel) return
+    // Read raw input before merging or delaying, including control carried in a routed universe.
+    this.setDelayEnabled(packet.data[control.channel - 1] >= control.onThreshold)
+    this.cancelControlTimeout()
+    this.controlTimer = setTimeout(() => {
+      this.controlTimer = null
+      if (control.signalLoss !== 'hold') this.setDelayEnabled(control.signalLoss === 'delay')
+    }, control.timeoutMs)
   }
 
   private cancelPending(): void {

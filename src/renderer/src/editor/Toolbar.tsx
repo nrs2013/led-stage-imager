@@ -1,3 +1,4 @@
+import { PartsPalette } from './PartsPalette'
 import { useEffect, useState } from 'react'
 import { useStore, type Tool } from '../state/store'
 import { C, F, chrome, buttonStyle } from '../ui/tokens'
@@ -161,9 +162,10 @@ export function Toolbar({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
-        height: 52,
-        padding: '0 14px',
+        gap: 3,
+        minHeight: 52,
+        flexWrap: 'wrap',
+        padding: '5px 8px',
         background: chrome.bar,
         borderBottom: `0.5px solid ${C.border}`,
         boxShadow: chrome.topHi,
@@ -174,9 +176,9 @@ export function Toolbar({
         <div
           style={{
             fontFamily: F.serif,
-            fontSize: 21,
+            fontSize: 14,
             fontWeight: 400,
-            letterSpacing: '0.13em',
+            letterSpacing: '0.03em',
             color: C.white,
             lineHeight: 1
           }}
@@ -188,13 +190,15 @@ export function Toolbar({
         </div>
       </div>
 
-      <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
+      <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 2px' }} />
 
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          gap: 4,
+          flexWrap: 'wrap',
+          minWidth: 0,
           opacity: editing ? 1 : 0.3,
           pointerEvents: editing ? 'auto' : 'none'
         }}
@@ -210,9 +214,10 @@ export function Toolbar({
               ...buttonStyle({ active: tool === t.id }),
               display: 'flex',
               alignItems: 'center',
-              gap: 6,
-              height: 32,
-              padding: '0 10px'
+              gap: 4,
+              height: 30,
+              padding: '0 7px',
+              flexShrink: 0
             }}
             onClick={() => setTool(t.id)}
             title={`${t.label} — ${t.hint}`}
@@ -221,6 +226,59 @@ export function Toolbar({
             <span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{t.label}</span>
           </button>
         ))}
+      </div>
+
+        <button
+          style={{ ...buttonStyle({ active: testOpen, accent: C.fuchsia, accentRGB: '193,134,200' }), padding: '6px 9px' }}
+          onClick={onToggleTest}
+          title="卓やArt-Net無しでも、選んだ電飾に色を手で当てて確認できます（テスト用フェーダー）"
+        >
+          卓なしで確認
+        </button>
+        {hasPreview && (
+          <button
+            style={{ ...buttonStyle({ active: previewOpen, accent: C.green, accentRGB: '168,232,120' }), padding: '6px 9px' }}
+            onClick={() => previewApi()?.togglePreview?.()}
+            title="出力の絵を別ウィンドウで全画面表示（確認用）"
+          >
+            全画面
+          </button>
+        )}
+        <span
+          style={{
+            fontFamily: F.ui,
+            fontSize: 11,
+            color: C.amber,
+            border: `0.5px solid ${C.border}`,
+            borderRadius: 4,
+            padding: '5px 7px',
+            userSelect: 'none',
+            whiteSpace: 'nowrap',
+            flexShrink: 0
+          }}
+          title="Syphon/NDI「LED STAGE IMAGER」へ常に出力中（編集中の絵もそのまま出ます。隠したい時はResolume側でレイヤーを落とす）"
+        >
+          ● 出力中
+        </span>
+        <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 1px' }} />
+        <button
+          style={{ ...buttonStyle({}), padding: '6px 9px' }}
+          onClick={() => useStore.getState().setHelpOpen(!useStore.getState().helpOpen)}
+          title="ショートカット・隠し操作の一覧（?キーでも開く）"
+        >
+          キー一覧
+        </button>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          flexWrap: 'wrap',
+          minWidth: 0,
+          opacity: editing ? 1 : 0.3,
+          pointerEvents: editing ? 'auto' : 'none'
+        }}
+      >
         <span
           style={{ display: 'flex', alignItems: 'center', gap: 5, width: 150, flexShrink: 0 }}
           title="書く太さ（px）— 塗る・消しゴム・図形に効く。クリックで全選択して入力"
@@ -262,6 +320,8 @@ export function Toolbar({
       </div>
 
       <div style={{ flex: 1 }} />
+      {editing && <PartsPalette toolbar />}
+
 
       <button
         style={buttonStyle({ active: stepPatch, accent: C.green, accentRGB: '168,232,120' })}
@@ -272,55 +332,6 @@ export function Toolbar({
       </button>
       <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
 
-      <button
-        style={buttonStyle({})}
-        onClick={() => useStore.getState().setHelpOpen(!useStore.getState().helpOpen)}
-        title="ショートカット・隠し操作の一覧（?キーでも開く）"
-      >
-        キー一覧
-      </button>
-      <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
-      <button
-        style={buttonStyle({ active: testOpen, accent: C.fuchsia, accentRGB: '193,134,200' })}
-        onClick={onToggleTest}
-        title="卓やArt-Net無しでも、選んだ電飾に色を手で当てて確認できます（テスト用フェーダー）"
-      >
-        卓なしで確認
-      </button>
-      <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
-
-      {hasPreview && (
-        <>
-          <button
-            style={buttonStyle({ active: previewOpen, accent: C.green, accentRGB: '168,232,120' })}
-            onClick={() => previewApi()?.togglePreview?.()}
-            title="出力の絵を別ウィンドウで全画面表示（確認用）"
-          >
-            全画面
-          </button>
-          <div style={{ width: '0.5px', height: 26, background: C.border, margin: '0 4px' }} />
-        </>
-      )}
-
-      {/* 出力は常時（Live/Edit切替は2026-07-07に廃止＝押し忘れでResolumeが黒になる事故を根絶）。
-          Syphon/NDIへは useChartOutput が編集中も含めて流し続けている。 */}
-      <span
-        style={{
-          fontFamily: F.ui,
-          fontSize: 11,
-          color: C.amber,
-          border: `0.5px solid ${C.border}`,
-          borderRadius: 4,
-          padding: '5px 10px',
-          userSelect: 'none',
-          // 1行に固定＝バーが狭い時に「出/力/中」と縦3行に潰れるのを防ぐ
-          whiteSpace: 'nowrap',
-          flexShrink: 0
-        }}
-        title="Syphon/NDI「LED STAGE IMAGER」へ常に出力中（編集中の絵もそのまま出ます。隠したい時はResolume側でレイヤーを落とす）"
-      >
-        ● 出力中
-      </span>
     </header>
   )
 }

@@ -13,7 +13,7 @@ export function createChart(canvas: { w: number; h: number }): Chart {
     id: newId('chart'),
     name: 'Untitled',
     canvas,
-    layers: [{ id: layerId, name: 'CHART 1', underlay: null, visible: true }],
+    layers: [{ id: layerId, name: 'フィックスチャーチャート 1', underlay: null, visible: true }],
     activeLayerId: layerId,
     shapes: [],
     fixtures: [],

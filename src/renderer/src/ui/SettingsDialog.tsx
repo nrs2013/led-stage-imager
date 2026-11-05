@@ -306,7 +306,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }): React.JSX.
               </Field>
             </div>
             <div style={{ color: C.hint, fontSize: 10, fontFamily: F.ui, marginTop: -6, marginBottom: 12 }}>
-              値 0 = CHART 1、値 1 = CHART 2、…、値 255 = CHART 256。まだ無い番号は黒で送出します。
+              値 0 = フィックスチャーチャート 1、値 1 = フィックスチャーチャート 2、…、値 255 = フィックスチャーチャート 256。まだ無い番号は黒で送出します。
             </div>
           </>
         )}
