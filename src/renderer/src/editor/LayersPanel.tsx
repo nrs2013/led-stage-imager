@@ -6,7 +6,8 @@ import { C, F, buttonStyle } from '../ui/tokens'
 import { ChartDeleteDialog } from '../ui/ChartDeleteDialog'
 import { NumberField } from '../ui/NumberField'
 import { outputLayerIndex } from '../output/page-switch'
-import { parseChart } from '../io/chart-file'
+import { parseChart, serializeChart } from '../io/chart-file'
+import { extractChartPage } from '../model/chart-pages'
 import type { Chart } from '../model/types'
 
 const smallBtn = { ...buttonStyle({}), padding: '6px 8px', fontSize: 10, minHeight: 24 }
@@ -25,6 +26,7 @@ export function LayersPanel(): React.JSX.Element {
   const setChartOutput = useStore((s) => s.setChartOutput)
   const setActiveLayer = useStore((s) => s.setActiveLayer)
   const renameLayer = useStore((s) => s.renameLayer)
+  const moveLayer = useStore((s) => s.moveLayer)
   const pageSwitchManual = useStore((s) => s.pageSwitchManual)
   const setPageSwitchManual = useStore((s) => s.setPageSwitchManual)
   const setPageSwitch = useStore((s) => s.setPageSwitch)
@@ -96,6 +98,39 @@ export function LayersPanel(): React.JSX.Element {
     window.dispatchEvent(new CustomEvent('decor:fit'))
   }
 
+  const exportActivePage = async (): Promise<void> => {
+    const state = useStore.getState()
+    const id = state.chart.activeLayerId
+    let page: Chart
+    try { page = extractChartPage(state.chart, id) } catch (error) {
+      useStore.setState({ chartImportStatus: `書き出し失敗: ${(error as Error).message}` })
+      return
+    }
+    const json = serializeChart(page)
+    const name = page.name || 'chart'
+    try {
+      if (window.api?.exportChart) {
+        const path = await window.api.exportChart(json, name)
+        if (!path) return
+      } else {
+        const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }))
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${name}.ledimager`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch (error) {
+      useStore.setState({ chartImportStatus: `書き出し失敗: ${(error as Error).message}` })
+      return
+    }
+    useStore.setState({ chartImportStatus: `「${page.name}」を書き出しました（図形${page.shapes.length}個／Fixture ${page.fixtures.length}個・背景込み）` })
+  }
+
+  // 一覧の行をドラッグして順番を入れ替える
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
+
   const commitRename = (id: string): void => {
     if (cancelRename.current) {
       cancelRename.current = false // Escで取り消し＝確定しない
@@ -127,6 +162,10 @@ export function LayersPanel(): React.JSX.Element {
         <button style={{ ...smallBtn, minHeight: 34, gridColumn: '1 / -1' }} disabled={layers.length >= 256}
           onClick={() => void importPageFromFile()} title="別の .ledimager から下書き以外の図形とPatchを取り込みます。元の背景画像は取り込みません">
           フィックスチャーチャートを取り込む…
+        </button>
+        <button style={{ ...smallBtn, minHeight: 34, gridColumn: '1 / -1' }}
+          onClick={() => void exportActivePage()} title="選択中のフィックスチャーチャート1枚を、背景・図形・Patchごと別の .ledimager に書き出します。今開いているファイルは変わりません">
+          選択中のフィックスチャーチャートを書き出す…
         </button>
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, color: C.label, fontFamily: F.ui, fontSize: 10 }}>
@@ -216,9 +255,38 @@ export function LayersPanel(): React.JSX.Element {
                 borderRadius: 3,
                 border: `0.5px solid ${active ? C.accent : C.border}`,
                 background: active ? `rgba(${C.accentRGB},0.10)` : 'transparent',
-                cursor: 'pointer'
+                boxShadow: dragId && dropIndex === layerIndex
+                  ? `inset 0 2px 0 ${C.accent}`
+                  : dragId && dropIndex === layerIndex + 1 && layerIndex === layers.length - 1
+                    ? `inset 0 -2px 0 ${C.accent}`
+                    : 'none',
+                opacity: dragId === l.id ? 0.5 : 1,
+                cursor: dragId ? 'grabbing' : 'pointer'
               }}
               onClick={() => setActiveLayer(l.id)}
+              draggable={editingId !== l.id}
+              onDragStart={(e) => {
+                setDragId(l.id)
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/plain', l.id)
+              }}
+              onDragOver={(e) => {
+                if (!dragId) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+                const r = e.currentTarget.getBoundingClientRect()
+                setDropIndex(e.clientY < r.top + r.height / 2 ? layerIndex : layerIndex + 1)
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                if (dragId && dropIndex != null) {
+                  const from = layers.findIndex((layer) => layer.id === dragId)
+                  moveLayer(dragId, dropIndex > from ? dropIndex - 1 : dropIndex)
+                }
+                setDragId(null)
+                setDropIndex(null)
+              }}
+              onDragEnd={() => { setDragId(null); setDropIndex(null) }}
             >
               <span style={{ fontSize: 10, fontFamily: F.mono, color: C.label }}>{layerIndex + 1}</span>
               {editingId === l.id ? (
@@ -283,6 +351,24 @@ export function LayersPanel(): React.JSX.Element {
                 </span>
               )}
               <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              <button
+                style={{ ...smallBtn, padding: '4px', minWidth: 26, minHeight: 30, color: layerIndex === 0 ? C.faint : C.text }}
+                disabled={layerIndex === 0}
+                title="このフィックスチャーチャートを1つ上へ移動（行をドラッグしても並べ替えできます）"
+                aria-label={`${l.name}を上へ移動`}
+                onClick={(e) => { e.stopPropagation(); moveLayer(l.id, layerIndex - 1) }}
+              >
+                ▲
+              </button>
+              <button
+                style={{ ...smallBtn, padding: '4px', minWidth: 26, minHeight: 30, color: layerIndex === layers.length - 1 ? C.faint : C.text }}
+                disabled={layerIndex === layers.length - 1}
+                title="このフィックスチャーチャートを1つ下へ移動（行をドラッグしても並べ替えできます）"
+                aria-label={`${l.name}を下へ移動`}
+                onClick={(e) => { e.stopPropagation(); moveLayer(l.id, layerIndex + 1) }}
+              >
+                ▼
+              </button>
               <button
                 style={{
                   ...smallBtn,

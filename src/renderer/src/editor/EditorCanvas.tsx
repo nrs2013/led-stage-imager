@@ -820,15 +820,15 @@ export function EditorCanvas({ checkView = false }: { checkView?: boolean }): Re
     ctx.setTransform(1, 0, 0, 1, 0, 0)
 
     // #N fixture labels — same numbers as the patch chips below (screen-space).
-    // Dense autoFill scenes only label the selection to avoid wallpapering the canvas.
-    if (!checkView && showIds && chart.fixtures.length) {
-      const dense = chart.fixtures.length > 400
+    // 何も選んでいない通常時は番号を出さない（線が多いと番号だらけで見にくい）。
+    // 選択した線だけに番号を出す。
+    if (!checkView && showIds && chart.fixtures.length && selectedIds.length) {
       ctx.font = "9px 'JetBrains Mono', monospace"
       ctx.textBaseline = 'middle'
       ctx.textAlign = 'center'
       chart.fixtures.forEach((f, i) => {
         const isSel = selectedIds.includes(f.shapeId)
-        if (dense && !isSel) return
+        if (!isSel) return
         const sh = chart.shapes.find((x) => x.id === f.shapeId)
         if (!sh || !sh.points.length) return
         if ((sh.layerId ?? chart.layers[0]?.id) !== chart.activeLayerId) return

@@ -1,3 +1,4 @@
+import { moveChartPage } from '../model/chart-pages'
 import { prepareChartImport } from '../model/import-chart'
 import { create } from 'zustand'
 import type { Chart, Shape, Fixture, ChannelMode, Point, Layer, Underlay } from '../model/types'
@@ -203,6 +204,8 @@ interface AppState {
   setActiveLayer: (id: string) => void
   setLayerVisible: (id: string, visible: boolean) => void
   renameLayer: (id: string, name: string) => void
+  /** フィックスチャーチャートの順番を移動する（1回のUndo）。DMX切替の番号も新しい順番になる。 */
+  moveLayer: (id: string, toIndex: number) => void
 
   upsertFixture: (shapeId: string, patch: Partial<Omit<Fixture, 'id' | 'shapeId'>>) => void
   /** Bulk-apply patch fields to every given shape's fixture (creating fixtures where
@@ -944,6 +947,20 @@ export const useStore = create<AppState>()((set, get) => ({
         layers: s.chart.layers.map((l) => (l.id === id ? { ...l, visible } : l))
       }
     })),
+  moveLayer: (id, toIndex) => {
+    const before = get().chart
+    const after = moveChartPage(before, id, toIndex)
+    if (after === before) return
+    get().beginHistory()
+    set((s) => {
+      const manualId = s.pageSwitchManual == null ? null : before.layers[s.pageSwitchManual]?.id
+      const manualIndex = manualId == null ? -1 : after.layers.findIndex((layer) => layer.id === manualId)
+      return {
+        chart: after,
+        pageSwitchManual: s.pageSwitchManual == null ? null : manualIndex >= 0 ? manualIndex : s.pageSwitchManual
+      }
+    })
+  },
   renameLayer: (id, name) =>
     set((s) => ({
       chart: {

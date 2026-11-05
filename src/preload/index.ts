@@ -151,6 +151,8 @@ const api = {
     ipcRenderer.invoke('chart:save', json, name),
   saveChartAs: (json: string, name: string): Promise<string | null> =>
     ipcRenderer.invoke('chart:saveAs', json, name),
+  exportChart: (json: string, name: string): Promise<string | null> =>
+    ipcRenderer.invoke('chart:export', json, name),
   chartNew: (): Promise<boolean> => ipcRenderer.invoke('chart:new'),
   openChartFile: (): Promise<string | null> => ipcRenderer.invoke('chart:open'),
   currentChartFileName: (): Promise<string | null> =>

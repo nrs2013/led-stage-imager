@@ -78,7 +78,7 @@ export function PatchTable({ onClose }: { onClose?: () => void } = {}): React.JS
         <button
           style={{ ...buttonStyle({ active: showIds }), padding: '7px 12px', minHeight: 30 }}
           onClick={() => setShowIds(!showIds)}
-          title="キャンバスに #番号 ラベルを表示（下の札と同じ番号）"
+          title="選択した線に #番号 ラベルを表示（下の札と同じ番号）。何も選んでいない時は出しません"
         >
           番号を出す
         </button>

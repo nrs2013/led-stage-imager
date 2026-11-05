@@ -71,6 +71,8 @@ export interface DecorApi {
   setWindowTitle: (title: string) => void
   /** Save chart JSON via a native dialog; resolves to the path or null. */
   saveChart: (json: string, name: string) => Promise<string | null>
+  /** フィックスチャーチャートを別ファイルへ書き出す（⌘Sの上書き先は変えない）。 */
+  exportChart?: (json: string, name: string) => Promise<string | null>
   /** 画像照明の公演を、入口 .ledshow 入りのフォルダとして保存する。 */
   saveImageLightShowPackage: (
     bytes: Uint8Array,

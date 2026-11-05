@@ -751,6 +751,15 @@ app.whenReady().then(() => {
     writeFileSync(currentChartPath, json, 'utf8')
     return currentChartPath
   })
+  // フィックスチャーチャートの書き出し。別ファイルへ写しを作るだけなので、
+  // ⌘S の上書き先（currentChartPath）は変えない。
+  ipcMain.handle('chart:export', async (_e, json: string, name: string) => {
+    const p = await askSavePath(name)
+    if (!p) return null
+    if (currentChartPath && p === currentChartPath) throw new Error('今開いているファイルには書き出せません。別の名前にしてください')
+    writeFileSync(p, json, 'utf8')
+    return p
+  })
   ipcMain.handle('chart:open', async () => {
     const res = await dialog.showOpenDialog({
       properties: ['openFile'],
